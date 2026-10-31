@@ -1,0 +1,8 @@
+[Unit]
+Description=Check for a signed Alice release (installs urgent security releases, offers the rest)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/alice-updater check

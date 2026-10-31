@@ -1,0 +1,6 @@
+{
+  "name": "@alice/mock-ha",
+  "type": "module",
+  "scripts": { "dev": "bun --watch src/index.ts" },
+  "devDependencies": { "@types/bun": "latest" }
+}

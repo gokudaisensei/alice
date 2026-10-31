@@ -1,0 +1,11 @@
+{$SITE_ADDRESS:localhost} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+	# Single upstream: the app. Home Assistant is deliberately not reachable from here.
+	reverse_proxy app:3000
+}

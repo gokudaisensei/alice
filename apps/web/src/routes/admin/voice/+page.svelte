@@ -1,0 +1,35 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { api, explain, sensitive } from '#lib/api.js';
+	import { Badge } from '#lib/components/ui/badge';
+	import * as Card from '#lib/components/ui/card';
+
+	type Item = { id: string; name: string; kind: 'device' | 'scene' | 'routine'; enabled: boolean };
+	let items = $state<Item[]>([]), cloud = $state<{ loggedIn: boolean } | null | undefined>(undefined), msg = $state(''), busy = $state<Record<string, boolean>>({});
+	async function load() { const r = await api('GET', '/api/admin/voice'); if (r.ok) { items = r.data.items; cloud = r.data.cloud; } }
+	onMount(load);
+	async function set(i: Item, enabled: boolean) {
+		busy[i.id] = true; msg = '';
+		const r = await sensitive('PUT', '/api/admin/voice', { entityId: i.id, enabled });
+		busy[i.id] = false;
+		if (!r.ok) msg = r.data?.message ?? explain(r.data?.error);
+		await load();
+	}
+	const KIND = { device: 'Device', scene: 'Scene', routine: 'Routine' } as const;
+</script>
+
+<main class="mx-auto max-w-2xl space-y-4 p-4">
+	<h1 class="text-2xl font-semibold">Voice control</h1>
+	<p class="text-sm text-muted-foreground">Choose what Alexa and Google Assistant may control. Nothing is on until you turn it on. Doors, locks and cameras can't be turned on for voice.</p>
+	<Card.Root class="gap-0 py-0"><div class="space-y-1 p-4 text-sm">
+		<p><strong>Good to know:</strong> voice commands go through Home Assistant Cloud and run on your home hub, so they don't check who is speaking and aren't recorded against a person. Only switch on things where that's fine.</p>
+		<p class="text-muted-foreground">Voice needs the internet. If it's down, voice stops; the app and your automations keep working.</p>
+		{#if cloud === null}<p class="text-destructive">Couldn't check the Home Assistant Cloud link.</p>{:else if cloud && !cloud.loggedIn}<p class="text-destructive">Home Assistant Cloud isn't linked on this home yet. Our support team sets that up.</p>{/if}
+	</div></Card.Root>
+	{#if msg}<p role="alert" class="text-sm text-destructive">{msg}</p>{/if}
+	<ul class="space-y-1">
+		{#each items as i (i.id)}
+			<li class="flex items-center justify-between gap-2 rounded-md border p-2"><label class="flex min-w-0 items-center gap-2"><input type="checkbox" class="size-4" checked={i.enabled} disabled={!!busy[i.id]} onchange={(e) => set(i, e.currentTarget.checked)} /><span class="truncate">{i.name}</span></label><Badge variant="outline">{KIND[i.kind]}</Badge></li>
+		{:else}<li class="text-sm text-muted-foreground">Nothing to choose from yet.</li>{/each}
+	</ul>
+</main>

@@ -1,0 +1,7 @@
+[Unit]
+Description=Install the Alice release a household admin approved
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/alice-updater apply-request

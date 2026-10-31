@@ -1,0 +1,11 @@
+node_modules
+data
+.env
+.env.*
+!.env.example
+apps/web/build
+apps/web/.svelte-kit
+deploy/secrets/
+deploy/backups/
+deploy/updates/
+*.bak

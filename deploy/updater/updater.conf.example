@@ -1,0 +1,15 @@
+# /etc/alice/updater.conf: read by the host updater. Everything here is set by the installer, never by the app.
+COMPOSE_FILE=/opt/alice/deploy/docker-compose.yml
+COMPOSE_PROJECT=alice
+# Compose reads this too. The updater only ever changes ALICE_IMAGE and ALICE_VERSION in it.
+RELEASE_ENV=/opt/alice/release.env
+# Compose volume holding the app's data (project name + _app_data)
+DATA_VOLUME=alice_app_data
+STATE_DIR=/var/lib/alice
+PUBKEY=/etc/alice/release.pub
+# Where releases are announced (https only), and the only registry a release may pull from (digest-pinned).
+SOURCE_URL=https://updates.example.com/alice/stable
+REGISTRY_PREFIX=registry.example.com/alice/app
+# How long an urgent security release waits after telling the household, before installing.
+GRACE_SECONDS=300
+HEALTH_TIMEOUT=120

@@ -1,0 +1,20 @@
+{
+  "name": "@alice/server",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "^14.0.3",
+    "age-encryption": "^0.3.1",
+    "elysia": "latest",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/web-push": "^3.6.4",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Host-level updater. Runs on the device as root, OUTSIDE the app containers. It never opens the app database
+# and has no Home Assistant credentials. It only ever installs a release whose manifest is signed by the company
+# key pinned on this device, and it rolls back if the new version does not come up healthy.
+#
+#   alice-updater check                      fetch + verify the latest release; install it if it is an emergency release,
+#                                            otherwise record it as "available" for the household to approve
+#   alice-updater apply-request              install the release a household admin approved in the app (request file)
+#   alice-updater apply --bundle DIR         install an offline bundle (manifest.json, manifest.json.sig, image.tar), e.g. from a USB stick
+#   alice-updater rollback                   put back the previous version and data snapshot
+#   alice-updater verify MANIFEST SIG        check a signature only
+#   alice-updater status
+set -uo pipefail
+CONF="${ALICE_UPDATER_CONF:-/etc/alice/updater.conf}"
+[ -r "$CONF" ] && . "$CONF"
+: "${COMPOSE_FILE:?COMPOSE_FILE not set}" "${RELEASE_ENV:?RELEASE_ENV not set}" "${DATA_VOLUME:?DATA_VOLUME not set}"
+STATE_DIR="${STATE_DIR:-/var/lib/alice}"; PUBKEY="${PUBKEY:-/etc/alice/release.pub}"; SERVICE="${SERVICE:-app}"
+GRACE_SECONDS="${GRACE_SECONDS:-300}"; HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"; KEEP_SNAPSHOTS="${KEEP_SNAPSHOTS:-2}"
+OUT="$STATE_DIR/out" IN="$STATE_DIR/in" PENDING="$STATE_DIR/pending" SNAPS="$STATE_DIR/snapshots"
+mkdir -p "$OUT" "$IN" "$PENDING" "$SNAPS"; chmod 755 "$OUT"; chmod 1777 "$IN"
+
+log() { echo "[$(date -u +%H:%M:%S)] $*" >&2; }
+die() { log "ERROR: $*"; exit 1; }
+dc() { docker compose -f "$COMPOSE_FILE" ${COMPOSE_PROJECT:+-p "$COMPOSE_PROJECT"} --env-file "$RELEASE_ENV" "$@"; }
+envget() { [ -r "$RELEASE_ENV" ] && sed -n "s/^$1=//p" "$RELEASE_ENV" | tail -1; }
+current_version() { envget ALICE_VERSION | grep . || echo "0.0.0"; }
+semver_gt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
+now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+# Append-only record the app reads (read-only) to tell the household and write its own audit trail.
+event() { # type, then extra jq key=value pairs as JSON object string
+  local seq extra="${2:-}"; [ -n "$extra" ] || extra='{}'
+  seq=$(( $(wc -l < "$OUT/events.jsonl" 2>/dev/null || echo 0) + 1 ))
+  jq -cn --argjson seq "$seq" --arg ts "$(now)" --arg type "$1" --argjson extra "$extra" '{seq:$seq,ts:$ts,type:$type} + $extra' >> "$OUT/events.jsonl"
+  chmod 644 "$OUT/events.jsonl"
+}
+status() { jq -cn --arg s "$1" --arg m "${2:-}" --arg v "$(current_version)" --arg t "$(now)" '{state:$s,message:$m,current:$v,at:$t}' > "$OUT/status.json.tmp" && mv "$OUT/status.json.tmp" "$OUT/status.json"; chmod 644 "$OUT/status.json"; }
+
+# ---- verification: the only gate for anything we install ----
+M_VERSION= M_EMERGENCY= M_REASON= M_NOTES= M_IMAGE= M_IMAGE_ID= M_IMAGE_TAG= M_TAR_SHA= M_TAR_FILE= M_MINV= M_EXPIRES=
+verify_manifest() { # manifest sig
+  [ -r "$PUBKEY" ] || { log "no pinned release key at $PUBKEY"; return 1; }
+  openssl pkeyutl -verify -pubin -inkey "$PUBKEY" -rawin -in "$1" -sigfile "$2" >/dev/null 2>&1 || { log "signature does not verify against the pinned key"; return 1; }
+  jq -e '.product == "alice"' "$1" >/dev/null 2>&1 || { log "not an Alice release"; return 1; }
+  M_VERSION=$(jq -r .version "$1"); M_EMERGENCY=$(jq -r '.emergency // false' "$1"); M_REASON=$(jq -r '.reason // ""' "$1"); M_NOTES=$(jq -r '.notes // ""' "$1")
+  M_IMAGE=$(jq -r '.image // ""' "$1"); M_IMAGE_ID=$(jq -r '.imageId // ""' "$1"); M_IMAGE_TAG=$(jq -r '.imageTag // ""' "$1")
+  M_TAR_SHA=$(jq -r '.bundle.sha256 // ""' "$1"); M_TAR_FILE=$(jq -r '.bundle.file // ""' "$1"); M_MINV=$(jq -r '.minVersion // "0.0.0"' "$1"); M_EXPIRES=$(jq -r .expires "$1")
+  [[ "$M_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { log "bad version in manifest"; return 1; }
+  [[ "$M_EXPIRES" > "$(now)" ]] || { log "release expired at $M_EXPIRES"; return 1; }   # ISO-8601 UTC sorts as text
+  local cur; cur=$(current_version)
+  semver_gt "$M_VERSION" "$cur" || { log "version $M_VERSION is not newer than $cur"; return 1; }   # no downgrades, no replays
+  [ "$M_MINV" = 0.0.0 ] || [ "$M_MINV" = "$cur" ] || semver_gt "$cur" "$M_MINV" || { log "needs at least $M_MINV first (running $cur)"; return 1; }
+  if [ -n "$M_IMAGE" ]; then
+    [[ "$M_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]] || { log "registry image is not pinned by digest"; return 1; }
+    [ -n "${REGISTRY_PREFIX:-}" ] && [[ "$M_IMAGE" == "$REGISTRY_PREFIX"@* ]] || { log "image is outside the allowed registry"; return 1; }
+  else
+    [[ "$M_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] && [[ "$M_TAR_SHA" =~ ^[0-9a-f]{64}$ ]] && [[ "$M_IMAGE_TAG" =~ ^[A-Za-z0-9._/:-]+$ ]] && [ "$M_TAR_FILE" = image.tar ] || { log "manifest names neither a registry image nor a valid bundle"; return 1; }
+  fi
+  return 0
+}
+
+fetch_image() { # bundle dir (or empty for registry); sets NEW_IMAGE
+  if [ -n "$M_IMAGE" ]; then
+    docker pull -q "$M_IMAGE" >/dev/null || { log "could not pull $M_IMAGE"; return 1; }   # a digest reference is verified by Docker itself
+    NEW_IMAGE="$M_IMAGE"
+  else
+    [ -r "$1/$M_TAR_FILE" ] || { log "bundle has no image file"; return 1; }
+    [ "$(sha256sum "$1/$M_TAR_FILE" | cut -d' ' -f1)" = "$M_TAR_SHA" ] || { log "image file does not match the signed checksum"; return 1; }
+    docker load -i "$1/$M_TAR_FILE" >/dev/null || { log "could not load image"; return 1; }
+    [ "$(docker image inspect --format '{{.Id}}' "$M_IMAGE_TAG" 2>/dev/null)" = "$M_IMAGE_ID" ] || { log "loaded image is not the signed one"; return 1; }
+    NEW_IMAGE="$M_IMAGE_TAG"
+  fi
+}
+
+wait_healthy() { # expected version
+  local end=$(( $(date +%s) + HEALTH_TIMEOUT )) cid h v
+  while [ "$(date +%s)" -lt "$end" ]; do
+    cid=$(dc ps -q "$SERVICE" 2>/dev/null | head -1)
+    if [ -n "$cid" ]; then
+      h=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$cid" 2>/dev/null)
+      if [ "$h" = healthy ]; then
+        v=$(dc exec -T "$SERVICE" bun -e 'const r=await fetch("http://127.0.0.1:3000/healthz");console.log((await r.json()).version)' 2>/dev/null | tr -d '\r\n')
+        [ "$v" = "$1" ] && return 0
+      fi
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+snapshot() { # raw copy of the data volume, kept on this device only, as a way back. The app is stopped, so SQLite is quiescent.
+  local dir="$SNAPS/$1" img; img=$(envget ALICE_IMAGE); mkdir -p "$dir"; chmod 700 "$dir"
+  docker run --rm --user 0 --entrypoint cp -v "$DATA_VOLUME:/d:ro" -v "$dir:/s" "$img" -a /d/. /s/ || return 1
+}
+restore_snapshot() {
+  local dir="$SNAPS/$1" img; img=$(envget ALICE_IMAGE)
+  docker run --rm --user 0 --entrypoint sh -v "$DATA_VOLUME:/d" -v "$dir:/s:ro" "$img" -c 'find /d -mindepth 1 -delete && cp -a /s/. /d/ && chown -R 1000:1000 /d'
+}
+prune_snapshots() { ls -1dt "$SNAPS"/*/ 2>/dev/null | tail -n +$((KEEP_SNAPSHOTS + 1)) | xargs -r rm -rf; }
+
+# ---- the update itself ----
+do_apply() { # manifest sig bundle_dir
+  exec 9>"$STATE_DIR/updater.lock"; flock -n 9 || die "another update is running"
+  verify_manifest "$1" "$2" || { event update_refused "$(jq -cn --arg m "${M_VERSION:-?}" '{version:$m}')"; die "release refused"; }
+  local cur; cur=$(current_version); NEW_IMAGE=
+  fetch_image "${3:-}" || { event update_refused "$(jq -cn --arg m "$M_VERSION" '{version:$m,why:"image"}')"; die "release refused"; }
+
+  # Tell the household first, and give an emergency release a short grace period so the notice can be delivered.
+  local grace=0; [ "$M_EMERGENCY" = true ] && grace=$GRACE_SECONDS
+  event update_starting "$(jq -cn --arg v "$M_VERSION" --arg f "$cur" --argjson em "$M_EMERGENCY" --arg r "$M_REASON" --arg g "$(date -u -d "+$grace seconds" +%Y-%m-%dT%H:%M:%SZ)" '{version:$v,from:$f,emergency:$em,reason:$r,startsAt:$g}')"
+  status applying "Installing $M_VERSION"
+  [ "$grace" -gt 0 ] && { log "emergency release $M_VERSION: waiting ${grace}s so the household is told"; sleep "$grace"; }
+
+  local snap; snap="$(date -u +%Y%m%dT%H%M%SZ)-$cur"
+  cp -f "$RELEASE_ENV" "$RELEASE_ENV.prev"
+  dc stop "$SERVICE" >/dev/null 2>&1
+  if ! snapshot "$snap"; then dc up -d --no-deps "$SERVICE" >/dev/null 2>&1; event update_failed "$(jq -cn --arg v "$M_VERSION" '{version:$v,why:"snapshot",rolledBack:true}')"; status failed "Could not make a safety copy, so nothing was changed"; die "snapshot failed"; fi
+  echo "$snap" > "$STATE_DIR/last-snapshot"
+  { grep -v -e '^ALICE_IMAGE=' -e '^ALICE_VERSION=' "$RELEASE_ENV.prev" || true; echo "ALICE_IMAGE=$NEW_IMAGE"; echo "ALICE_VERSION=$M_VERSION"; } > "$RELEASE_ENV.new" && mv "$RELEASE_ENV.new" "$RELEASE_ENV"
+
+  if dc up -d --no-deps "$SERVICE" >/dev/null 2>&1 && wait_healthy "$M_VERSION"; then
+    prune_snapshots
+    event update_succeeded "$(jq -cn --arg v "$M_VERSION" --arg f "$cur" --argjson em "$M_EMERGENCY" '{version:$v,from:$f,emergency:$em}')"
+    status ok "Running $M_VERSION"; rm -f "$PENDING/manifest.json" "$PENDING/manifest.json.sig" "$OUT/available.json" "$IN/request.json"
+    log "updated $cur -> $M_VERSION"; return 0
+  fi
+  log "$M_VERSION did not become healthy; rolling back to $cur"
+  do_rollback_to "$snap" "$cur" "$M_VERSION"; return 1
+}
+
+do_rollback_to() { # snapshot, previous version, failed version
+  dc stop "$SERVICE" >/dev/null 2>&1
+  [ -r "$RELEASE_ENV.prev" ] && cp -f "$RELEASE_ENV.prev" "$RELEASE_ENV"
+  local ok=true; restore_snapshot "$1" || ok=false
+  dc up -d --no-deps "$SERVICE" >/dev/null 2>&1
+  if $ok && wait_healthy "$2"; then
+    event update_failed "$(jq -cn --arg v "${3:-}" --arg b "$2" '{version:$v,rolledBack:true,backTo:$b}')"; status failed "Update to ${3:-?} did not work and was undone; still on $2"
+  else
+    event update_failed "$(jq -cn --arg v "${3:-}" --arg b "$2" '{version:$v,rolledBack:false,backTo:$b}')"; status broken "Update failed and the previous version did not start. Contact support."
+  fi
+}
+
+# ---- entry points ----
+fetch_release() { # SOURCE_URL -> $PENDING
+  [ -n "${SOURCE_URL:-}" ] || return 1
+  curl -fsS --max-time 20 --proto '=https,file' "$SOURCE_URL/manifest.json" -o "$PENDING/m.json" && curl -fsS --max-time 20 --proto '=https,file' "$SOURCE_URL/manifest.json.sig" -o "$PENDING/m.sig"
+}
+cmd="${1:-}"; shift || true
+case "$cmd" in
+verify) verify_manifest "$1" "$2" && echo "ok $M_VERSION"; exit $?;;
+status) cat "$OUT/status.json" 2>/dev/null || echo '{"state":"unknown"}'; exit 0;;
+check)
+  date -u +%s > "$OUT/last-check"; chmod 644 "$OUT/last-check"
+  fetch_release || { log "could not fetch the release feed"; exit 0; }   # offline is normal, never an error
+  verify_manifest "$PENDING/m.json" "$PENDING/m.sig" || { rm -f "$PENDING/m.json" "$PENDING/m.sig"; exit 0; }
+  mv "$PENDING/m.json" "$PENDING/manifest.json"; mv "$PENDING/m.sig" "$PENDING/manifest.json.sig"
+  if [ "$M_EMERGENCY" = true ]; then
+    log "emergency release $M_VERSION: installing without waiting for approval"
+    do_apply "$PENDING/manifest.json" "$PENDING/manifest.json.sig" ""; exit $?
+  fi
+  jq -n --arg v "$M_VERSION" --arg n "$M_NOTES" --arg c "$(jq -r .created "$PENDING/manifest.json")" '{version:$v,notes:$n,created:$c}' > "$OUT/available.json"; chmod 644 "$OUT/available.json"
+  log "update $M_VERSION is available (waiting for the household)";;
+apply-request)
+  [ -r "$IN/request.json" ] || exit 0
+  want=$(jq -r '.version // ""' "$IN/request.json" 2>/dev/null); rm -f "$IN/request.json"   # consumed either way
+  [ -r "$PENDING/manifest.json" ] && [ "$(jq -r .version "$PENDING/manifest.json")" = "$want" ] || die "no verified release $want is waiting"
+  do_apply "$PENDING/manifest.json" "$PENDING/manifest.json.sig" ""; exit $?;;
+apply)
+  [ "${1:-}" = "--bundle" ] && [ -n "${2:-}" ] || die "usage: apply --bundle DIR"
+  do_apply "$2/manifest.json" "$2/manifest.json.sig" "$2"; exit $?;;
+rollback)
+  snap=$(cat "$STATE_DIR/last-snapshot" 2>/dev/null) && [ -d "$SNAPS/$snap" ] || die "no snapshot to go back to"
+  prev=$(sed -n 's/^ALICE_VERSION=//p' "$RELEASE_ENV.prev" | tail -1); [ -n "$prev" ] || die "no previous version recorded"
+  exec 9>"$STATE_DIR/updater.lock"; flock -n 9 || die "another update is running"
+  do_rollback_to "$snap" "$prev" "$(current_version)";;
+*) sed -n 2,14p "$0"; exit 1;;
+esac
