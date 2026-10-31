@@ -17,6 +17,8 @@ export interface HaApi extends HaHealth {
   /** Resolves with the first entity (now or soon) matching `pred`, or null on timeout. */
   waitFor(pred: (e: HaEntity) => boolean, ms: number): Promise<HaEntity | null>;
   snapshot?(entityId: string): Promise<{ body: ArrayBuffer; type: string } | null>;
+  /** State changes for one entity over the last `hours`, oldest first. */
+  history?(entityId: string, hours: number): Promise<{ t: number; state: string }[] | null>;
 }
 
 /** Single persistent WebSocket to Home Assistant. State cache is in memory only; HA stays the source of truth. */
@@ -130,6 +132,17 @@ export class HaClient implements HaApi {
     try {
       const r = await fetch(new URL(`/api/camera_proxy/${encodeURIComponent(entityId)}`, this.url), { headers: { Authorization: `Bearer ${this.token}` }, signal: AbortSignal.timeout(5000) });
       return r.ok ? { body: await r.arrayBuffer(), type: r.headers.get("content-type") ?? "image/jpeg" } : null;
+    } catch { return null; }
+  }
+
+  /** Recent state changes via HA's REST history (no attributes, minimal response). */
+  async history(entityId: string, hours: number) {
+    try {
+      const start = new Date(Date.now() - hours * 3600_000).toISOString();
+      const r = await fetch(new URL(`/api/history/period/${start}?filter_entity_id=${encodeURIComponent(entityId)}&minimal_response&no_attributes`, this.url), { headers: { Authorization: `Bearer ${this.token}` }, signal: AbortSignal.timeout(8000) });
+      if (!r.ok) return null;
+      const rows = ((await r.json()) as any[][])[0] ?? [];
+      return rows.map((x) => ({ t: Date.parse(x.last_changed ?? x.last_updated), state: String(x.state) })).filter((x) => Number.isFinite(x.t));
     } catch { return null; }
   }
 

@@ -9,7 +9,7 @@
 </script>
 
 {#if n}
-	<div role="status" class="border-b bg-amber-500/15 px-4 py-2 text-sm">
+	<div role="status" class="border-b bg-on-soft px-4 py-2.5 text-sm text-on-foreground md:px-10">
 		{#if soon}{n.emergency ? 'An urgent security update' : 'An update'} (version {n.version}) will start at {at}. The app will be unavailable for a few minutes; your devices and automations keep running.
 		{:else}Updating to version {n.version} now. The app may be unavailable for a few minutes. Your devices and automations keep running.{/if}
 	</div>

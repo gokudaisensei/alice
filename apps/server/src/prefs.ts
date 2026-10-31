@@ -18,6 +18,8 @@ export function prefsRoutes(db: Database, secure: boolean, svc: DeviceService) {
       template: p.template, appearance: p.appearance, sections: JSON.parse(p.sections),
       roomOrder: (JSON.parse(p.room_order) as string[]).filter((r) => rooms.has(r)),
       favorites: { devices: fav("device").filter((id) => ok(id)), rooms: fav("room").filter((r) => rooms.has(r)) },
+      // What this person reaches for most (their own taps only). Needs a habit, not a one-off, before it shows.
+      frequent: (db.query("SELECT entity_id FROM device_usage WHERE user_id = ? AND count >= 3 ORDER BY count DESC, last_used DESC LIMIT 12").all(userId) as any[]).map((r) => r.entity_id as string).filter((id) => ok(id) && !fav("device").includes(id)).slice(0, 6),
     };
   };
 

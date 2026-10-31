@@ -17,6 +17,8 @@ export type Group = { id: string; name: string; deviceIds: string[] };
 export type Prefs = {
 	template: 'comfort' | 'minimal'; appearance: 'light' | 'dark' | 'system'; sections: string[]; roomOrder: string[];
 	favorites: { devices: string[]; rooms: string[] };
+	/** what this person reaches for most, from their own taps */
+	frequent?: string[];
 };
 export type ModeInfo = {
 	available: boolean; current: string | null; modes: string[]; canSet: boolean; note: string;

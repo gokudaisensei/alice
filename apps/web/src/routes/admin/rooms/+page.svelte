@@ -5,7 +5,10 @@
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
 	import { Badge } from '#lib/components/ui/badge';
-	import * as Card from '#lib/components/ui/card';
+	import Page from '#lib/components/app/Page.svelte';
+	import Section from '#lib/components/app/Section.svelte';
+	import Group from '#lib/components/app/Group.svelte';
+	import Row from '#lib/components/app/Row.svelte';
 
 	type AdminDevice = { id: string; name: string; haName: string; category: string; ordinary: boolean; roomId: string | null; hidden: boolean };
 	let devices = $state<AdminDevice[]>([]);
@@ -37,43 +40,45 @@
 	}
 </script>
 
-<main class="mx-auto max-w-3xl space-y-6 p-4">
-	<h1 class="text-2xl font-semibold">Rooms & devices</h1>
-	{#if error}<p role="alert" class="text-destructive">{error}</p>{/if}
+<Page title="Rooms & devices" subtitle="Organise your home: rooms, device names, and groups you control together." width="lg">
+	{#if error}<p role="alert" class="text-sm text-signal">{error}</p>{/if}
 
-	<Card.Root><Card.Header><Card.Title>Rooms</Card.Title></Card.Header>
-		<Card.Content class="space-y-3">
-			<form class="flex gap-2" onsubmit={(e) => { e.preventDefault(); addRoom(); }}>
-				<Input placeholder="New room name" bind:value={newRoom} maxlength={60} aria-label="New room name" /><Button type="submit">Add</Button>
-			</form>
-			{#each home.orderedRooms as r (r.id)}
-				<div class="flex items-center justify-between rounded-md border p-2"><span>{r.name}</span><Button size="sm" variant="ghost" onclick={() => delRoom(r.id, r.name)}>Remove</Button></div>
-			{/each}
-		</Card.Content></Card.Root>
+	<Section title="Rooms">
+		<form class="flex gap-2" onsubmit={(e) => { e.preventDefault(); addRoom(); }}>
+			<Input placeholder="New room name" bind:value={newRoom} maxlength={60} aria-label="New room name" /><Button type="submit" disabled={!newRoom.trim()}>Add room</Button>
+		</form>
+		{#if home.orderedRooms.length}
+			<Group>{#each home.orderedRooms as r (r.id)}
+				<Row title={r.name} description="{home.inRoom(r.id).length} device{home.inRoom(r.id).length === 1 ? '' : 's'}">{#snippet trailing()}<Button size="sm" variant="ghost" onclick={() => delRoom(r.id, r.name)}>Remove</Button>{/snippet}</Row>
+			{/each}</Group>
+		{/if}
+	</Section>
 
-	<Card.Root><Card.Header><Card.Title>Devices</Card.Title><Card.Description>Name them and put them in rooms. Hidden devices disappear for everyone.</Card.Description></Card.Header>
-		<Card.Content class="space-y-2">
+	<Section title="Devices" hint="Name them and put them in rooms. Hidden devices disappear for everyone.">
+		<Group>
 			{#each devices as d (d.id)}
-				<div class="space-y-2 rounded-md border p-3 {d.hidden ? 'opacity-60' : ''}">
+				<div class="space-y-2.5 px-4 py-3.5 {d.hidden ? 'opacity-60' : ''}">
 					<div class="flex flex-wrap items-center gap-2">
 						<Input class="min-w-40 flex-1" value={d.name} maxlength={60} aria-label="Name for {d.haName}" onchange={(e) => rename(d, e)} />
-						<select class="h-9 rounded-md border bg-background px-2 text-sm" value={d.roomId ?? ''} aria-label="Room for {d.name}" onchange={(e) => place(d, e.currentTarget.value)}>
+						<select class="field" value={d.roomId ?? ''} aria-label="Room for {d.name}" onchange={(e) => place(d, e.currentTarget.value)}>
 							<option value="">No room</option>
 							{#each home.orderedRooms as r}<option value={r.id}>{r.name}</option>{/each}
 						</select>
-						{#if d.ordinary}<Button size="sm" variant="outline" onclick={() => hide(d)}>{d.hidden ? 'Show' : 'Hide'}</Button>{/if}
+						{#if d.ordinary}<Button size="sm" variant="secondary" onclick={() => hide(d)}>{d.hidden ? 'Show' : 'Hide'}</Button>{/if}
 					</div>
 					{#if !d.ordinary}<Badge variant="outline">Not available in the household app</Badge>{/if}
 					{#if d.ordinary && !d.hidden}
-						<label class="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" class="size-4" bind:group={groupPick} value={d.id} />Include in new group</label>
+						<label class="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" class="size-4 accent-[var(--primary)]" bind:group={groupPick} value={d.id} />Include in new group</label>
 					{/if}
 				</div>
 			{/each}
-		</Card.Content></Card.Root>
+		</Group>
+	</Section>
 
-	<Card.Root><Card.Header><Card.Title>New group</Card.Title><Card.Description>Tick devices above, name the group, then create it. Groups are controlled together from Home.</Card.Description></Card.Header>
-		<Card.Content class="flex gap-2">
+	<Section title="New group" hint="Tick devices above, name the group, then create it. Groups are controlled together from Home.">
+		<div class="flex gap-2">
 			<Input placeholder="Group name, e.g. Downstairs lights" bind:value={groupName} maxlength={60} aria-label="Group name" />
 			<Button onclick={makeGroup} disabled={!groupName.trim() || !groupPick.length}>Create ({groupPick.length})</Button>
-		</Card.Content></Card.Root>
-</main>
+		</div>
+	</Section>
+</Page>

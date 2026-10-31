@@ -2,17 +2,17 @@
 	import { page } from '$app/state';
 	import { home } from '#lib/home.svelte.js';
 	import DeviceCard from '#lib/components/app/DeviceCard.svelte';
+	import { tileClass } from '#lib/tiles.js';
+	import Pg from '#lib/components/app/Page.svelte';
+	import Empty from '#lib/components/app/Empty.svelte';
 
 	const room = $derived(home.rooms.find((r) => r.id === page.params.id));
 	const devices = $derived(home.inRoom(page.params.id ?? ''));
 </script>
 
-<main class="mx-auto max-w-3xl space-y-4 p-4">
-	<a href="/rooms" class="text-sm text-muted-foreground underline">← Rooms</a>
+<Pg title={room?.name ?? (home.loaded ? 'Room not found' : '')} back={{ href: '/rooms', label: 'Rooms' }} width="xl">
 	{#if room}
-		<h1 class="text-2xl font-semibold">{room.name}</h1>
-		{#if devices.length}
-			<div class="grid gap-3 sm:grid-cols-2">{#each devices as d (d.id)}<DeviceCard device={d} />{/each}</div>
-		{:else}<p class="text-muted-foreground">Nothing in this room yet.</p>{/if}
-	{:else if home.loaded}<p>That room doesn’t exist.</p>{/if}
-</main>
+		{#if devices.length}<div class="grid grid-flow-dense grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3">{#each devices as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div>
+		{:else}<Empty title="Nothing in this room yet" description="Devices appear here once they're placed in this room." />{/if}
+	{:else if home.loaded}<Empty title="That room doesn't exist" description="It may have been removed." />{/if}
+</Pg>

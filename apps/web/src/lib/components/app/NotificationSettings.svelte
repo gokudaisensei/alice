@@ -4,7 +4,10 @@
 	import { notifications, type NotePrefs } from '#lib/notifications.svelte.js';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
-	import * as Card from '#lib/components/ui/card';
+	import Section from '#lib/components/app/Section.svelte';
+	import Group from '#lib/components/app/Group.svelte';
+	import Row from '#lib/components/app/Row.svelte';
+	import { Switch } from '#lib/components/ui/switch';
 
 	const LABEL: Record<string, string> = { device_offline: 'A device stays offline', lock_open: 'A door stays unlocked', hub: 'The home hub is unreachable', insight: 'Suggestions about energy and devices left on' };
 	let p = $state<NotePrefs | null>(null), here = $state(false), msg = $state(''), busy = $state(false);
@@ -16,7 +19,7 @@
 		const r = await api('PUT', '/api/me/notifications', patch);
 		if (r.ok) p = { ...p!, ...r.data }; else msg = r.data?.message ?? explain(r.data?.error);
 	}
-	const toggleKind = (k: string) => save({ muted: p!.muted.includes(k) ? p!.muted.filter((x) => x !== k) : [...p!.muted, k] });
+	const toggleKind = (k: string) => p && save({ muted: p.muted.includes(k) ? p.muted.filter((x) => x !== k) : [...p.muted, k] });
 	const quiet = (patch: object) => save({ quiet: { ...p!.quiet, tz, ...patch } });
 	async function togglePush() {
 		busy = true; msg = '';
@@ -29,25 +32,31 @@
 	}
 </script>
 
-<Card.Root id="notifications"><Card.Header><Card.Title>Notifications</Card.Title><Card.Description>Only you see these choices. Everything still appears under Alerts.</Card.Description></Card.Header>
-	<Card.Content class="space-y-4">
-		{#if p}
-			<fieldset class="space-y-2"><legend class="text-sm font-medium">Tell me when</legend>
-				{#each p.kinds as k}<label class="flex items-center gap-2"><input type="checkbox" class="size-4" checked={!p.muted.includes(k)} onchange={() => toggleKind(k)} />{LABEL[k] ?? k}</label>{/each}
-			</fieldset>
-			<fieldset class="space-y-2"><legend class="text-sm font-medium">Quiet hours</legend>
-				<label class="flex items-center gap-2"><input type="checkbox" class="size-4" checked={p.quiet.enabled} onchange={(e) => quiet({ enabled: e.currentTarget.checked })} />Don't send push notifications during these hours</label>
+<div id="notifications" class="scroll-mt-20 space-y-9">
+	{#if p}
+		<Section title="Alerts" hint="Everything still appears under Alerts. These choices only decide what is worth a notification.">
+			<Group>{#each p.kinds as k}
+				<Row title={LABEL[k] ?? k}>{#snippet trailing()}<Switch checked={!(p?.muted ?? []).includes(k)} aria-label={LABEL[k] ?? k} onCheckedChange={() => toggleKind(k)} />{/snippet}</Row>
+			{/each}</Group>
+		</Section>
+
+		<Section title="Quiet hours" hint="Push notifications wait until quiet hours end. Alerts stay in the app.">
+			<Group>
+				<Row title="Hold back push notifications" description={p.quiet.enabled ? `From ${p.quiet.start} until ${p.quiet.end} (${tz})` : undefined}>{#snippet trailing()}<Switch checked={!!p?.quiet.enabled} aria-label="Quiet hours" onCheckedChange={(v) => quiet({ enabled: v })} />{/snippet}</Row>
 				{#if p.quiet.enabled}
-					<div class="flex flex-wrap items-center gap-2 text-sm">From <Input type="time" class="w-32" value={p.quiet.start} onchange={(e) => quiet({ start: e.currentTarget.value })} aria-label="Quiet hours start" /> until <Input type="time" class="w-32" value={p.quiet.end} onchange={(e) => quiet({ end: e.currentTarget.value })} aria-label="Quiet hours end" /> <span class="text-muted-foreground">({tz})</span></div>
-					<p class="text-xs text-muted-foreground">Alerts still wait for you under Alerts.</p>
+					<div class="flex flex-wrap items-center gap-2 px-4 py-3 text-sm">From <Input type="time" class="w-32" value={p.quiet.start} onchange={(e) => quiet({ start: e.currentTarget.value })} aria-label="Quiet hours start" /> until <Input type="time" class="w-32" value={p.quiet.end} onchange={(e) => quiet({ end: e.currentTarget.value })} aria-label="Quiet hours end" /></div>
 				{/if}
-			</fieldset>
-			{#if p.pushAvailable}
-				<div class="space-y-2"><p class="text-sm font-medium">Push notifications on this device</p>
-					<div class="flex flex-wrap gap-2"><Button variant={here ? 'outline' : 'default'} disabled={busy} onclick={togglePush}>{here ? 'Turn off on this device' : 'Turn on for this device'}</Button>
-						{#if p.pushDevices}<Button variant="outline" disabled={busy} onclick={test}>Send a test</Button>{/if}</div>
-					<p class="text-xs text-muted-foreground">{p.pushDevices} device{p.pushDevices === 1 ? '' : 's'} set up. Messages go through your browser's push service, so they need an internet connection. On an iPhone, add the app to your Home Screen first.</p></div>
-			{/if}
-			{#if msg}<p role="status" class="text-sm">{msg}</p>{/if}
+			</Group>
+		</Section>
+
+		{#if p.pushAvailable}
+			<Section title="Push notifications" hint="Sent through your browser's push service, so they need an internet connection. On an iPhone, add the app to your Home Screen first.">
+				<Group>
+					<Row title="This device" description={here ? 'Notifications are on' : 'Notifications are off'}>{#snippet trailing()}<Button size="sm" variant={here ? 'secondary' : 'default'} disabled={busy} onclick={togglePush}>{here ? 'Turn off' : 'Turn on'}</Button>{/snippet}</Row>
+					{#if p.pushDevices}<Row title="Send a test" description="{p.pushDevices} device{p.pushDevices === 1 ? '' : 's'} set up">{#snippet trailing()}<Button size="sm" variant="secondary" disabled={busy} onclick={test}>Send</Button>{/snippet}</Row>{/if}
+				</Group>
+			</Section>
 		{/if}
-	</Card.Content></Card.Root>
+		{#if msg}<p role="status" class="rounded-2xl bg-accent px-4 py-3 text-sm">{msg}</p>{/if}
+	{/if}
+</div>

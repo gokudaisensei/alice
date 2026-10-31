@@ -2,8 +2,8 @@
 	import { home } from '#lib/home.svelte.js';
 </script>
 
-<div class="pointer-events-none fixed inset-x-0 bottom-20 z-50 flex justify-center px-4 md:bottom-6" aria-live="assertive">
+<div class="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex justify-center px-4 md:bottom-8" aria-live="assertive">
 	{#if home.notice}
-		<p role={home.notice.kind === 'error' ? 'alert' : 'status'} class="pointer-events-auto max-w-md rounded-lg border px-4 py-3 text-sm shadow-lg {home.notice.kind === 'error' ? 'border-destructive bg-background text-destructive' : 'bg-card text-card-foreground'}">{home.notice.text}</p>
+		<p role={home.notice.kind === 'error' ? 'alert' : 'status'} class="pointer-events-auto max-w-md rounded-2xl px-4 py-3 text-sm font-medium shadow-xl backdrop-blur {home.notice.kind === 'error' ? 'bg-signal text-white' : 'bg-foreground/95 text-background'}">{home.notice.text}</p>
 	{/if}
 </div>

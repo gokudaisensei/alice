@@ -296,3 +296,28 @@ test("asking for what is already true is confirmed, but a device that ignores a 
   t.ha.ignoring.add("light.hall"); t.ha.set("light.hall", "off");
   expect((await cmd("light.hall", "turn_on")).json.confirmed).toBe(false); // accepted but never happened
 });
+
+test("what someone reaches for most is remembered for them alone", async () => {
+  const t = setup(); const a = await t.bootstrapAdmin("a1"); const m = await t.addUser(a.cookie!, "member", "m1");
+  const cmd = (cookie: string, id: string, action: string) => t.call("POST", `/api/devices/${encodeURIComponent(id)}/command`, { cookie, body: { action } });
+  const freq = async (cookie: string) => (await t.call("GET", "/api/me/prefs", { cookie })).json.frequent as string[];
+  for (let i = 0; i < 3; i++) { await cmd(a.cookie!, "light.kitchen", i % 2 ? "turn_off" : "turn_on"); }
+  await cmd(a.cookie!, "light.hall", "turn_on"); // a one-off is not a habit
+  expect(await freq(a.cookie!)).toEqual(["light.kitchen"]);
+  expect(await freq(m.cookie)).toEqual([]); // someone else's taps are theirs alone
+  await t.call("PUT", "/api/me/favorites", { cookie: a.cookie!, body: { devices: ["light.kitchen"], rooms: [] } });
+  expect(await freq(a.cookie!)).toEqual([]); // already a favourite, so not repeated
+});
+
+test("a device's day is available only to people who can use it, and is honest when the hub is away", async () => {
+  const t = setup(); const a = await t.bootstrapAdmin("a1"); const g = await t.addUser(a.cookie!, "guest", "g1");
+  const now = Date.now();
+  t.ha.historyFor.set("light.kitchen", [{ t: now - 7200_000, state: "on" }, { t: now - 3600_000, state: "off" }]);
+  const r = await t.call("GET", "/api/devices/light.kitchen/history", { cookie: a.cookie! });
+  expect([r.status, r.json.kind, r.json.points.length]).toEqual([200, "state", 2]);
+  t.ha.historyFor.set("sensor.temp", [{ t: now - 1000, state: "21.5" }, { t: now, state: "21.7" }]);
+  expect((await t.call("GET", "/api/devices/sensor.temp/history", { cookie: a.cookie! })).json.kind).toBe("numeric");
+  expect((await t.call("GET", "/api/devices/light.kitchen/history", { cookie: g.cookie })).status).toBe(404);
+  t.ha.setStale(true);
+  expect((await t.call("GET", "/api/devices/light.kitchen/history", { cookie: a.cookie! })).status).toBe(503);
+});

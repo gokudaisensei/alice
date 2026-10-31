@@ -135,6 +135,8 @@ export class FakeHa implements HaApi {
       const off = this.subscribe((e) => { if (e.type === "entity" && e.entityId === id && this.entities.get(id) !== before) { clearTimeout(t); off(); resolve(true); } });
     });
   }
+  historyFor = new Map<string, { t: number; state: string }[]>();
+  async history(id: string, _hours: number) { return this.stale ? null : (this.historyFor.get(id) ?? []); }
   async snapshot(id: string) { return id === "camera.porch" ? { body: new Uint8Array([0xff, 0xd8, 0xff]).buffer as ArrayBuffer, type: "image/jpeg" } : null; }
 }
 

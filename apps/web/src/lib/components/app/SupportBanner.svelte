@@ -8,7 +8,7 @@
 </script>
 
 {#if s}
-	<div role="status" class="flex flex-wrap items-center justify-between gap-2 border-b bg-primary/10 px-4 py-2 text-sm">
+	<div role="status" class="flex flex-wrap items-center justify-between gap-2 border-b bg-accent px-4 py-2.5 text-sm md:px-10">
 		<span>Support access is allowed until {until}.{s.connected ? ` ${s.operatorName} is connected.` : ''}</span>
 		<a class="underline" href="/admin/system">Manage</a>
 	</div>

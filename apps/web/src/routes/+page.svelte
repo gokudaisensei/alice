@@ -1,79 +1,284 @@
 <script lang="ts">
-	import { home } from '#lib/home.svelte.js';
+	import { onMount } from 'svelte';
+	import { api } from '#lib/api.js';
+	import { chrome } from '#lib/chrome.svelte.js';
+	import { home, type Device } from '#lib/home.svelte.js';
+	import { notifications } from '#lib/notifications.svelte.js';
 	import { session } from '#lib/session.svelte.js';
+	import { viewport } from '#lib/viewport.svelte.js';
+	import { tileClass } from '#lib/tiles.js';
 	import DeviceCard from '#lib/components/app/DeviceCard.svelte';
 	import Insights from '#lib/components/app/Insights.svelte';
 	import ModeCard from '#lib/components/app/ModeCard.svelte';
+	import Section from '#lib/components/app/Section.svelte';
+	import Collapse from '#lib/components/app/Collapse.svelte';
+	import Group from '#lib/components/app/Group.svelte';
+	import Row from '#lib/components/app/Row.svelte';
 	import { Button } from '#lib/components/ui/button';
+	import { Check, ChevronDown, Lightbulb, Lock, LockOpen, Plug, Search, ShieldAlert, Sparkles, Thermometer, Tv, Video, WifiOff, X, Zap } from '@lucide/svelte';
 
 	const t = $derived(home.prefs?.template ?? 'comfort');
 	const sections = $derived(home.prefs?.sections ?? ['favorites', 'rooms']);
-	const favRooms = $derived((home.prefs?.favorites.rooms ?? []).map((id) => home.rooms.find((r) => r.id === id)).filter((r) => !!r));
-	const shownRooms = $derived(favRooms.length ? favRooms : home.orderedRooms);
-	const sensors = $derived(home.devices.filter((d) => d.category === 'sensor' || d.category === 'energy').slice(0, 6));
+
+	// ---- the sentence ----
 	const hour = new Date().getHours();
-	const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+	const greeting = hour < 5 ? 'Still up' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+	const NUM = ['No', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+	const n = (k: number) => (k <= 10 ? NUM[k] : String(k));
+	const by = (c: string) => home.devices.filter((d) => d.category === c);
+	const lights = $derived(by('light')), lightsOn = $derived(lights.filter((d) => d.available && d.state === 'on'));
+	const locks = $derived(by('lock')), unlocked = $derived(locks.filter((d) => d.available && d.state === 'unlocked'));
+	const offline = $derived(home.devices.filter((d) => d.reason === 'device_offline'));
+	const headline = $derived.by(() => {
+		if (!home.loaded) return 'One moment…';
+		if (home.haHealth !== 'ok') return 'The hub can’t be reached.';
+		if (!home.devices.length) return 'Your home is ready.';
+		const p: string[] = [];
+		if (unlocked.length) p.push(unlocked.length === 1 ? `${unlocked[0].name} is unlocked.` : `${n(unlocked.length)} doors unlocked.`);
+		else if (locks.length) p.push('Everything is locked.');
+		if (lights.length) p.push(lightsOn.length === 0 ? 'Lights are off.' : lightsOn.length === 1 ? `${lightsOn[0].name} is on.` : `${n(lightsOn.length)} lights on.`);
+		return p.join(' ') || 'Everything looks calm.';
+	});
+
+	// ---- status chips: each one is a summary, a filter, and a way in ----
+	const climate = $derived(home.devices.find((d) => d.category === 'climate' && d.available));
+	const meter = $derived(home.devices.find((d) => d.category === 'energy' && d.available && d.reading?.unit === 'W'));
+	const playing = $derived(by('media').filter((d) => d.state === 'playing').length);
+	const cams = $derived(by('camera'));
+	const plugs = $derived(home.devices.filter((d) => ['switch', 'fan'].includes(d.category)));
+	type Chip = { key: string; label: string; value: string; icon: any; tone: 'on' | 'signal' | 'none'; cats: string[] };
+	const chips = $derived.by<Chip[]>(() => {
+		const c: Chip[] = [];
+		if (lights.length) c.push({ key: 'lights', label: 'Lights', value: lightsOn.length ? `${lightsOn.length} on` : 'Off', icon: Lightbulb, tone: lightsOn.length ? 'on' : 'none', cats: ['light'] });
+		if (locks.length) c.push({ key: 'security', label: 'Doors', value: unlocked.length ? `${unlocked.length} open` : 'Locked', icon: unlocked.length ? LockOpen : Lock, tone: unlocked.length ? 'signal' : 'none', cats: ['lock'] });
+		if (climate) c.push({ key: 'climate', label: 'Climate', value: climate.reading ? `${climate.reading.value}°` : climate.state, icon: Thermometer, tone: 'none', cats: ['climate'] });
+		if (plugs.length) c.push({ key: 'plugs', label: 'Plugs & fans', value: `${plugs.filter((d) => d.state === 'on').length} on`, icon: Plug, tone: plugs.some((d) => d.state === 'on') ? 'on' : 'none', cats: ['switch', 'fan'] });
+		if (by('media').length) c.push({ key: 'media', label: 'Media', value: playing ? `${playing} playing` : 'Idle', icon: Tv, tone: 'none', cats: ['media'] });
+		if (cams.length) c.push({ key: 'cameras', label: 'Cameras', value: String(cams.length), icon: Video, tone: 'none', cats: ['camera'] });
+		if (meter) c.push({ key: 'energy', label: 'Power', value: `${meter.reading?.value} W`, icon: Zap, tone: 'none', cats: [] });
+		return c;
+	});
+	let filter = $state<string | null>(null);
+	const active = $derived(chips.find((c) => c.key === filter));
+	const filtered = $derived(active ? home.devices.filter((d) => active.cats.includes(d.category)) : []);
+	const filteredByRoom = $derived.by(() => {
+		const rooms = [...home.orderedRooms.map((r) => ({ id: r.id as string | null, name: r.name })), { id: null as string | null, name: 'No room' }];
+		return rooms.map((r) => ({ ...r, devices: filtered.filter((d) => (d.roomId ?? null) === r.id) })).filter((r) => r.devices.length);
+	});
+	const toggleChip = (c: Chip) => { if (c.key === 'energy') location.href = '/activity?tab=energy'; else filter = filter === c.key ? null : c.key; };
+	async function allOff(ds: Device[]) { for (const d of ds.filter((x) => x.state === 'on')) await home.command(d.id, 'turn_off'); }
+	async function lockAll() { for (const d of unlocked) await home.command(d.id, 'lock'); }
+	const toneChip = { on: 'bg-on-soft text-on-foreground border-transparent', signal: 'bg-signal-soft text-signal-foreground border-transparent', none: 'bg-card' };
+
+	// ---- quick actions: a suggestion that fits the time of day comes first. It only suggests; it never acts. ----
+	const WHEN: [RegExp, (h: number) => boolean][] = [[/night|bed|sleep/i, (h) => h >= 21 || h < 4], [/morning|wake/i, (h) => h >= 5 && h < 10], [/evening|movie|dinner|relax/i, (h) => h >= 17 && h < 21]];
+	type Quick = { id: string; label: string; run: () => unknown; suggested?: boolean; busy?: boolean };
+	const quick = $derived.by<Quick[]>(() => {
+		const all: Quick[] = [
+			...home.scenes.map((s) => ({ id: s.id, label: s.name, run: () => home.activateScene(s), busy: !!home.busy[s.id] })),
+			...home.routines.map((r) => ({ id: `routine:${r.id}`, label: r.name, run: () => home.runRoutine(r), busy: !!home.busy[`routine:${r.id}`] }))
+		];
+		for (const q of all) q.suggested = WHEN.some(([re, ok]) => re.test(q.label) && ok(hour));
+		all.sort((a, b) => Number(!!b.suggested) - Number(!!a.suggested));
+		if (lightsOn.length) all.splice(all.some((q) => q.suggested) ? 1 : 0, 0, { id: 'alloff', label: 'All lights off', run: () => allOff(lightsOn) });
+		return all.slice(0, 8);
+	});
+
+	// ---- favourites, things you reach for, and rooms you can fold away ----
+	const often = $derived((home.prefs?.frequent ?? []).map((id) => home.byId(id)).filter((d): d is Device => !!d && d.available && d.controls.some((c) => c.type === 'power')));
+	let openRooms = $state<Record<string, boolean>>({});
+	onMount(() => { try { openRooms = JSON.parse(localStorage.getItem('rooms-open') ?? '{}'); } catch {} });
+	const isRoomOpen = (id: string, i: number) => openRooms[id] ?? (!viewport.phone && i === 0);
+	const flip = (id: string, i: number) => { openRooms[id] = !isRoomOpen(id, i); try { localStorage.setItem('rooms-open', JSON.stringify(openRooms)); } catch {} };
+	const roomsWithDevices = $derived(home.orderedRooms.map((r) => ({ ...r, devices: home.inRoom(r.id) })).filter((r) => r.devices.length));
+	const unplaced = $derived(home.devices.filter((d) => !d.roomId && !['sensor', 'energy'].includes(d.category)));
+
+	// ---- getting started ----
+	let pushHere = $state(false), others = $state(false), hidden = $state(false), setupOpen = $state<boolean | null>(null);
+	onMount(async () => {
+		try { hidden = localStorage.getItem('setup-hidden') === '1'; } catch {}
+		pushHere = await notifications.thisDevice();
+		if (session.can('users.manage')) { const r = await api('GET', '/api/admin/users'); if (r.ok) others = (r.data.users ?? r.data).length > 1; }
+	});
+	const steps = $derived([
+		{ label: 'Star your favorite devices', done: home.favoriteDevices.length > 0, href: '/devices', cta: 'Browse' },
+		{ label: 'Turn on alerts for this device', done: pushHere, href: '/settings/notifications', cta: 'Set up' },
+		...(session.can('users.manage') ? [{ label: 'Invite someone in your home', done: others, href: '/admin/users', cta: 'Invite' }] : []),
+		...(session.can('automation.manage') ? [{ label: 'Create your first routine', done: home.routines.length > 0, href: '/routines/new', cta: 'Create' }] : [])
+	]);
+	const doneCount = $derived(steps.filter((s) => s.done).length);
+	const showSetup = $derived(home.loaded && !hidden && doneCount < steps.length);
+	const setupIsOpen = $derived(setupOpen ?? !viewport.phone);
+	const hide = () => { hidden = true; try { localStorage.setItem('setup-hidden', '1'); } catch {} };
+	const cameras = $derived(cams.filter((d) => d.available).slice(0, 2));
 </script>
 
-<main class="mx-auto max-w-3xl space-y-6 p-4">
-	<h1 class="text-2xl font-semibold">{greeting}{session.me ? `, ${session.me.displayName}` : ''}</h1>
+{#snippet setup()}
+	<section class="rounded-2xl border bg-card p-4">
+		<div class="flex items-center justify-between gap-3"><button type="button" class="flex min-w-0 flex-1 items-baseline gap-2 text-left" aria-expanded={setupIsOpen} onclick={() => (setupOpen = !setupIsOpen)}><h2 class="heading">Get set up</h2><span class="text-sm text-muted-foreground">{doneCount} of {steps.length}</span></button><button class="text-sm text-muted-foreground hover:text-foreground" onclick={hide}>Hide</button></div>
+		<div class="mt-2.5 h-1.5 overflow-hidden rounded-full bg-secondary" role="progressbar" aria-valuemin={0} aria-valuemax={steps.length} aria-valuenow={doneCount}><div class="h-full rounded-full bg-primary transition-all duration-500" style="width:{(doneCount / steps.length) * 100}%"></div></div>
+		<Collapse open={setupIsOpen}>
+			<ul class="mt-3 space-y-0.5">
+				{#each steps as s}
+					<li class="flex items-center gap-2.5 py-1.5">
+						<span class="flex size-5 shrink-0 items-center justify-center rounded-full border {s.done ? 'border-primary bg-primary text-primary-foreground' : 'border-input'}">{#if s.done}<Check class="size-3" strokeWidth={3} />{/if}</span>
+						<span class="flex-1 text-sm {s.done ? 'text-muted-foreground line-through' : 'font-medium'}">{s.label}</span>
+						{#if !s.done}<Button size="sm" variant="secondary" href={s.href}>{s.cta}</Button>{/if}
+					</li>
+				{/each}
+			</ul>
+		</Collapse>
+	</section>
+{/snippet}
 
-	<ModeCard />
-	<Insights />
+<main class="mx-auto w-full max-w-6xl px-5 pb-10 pt-4 md:px-10 md:pb-16 md:pt-10 lg:grid lg:grid-cols-[minmax(0,1fr)_19.5rem] lg:gap-x-14">
+	<div class="min-w-0 space-y-6 md:space-y-9">
+		<header class="flex items-start justify-between gap-4">
+			<div class="min-w-0">
+				<p class="text-[0.9375rem] text-muted-foreground">{greeting}{session.me ? `, ${session.me.displayName.split(' ')[0]}` : ''}</p>
+				<h1 class="display mt-1.5 max-w-[22ch]" aria-live="polite">{headline}</h1>
+			</div>
+			<button type="button" class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground md:hidden" aria-label="Search" onclick={() => (chrome.search = true)}><Search class="size-4" /></button>
+		</header>
 
-	{#if !home.loaded}
-		<p class="text-muted-foreground" role="status">Loading your home…</p>
-	{:else}
-		{#if sections.includes('favorites')}
-			<section aria-labelledby="fav">
-				<h2 id="fav" class="mb-2 text-sm font-medium uppercase text-muted-foreground">Favorites</h2>
-				{#if home.favoriteDevices.length}
-					<div class={t === 'minimal' ? 'space-y-2' : 'grid gap-3 sm:grid-cols-2'}>
-						{#each home.favoriteDevices as d (d.id)}<DeviceCard device={d} compact={t === 'minimal'} />{/each}
-					</div>
-				{:else}
-					<p class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-						{#if home.devices.length}Tap the star on any device to keep it here. <a class="underline" href="/devices">Browse devices</a>
-						{:else}No devices have been shared with you yet. Ask the person who manages your home.{/if}</p>
+		{#if home.loaded && (unlocked.length || offline.length)}
+			<ul class="space-y-2" aria-label="Needs attention">
+				{#if unlocked.length}
+					<li class="flex items-center gap-3 rounded-2xl bg-signal-soft px-4 py-3 text-signal-foreground">
+						<ShieldAlert class="size-5 shrink-0" />
+						<span class="min-w-0 flex-1 text-[0.9375rem] font-medium leading-snug">{unlocked.length === 1 ? `${unlocked[0].name} is unlocked.` : `${unlocked.length} doors are unlocked.`}{#if unlocked.length > 1}<span class="block truncate text-sm font-normal opacity-80">{unlocked.map((d) => d.name).join(', ')}</span>{/if}</span>
+						<Button size="sm" class="bg-signal text-white hover:bg-signal/85" onclick={lockAll}>{unlocked.length > 1 ? 'Lock all' : 'Lock'}</Button>
+					</li>
 				{/if}
-			</section>
-		{/if}
-
-		{#if sections.includes('rooms')}
-			<section aria-labelledby="rooms">
-				<h2 id="rooms" class="mb-2 text-sm font-medium uppercase text-muted-foreground">Rooms</h2>
-				{#if shownRooms.length}
-					<div class="flex flex-wrap gap-2">
-						{#each shownRooms as r}<Button variant="outline" href="/rooms/{r!.id}">{r!.name} <span class="ml-1 text-muted-foreground">{home.inRoom(r!.id).length}</span></Button>{/each}
-					</div>
-				{:else}
-					<p class="text-sm text-muted-foreground">No rooms yet.{#if session.can('rooms.manage')} <a class="underline" href="/admin/rooms">Set up your rooms</a>.{/if}</p>
+				{#if offline.length}
+					<li><a href="/devices" class="flex items-center gap-3 rounded-2xl bg-secondary px-4 py-3"><WifiOff class="size-5 shrink-0 text-muted-foreground" /><span class="flex-1 text-[0.9375rem]"><span class="font-medium">{offline.length === 1 ? offline[0].name : `${offline.length} devices`}</span> {offline.length === 1 ? 'is' : 'are'} offline</span><span class="text-sm text-muted-foreground">Check</span></a></li>
 				{/if}
-			</section>
+			</ul>
 		{/if}
 
-		{#if sections.includes('sensors') && sensors.length}
-			<section aria-labelledby="sens">
-				<h2 id="sens" class="mb-2 text-sm font-medium uppercase text-muted-foreground">At a glance</h2>
-				<div class="grid gap-3 sm:grid-cols-2">{#each sensors as d (d.id)}<DeviceCard device={d} compact />{/each}</div>
-			</section>
+		{#if home.loaded && chips.length}
+			<div class="-mx-5 flex gap-2 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0" role="group" aria-label="Status">
+				{#each chips as c (c.key)}
+					<button type="button" aria-pressed={filter === c.key} onclick={() => toggleChip(c)} class="flex min-w-[6.5rem] shrink-0 flex-col items-start gap-1 rounded-2xl border px-3 py-2.5 text-left transition-all {toneChip[c.tone]} {filter === c.key ? 'ring-2 ring-primary' : ''}">
+						<c.icon class="size-[18px] opacity-80" aria-hidden="true" />
+						<span class="figure text-[1.0625rem] leading-none">{c.value}</span>
+						<span class="text-xs opacity-75">{c.label}</span>
+					</button>
+				{/each}
+			</div>
 		{/if}
 
-		{#if home.groups.length}
-			<section aria-labelledby="grp">
-				<h2 id="grp" class="mb-2 text-sm font-medium uppercase text-muted-foreground">Groups</h2>
-				<div class="space-y-2">
-					{#each home.groups as g}
-						<div class="flex items-center justify-between rounded-lg border p-3">
-							<span>{g.name} <span class="text-sm text-muted-foreground">· {g.deviceIds.length} devices</span></span>
-							<span class="flex gap-2">
-								<Button size="sm" variant="outline" onclick={() => home.groupCommand(g.id, 'turn_on')}>All on</Button>
-								<Button size="sm" variant="outline" onclick={() => home.groupCommand(g.id, 'turn_off')}>All off</Button>
-							</span>
-						</div>
+		{#if active}
+			<Section title={active.label}>
+				{#snippet actions()}
+					{#if active.cats.some((k) => ['light', 'switch', 'fan'].includes(k)) && filtered.some((d) => d.state === 'on')}<Button size="sm" variant="secondary" onclick={() => allOff(filtered)}>All off</Button>{/if}
+					<Button size="sm" variant="ghost" onclick={() => (filter = null)}><X />Clear</Button>
+				{/snippet}
+				<div class="space-y-5">
+					{#each filteredByRoom as r (r.id ?? 'none')}
+						<div class="space-y-2"><h3 class="text-sm font-medium text-muted-foreground">{r.name}</h3><div class="grid grid-flow-dense grid-cols-2 gap-2.5 sm:gap-3">{#each r.devices as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div></div>
 					{/each}
 				</div>
-			</section>
+			</Section>
+		{:else}
+			<ModeCard />
+
+			{#if home.loaded && quick.length}
+				<Section>
+					<div class="-mx-5 flex gap-2 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
+						{#each quick as q (q.id)}
+							<button type="button" disabled={q.busy || home.haHealth !== 'ok'} onclick={() => q.run()} class="flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-4 text-sm font-medium transition-colors disabled:opacity-50 {q.suggested ? 'border-primary/40 bg-primary/10 text-primary' : 'bg-card hover:bg-muted'}">{#if q.suggested}<Sparkles class="size-3.5" />{/if}{q.label}</button>
+						{/each}
+					</div>
+				</Section>
+			{/if}
+
+			{#if home.loaded}
+				{#if sections.includes('favorites')}
+					<Section title="Favorites">
+						{#if home.favoriteDevices.length}
+							<div class={t === 'minimal' ? 'space-y-2' : 'grid grid-flow-dense grid-cols-2 gap-2.5 sm:gap-3'}>
+								{#each home.favoriteDevices as d (d.id)}<div class={t === 'minimal' ? '' : tileClass(d)}><DeviceCard device={d} compact={t === 'minimal'} /></div>{/each}
+							</div>
+						{:else}
+							<p class="rounded-2xl border border-dashed px-5 py-8 text-center text-sm text-muted-foreground">
+								{#if home.devices.length}Star a device to keep it here. <a class="font-medium text-primary underline-offset-2 hover:underline" href="/devices">Browse devices</a>
+								{:else}Nothing has been shared with you yet. Ask the person who manages your home.{/if}</p>
+						{/if}
+						{#if often.length}
+							<div class="-mx-5 flex items-center gap-2 overflow-x-auto no-scrollbar px-5 pb-1 pt-1 md:mx-0 md:flex-wrap md:px-0" role="group" aria-label="Often used">
+								<span class="shrink-0 text-sm text-muted-foreground">Often used</span>
+								{#each often as d (d.id)}
+									<button type="button" onclick={() => home.command(d.id, d.state === 'on' ? 'turn_off' : 'turn_on')} aria-pressed={d.state === 'on'} class="flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors {d.state === 'on' ? 'border-transparent bg-on-soft text-on-foreground' : 'bg-card hover:bg-muted'}"><span class="size-1.5 rounded-full {d.state === 'on' ? 'bg-on' : 'bg-border'}"></span>{d.name}</button>
+								{/each}
+							</div>
+						{/if}
+					</Section>
+				{/if}
+
+				{#if sections.includes('rooms')}
+					<Section title="Rooms">
+						{#if roomsWithDevices.length || unplaced.length}
+							<div class="space-y-2">
+								{#each roomsWithDevices as r, i (r.id)}
+									{@const open = isRoomOpen(r.id, i)}
+									{@const on = r.devices.filter((d) => d.state === 'on' && d.available).length}
+									<div class="overflow-hidden rounded-2xl border bg-card">
+										<button type="button" class="flex w-full items-center gap-3 px-4 py-3.5 text-left" aria-expanded={open} onclick={() => flip(r.id, i)}>
+											<span class="size-2.5 shrink-0 rounded-full {on ? 'bg-on' : 'bg-border'}" aria-hidden="true"></span>
+											<span class="min-w-0 flex-1"><span class="block truncate text-base font-semibold tracking-[-0.015em]">{r.name}</span><span class="text-sm text-muted-foreground">{on ? `${on} on · ` : ''}{r.devices.length} device{r.devices.length === 1 ? '' : 's'}</span></span>
+											<ChevronDown class="size-4 text-muted-foreground transition-transform duration-300 {open ? 'rotate-180' : ''}" />
+										</button>
+										<Collapse {open}><div class="grid grid-cols-2 gap-2.5 px-3 pb-3 sm:gap-3">{#each r.devices as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div></Collapse>
+									</div>
+								{/each}
+							</div>
+							{#if unplaced.length}<p class="text-sm text-muted-foreground">{unplaced.length} device{unplaced.length === 1 ? '' : 's'} not in a room. <a class="font-medium text-primary hover:underline" href="/devices">See all devices</a></p>{/if}
+						{:else}
+							<p class="text-sm text-muted-foreground">No rooms yet.{#if session.can('rooms.manage')} <a class="font-medium text-primary hover:underline" href="/admin/rooms">Set up your rooms</a>.{/if}</p>
+						{/if}
+					</Section>
+				{/if}
+
+				{#if home.groups.length}
+					<Section title="Groups">
+						<Group>{#each home.groups as g (g.id)}
+							<Row title={g.name} description="{g.deviceIds.length} devices">{#snippet trailing()}<Button size="sm" variant="secondary" onclick={() => home.groupCommand(g.id, 'turn_on')}>All on</Button><Button size="sm" variant="secondary" onclick={() => home.groupCommand(g.id, 'turn_off')}>All off</Button>{/snippet}</Row>
+						{/each}</Group>
+					</Section>
+				{/if}
+
+				{#if !viewport.wide}
+					<Insights />
+					{#if showSetup}{@render setup()}{/if}
+				{/if}
+			{/if}
 		{/if}
+	</div>
+
+	{#if home.loaded && viewport.wide}
+		<aside class="space-y-6 pt-1" aria-label="More">
+			{#if showSetup}{@render setup()}{/if}
+			{#if climate || meter || cameras.length}
+				<Group>
+					{#if climate}
+						<Row title={climate.name} description={climate.attrs.target != null ? `Set to ${climate.attrs.target}°` : climate.state}>
+							{#snippet icon()}<Thermometer class="size-[18px]" />{/snippet}
+							{#snippet trailing()}<span class="figure text-2xl">{climate!.reading ? climate!.reading.value : '—'}°</span>{/snippet}
+						</Row>
+					{/if}
+					{#if meter}
+						<Row title="Power right now" description={meter.name} tone="on" href="/activity?tab=energy">
+							{#snippet icon()}<Zap class="size-[18px]" />{/snippet}
+							{#snippet trailing()}<span class="figure text-2xl">{meter!.reading?.value} W</span>{/snippet}
+						</Row>
+					{/if}
+					{#if cameras.length}
+						<div class="grid grid-cols-2 gap-2 p-3">{#each cameras as c (c.id)}<button type="button" class="block overflow-hidden rounded-xl bg-muted" onclick={() => (filter = 'cameras')}><img src="/api/devices/{encodeURIComponent(c.id)}/snapshot" alt="Latest picture from {c.name}" class="aspect-video w-full object-cover" loading="lazy" /></button>{/each}</div>
+					{/if}
+				</Group>
+			{/if}
+			<Insights />
+		</aside>
 	{/if}
 </main>

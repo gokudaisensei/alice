@@ -4,7 +4,7 @@
 	import { api, explain } from '#lib/api.js';
 	import { session } from '#lib/session.svelte.js';
 	import { Button } from '#lib/components/ui/button';
-	import * as Card from '#lib/components/ui/card';
+	import { Fingerprint } from '@lucide/svelte';
 
 	let busy = $state(false);
 	let error = $state('');
@@ -25,13 +25,11 @@
 	}
 </script>
 
-<main class="mx-auto flex min-h-dvh max-w-sm items-center p-4">
-	<Card.Root class="w-full">
-		<Card.Header><Card.Title class="text-xl">Welcome home</Card.Title><Card.Description>Sign in with your passkey.</Card.Description></Card.Header>
-		<Card.Content class="space-y-3">
-			<Button class="w-full" onclick={signIn} disabled={busy}>{busy ? 'Waiting for passkey…' : 'Sign in'}</Button>
-			{#if error}<p role="alert" class="text-sm text-destructive">{error}</p>{/if}
-			<p class="text-sm text-muted-foreground">Have a setup or invite code? <a class="underline" href="/setup">Use it here</a>.</p>
-		</Card.Content>
-	</Card.Root>
+<main class="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-6 py-12">
+	<span class="mb-8 flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground" aria-hidden="true"><svg viewBox="0 0 24 24" class="size-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.2 12 4.5l8 6.7"/><path d="M6.2 10v9.5h11.6V10"/><path d="M10 19.5v-5h4v5"/></svg></span>
+	<h1 class="display">Welcome home.</h1>
+	<p class="mt-3 text-[0.9375rem] text-muted-foreground">Sign in with the passkey on this device. No password to remember.</p>
+	<Button size="lg" class="mt-8 w-full" onclick={signIn} disabled={busy}><Fingerprint />{busy ? 'Waiting for your passkey…' : 'Sign in with passkey'}</Button>
+	{#if error}<p role="alert" class="mt-3 rounded-xl bg-signal-soft px-3 py-2 text-sm text-signal-foreground">{error}</p>{/if}
+	<p class="mt-8 text-sm text-muted-foreground">Have an invite or setup code? <a class="font-medium text-primary underline-offset-2 hover:underline" href="/setup">Use it here</a></p>
 </main>

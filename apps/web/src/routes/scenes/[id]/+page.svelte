@@ -6,7 +6,9 @@
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
 	import { Label } from '#lib/components/ui/label';
-	import * as Card from '#lib/components/ui/card';
+	import Page from '#lib/components/app/Page.svelte';
+	import Section from '#lib/components/app/Section.svelte';
+	import Group from '#lib/components/app/Group.svelte';
 
 	const id = $derived(decodeURIComponent(page.params.id ?? 'new'));
 	const existing = $derived(id === 'new' ? undefined : home.scenes.find((s) => s.id === id));
@@ -27,33 +29,32 @@
 		saving = false;
 		if (!r.ok) { error = r.data?.message ?? explain(r.data?.error); return; }
 		await home.load();
-		goto('/scenes');
+		goto('/routines?tab=scenes');
 	}
 	async function remove() {
 		if (!confirm(`Delete “${name}”? This can’t be undone.`)) return;
 		const r = await api('DELETE', `/api/scenes/${encodeURIComponent(id)}`);
 		if (!r.ok) { error = r.data?.message ?? explain(r.data?.error); return; }
 		await home.load();
-		goto('/scenes');
+		goto('/routines?tab=scenes');
 	}
 </script>
 
-<main class="mx-auto max-w-2xl space-y-4 p-4">
-	<a href="/scenes" class="text-sm text-muted-foreground underline">← Scenes & routines</a>
-	<h1 class="text-2xl font-semibold">{id === 'new' ? 'New scene' : 'Edit scene'}</h1>
-	<p class="text-sm text-muted-foreground">Set your devices up the way you want them, tick them below, and save. The scene remembers how each one is <em>right now</em>{id !== 'new' ? ' (saving again updates it)' : ''}.</p>
-	<div class="space-y-1"><Label for="n">Name</Label><Input id="n" bind:value={name} maxlength={60} placeholder="e.g. Movie night" /></div>
-	<Card.Root><Card.Content class="divide-y p-0">
-		{#each choices as d (d.id)}
-			<label class="flex items-center justify-between p-4 {d.available ? '' : 'opacity-50'}">
-				<span>{d.name} <span class="text-sm text-muted-foreground">· {d.available ? (d.state === 'on' ? 'on now' : 'off now') : 'offline'}</span></span>
-				<input type="checkbox" class="size-5" bind:group={picked} value={d.id} disabled={!d.available} />
-			</label>
-		{:else}<p class="p-4 text-sm text-muted-foreground">No lights, switches or fans are available.</p>{/each}
-	</Card.Content></Card.Root>
-	{#if error}<p role="alert" class="text-sm text-destructive">{error}</p>{/if}
+<Page title={id === 'new' ? 'New scene' : 'Edit scene'} subtitle="Set your devices the way you want them, tick them below, and save. The scene remembers how each one is right now." back={{ href: '/routines?tab=scenes', label: 'Routines' }} width="md">
+	<div class="space-y-1.5"><Label for="n">Name</Label><Input id="n" bind:value={name} maxlength={60} placeholder="e.g. Movie night" /></div>
+	<Section title="Devices">
+		<Group>
+			{#each choices as d (d.id)}
+				<label class="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/60 {d.available ? '' : 'opacity-50'}">
+					<span class="min-w-0 flex-1"><span class="block truncate text-[0.9375rem] font-medium">{d.name}</span><span class="text-sm text-muted-foreground">{d.available ? (d.state === 'on' ? 'On now' : 'Off now') : 'Offline'}</span></span>
+					<input type="checkbox" class="size-5 accent-[var(--primary)]" bind:group={picked} value={d.id} disabled={!d.available} />
+				</label>
+			{:else}<p class="p-4 text-sm text-muted-foreground">No lights, switches or fans are available.</p>{/each}
+		</Group>
+	</Section>
+	{#if error}<p role="alert" class="text-sm text-signal">{error}</p>{/if}
 	<div class="flex gap-2">
 		<Button onclick={save} disabled={saving || !name.trim() || !picked.length}>{saving ? 'Saving…' : id === 'new' ? 'Save scene' : 'Save current state'}</Button>
-		{#if id !== 'new'}<Button variant="outline" onclick={remove}>Delete</Button>{/if}
+		{#if id !== 'new'}<Button variant="destructive" onclick={remove}>Delete</Button>{/if}
 	</div>
-</main>
+</Page>

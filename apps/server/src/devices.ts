@@ -88,6 +88,7 @@ export function createDeviceService(db: Database, ha: HaApi) {
     // Asking for what is already true (turn on a light that is on) produces no state change in Home Assistant. That is confirmed too.
     const want: Record<string, string> = { turn_on: "on", turn_off: "off", lock: "locked", unlock: "unlocked" };
     if (!confirmed && now && want[call.service] === now.state && entity.state === now.state && ["light", "switch", "fan", "lock"].includes(call.domain)) confirmed = true;
+    db.query("INSERT INTO device_usage (user_id, entity_id, count, last_used) VALUES (?,?,1,?) ON CONFLICT(user_id, entity_id) DO UPDATE SET count = count + 1, last_used = excluded.last_used").run(u.id, id, Date.now());
     return { status: 200, body: { ok: true, confirmed, device: now ? viewOf(now, meta(u.householdId).get(id)) : view } };
   }
 
@@ -166,6 +167,17 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
       const matches = (d: DeviceView) => d.name.toLowerCase().includes(q) || (!!d.roomId && !!roomName.get(d.roomId)?.includes(q)) || words[d.category].split(" ").some((w) => w.startsWith(q));
       const devices = svc.visibleDevices(g.user).filter(matches).slice(0, 20);
       return { devices: devices.map((d) => ({ id: d.id, name: d.name, category: d.category, roomId: d.roomId })), rooms: rooms.filter((r) => String(r.name).toLowerCase().includes(q)).slice(0, 10), ...extraSearch(g.user, q) };
+    })
+    // Today's story for one device: state changes over the last day, thinned out to a size a phone can draw.
+    .get("/api/devices/:id/history", async ({ request, params, set }: any) => {
+      const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
+      const dev = svc.deviceFor(g.user, params.id);
+      if (!dev) return deny(set, 404, "not_found");
+      const pts = ha.history ? await ha.history(params.id, 24) : null;
+      if (!pts) return deny(set, 503, "ha_unavailable");
+      const numeric = pts.length > 0 && pts.every((p) => Number.isFinite(Number(p.state)));
+      const step = Math.max(1, Math.ceil(pts.length / 200));
+      return { kind: numeric ? "numeric" : "state", points: pts.filter((_, i) => i % step === 0 || i === pts.length - 1), now: Date.now() };
     })
     .get("/api/stream", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);

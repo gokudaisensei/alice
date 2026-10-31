@@ -9,8 +9,11 @@
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
 	import { Label } from '#lib/components/ui/label';
-	import * as Card from '#lib/components/ui/card';
+	import Page from '#lib/components/app/Page.svelte';
+	import { Trash2 } from '@lucide/svelte';
 	import StepsEditor from '#lib/components/app/StepsEditor.svelte';
+	import Collapse from '#lib/components/app/Collapse.svelte';
+	import { ChevronDown } from '@lucide/svelte';
 
 	const id = $derived(page.params.id ?? 'new');
 	let name = $state('');
@@ -26,7 +29,7 @@
 	const unitOf = (eid: string) => home.byId(eid)?.reading?.unit ?? '';
 	const num = (v: string) => (v === '' ? undefined : Number(v));
 	const FOR = [[0, 'right away'], [60, 'for 1 minute'], [300, 'for 5 minutes'], [900, 'for 15 minutes'], [1800, 'for 30 minutes'], [3600, 'for 1 hour']] as const;
-	const sel = 'h-9 rounded-md border bg-background px-2 text-sm';
+	const sel = 'field';
 
 	onMount(async () => {
 		if (!home.loaded) await home.load();
@@ -65,6 +68,9 @@
 		return () => clearTimeout(t);
 	});
 	let previewError = $state('');
+	let openWhen = $state(true), openOnly = $state(false), openThen = $state(true);
+	// A problem is never hidden inside a folded section.
+	$effect(() => { if (problem?.where === 'trigger') openWhen = true; else if (problem?.where === 'condition') openOnly = true; else if (problem?.where === 'action') openThen = true; });
 
 	const addTrigger = (t: Trigger) => triggers.push(t);
 	const addCondition = (c: Condition) => conditions.push(c);
@@ -78,26 +84,28 @@
 		const r = id === 'new' ? await api('POST', '/api/automations', payload) : await api('PUT', `/api/automations/${id}`, payload);
 		saving = false;
 		if (!r.ok) { problem = r.data?.where ? { where: r.data.where, index: r.data.index } : null; error = r.data?.message ?? explain(r.data?.error); return; }
-		goto('/automations');
+		goto('/routines?tab=automations');
 	}
 	async function remove() {
 		if (!confirm(`Delete “${name}”?`)) return;
 		const r = await api('DELETE', `/api/automations/${id}`);
 		if (!r.ok) { error = r.data?.message ?? explain(r.data?.error); return; }
-		goto('/automations');
+		goto('/routines?tab=automations');
 	}
 </script>
 
-<main class="mx-auto max-w-2xl space-y-6 p-4">
-	<a href="/automations" class="text-sm text-muted-foreground underline">← Automations</a>
-	<h1 class="text-2xl font-semibold">{id === 'new' ? 'New automation' : 'Edit automation'}</h1>
+<Page title={id === 'new' ? 'New automation' : 'Edit automation'} subtitle="Choose what starts it, what has to be true, and what happens. It runs on your home hub." back={{ href: '/routines?tab=automations', label: 'Routines' }} width="md">
 
-	<div class="space-y-1"><Label for="n">Name</Label><Input id="n" bind:value={name} maxlength={60} placeholder="e.g. Evening lights" /></div>
+	<div class="space-y-1.5"><Label for="n">Name</Label><Input id="n" bind:value={name} maxlength={60} placeholder="e.g. Evening lights" /></div>
 
-	<section aria-labelledby="when" class="space-y-2">
-		<h2 id="when" class="text-sm font-medium uppercase text-muted-foreground">When any of these happens</h2>
+	<section aria-labelledby="when" class="space-y-3">
+		<button type="button" class="flex w-full items-center gap-3 text-left" aria-expanded={openWhen} onclick={() => (openWhen = !openWhen)}>
+			<span class="min-w-0 flex-1"><span id="when" class="heading block">When any of these happens</span><span class="text-sm text-muted-foreground">{triggers.length ? `${triggers.length} trigger${triggers.length === 1 ? '' : 's'}` : 'Choose what starts it'}</span></span>
+			<ChevronDown class="size-4 text-muted-foreground transition-transform duration-300 {openWhen ? 'rotate-180' : ''}" />
+		</button>
+		<Collapse open={openWhen}><div class="space-y-3 pt-1">
 		{#each triggers as t, i}
-			<Card.Root class="gap-0 py-0 {bad('trigger', i) ? 'border-destructive' : ''}"><div class="flex flex-wrap items-center gap-2 p-3">
+			<div class="rounded-2xl border bg-card {bad('trigger', i) ? 'border-signal ring-2 ring-signal/20' : ''}"><div class="flex flex-wrap items-center gap-2 p-3">
 				{#if t.type === 'device_state'}
 					<select class="{sel} min-w-36 flex-1" aria-label="Device for trigger {i + 1}" value={t.entityId} onchange={(e) => { t.entityId = e.currentTarget.value; t.to = statesFor(home.byId(t.entityId)!)[0]; }}>{#each withState as d}<option value={d.id}>{d.name}</option>{/each}</select>
 					<span class="text-sm">turns</span>
@@ -117,24 +125,28 @@
 					<span class="text-sm">The household mode changes to</span>
 					<select class="{sel} capitalize" aria-label="Mode for trigger {i + 1}" bind:value={t.mode}>{#each home.mode?.modes ?? [] as m}<option value={m}>{m}</option>{/each}</select>
 				{/if}
-				<Button size="sm" variant="ghost" class="ml-auto" aria-label="Remove trigger {i + 1}" onclick={() => triggers.splice(i, 1)}>Remove</Button>
-			</div></Card.Root>
+				<Button size="icon-sm" variant="ghost" class="ml-auto" aria-label="Remove trigger {i + 1}" onclick={() => triggers.splice(i, 1)}><Trash2 /></Button>
+			</div></div>
 		{:else}
-			<p class="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">Choose what should start it.</p>
+			<p class="rounded-2xl border border-dashed p-5 text-center text-sm text-muted-foreground">Choose what should start it.</p>
 		{/each}
 		<div class="flex flex-wrap gap-2" role="group" aria-label="Add a trigger">
-			<Button size="sm" variant="outline" disabled={!withState.length} onclick={() => firstWith() && addTrigger({ type: 'device_state', entityId: firstWith().id, to: statesFor(firstWith())[0] })}>+ A device changes</Button>
-			<Button size="sm" variant="outline" disabled={!sensors.length} onclick={() => addTrigger({ type: 'sensor', entityId: sensors[0].id, above: 0 })}>+ A sensor reading</Button>
-			<Button size="sm" variant="outline" onclick={() => addTrigger({ type: 'time', at: '07:00' })}>+ A time</Button>
-			<Button size="sm" variant="outline" onclick={() => addTrigger({ type: 'sun', event: 'sunset' })}>+ Sunrise or sunset</Button>
-			<Button size="sm" variant="outline" onclick={() => addTrigger({ type: 'mode', mode: 'away' })}>+ A household mode</Button>
+			<Button size="sm" variant="secondary" disabled={!withState.length} onclick={() => firstWith() && addTrigger({ type: 'device_state', entityId: firstWith().id, to: statesFor(firstWith())[0] })}>+ A device changes</Button>
+			<Button size="sm" variant="secondary" disabled={!sensors.length} onclick={() => addTrigger({ type: 'sensor', entityId: sensors[0].id, above: 0 })}>+ A sensor reading</Button>
+			<Button size="sm" variant="secondary" onclick={() => addTrigger({ type: 'time', at: '07:00' })}>+ A time</Button>
+			<Button size="sm" variant="secondary" onclick={() => addTrigger({ type: 'sun', event: 'sunset' })}>+ Sunrise or sunset</Button>
+			<Button size="sm" variant="secondary" onclick={() => addTrigger({ type: 'mode', mode: 'away' })}>+ A household mode</Button>
 		</div>
-	</section>
+	</div></Collapse></section>
 
-	<section aria-labelledby="only" class="space-y-2">
-		<h2 id="only" class="text-sm font-medium uppercase text-muted-foreground">Only if all of these are true (optional)</h2>
+	<section aria-labelledby="only" class="space-y-3">
+		<button type="button" class="flex w-full items-center gap-3 text-left" aria-expanded={openOnly} onclick={() => (openOnly = !openOnly)}>
+			<span class="min-w-0 flex-1"><span id="only" class="heading block">Only if all of these are true</span><span class="text-sm text-muted-foreground">{conditions.length ? `${conditions.length} condition${conditions.length === 1 ? '' : 's'}` : 'Optional. Add a limit, like a time or a mode'}</span></span>
+			<ChevronDown class="size-4 text-muted-foreground transition-transform duration-300 {openOnly ? 'rotate-180' : ''}" />
+		</button>
+		<Collapse open={openOnly}><div class="space-y-3 pt-1">
 		{#each conditions as c, i}
-			<Card.Root class="gap-0 py-0 {bad('condition', i) ? 'border-destructive' : ''}"><div class="flex flex-wrap items-center gap-2 p-3">
+			<div class="rounded-2xl border bg-card {bad('condition', i) ? 'border-signal ring-2 ring-signal/20' : ''}"><div class="flex flex-wrap items-center gap-2 p-3">
 				{#if c.type === 'device_state'}
 					<select class="{sel} min-w-36 flex-1" aria-label="Device for condition {i + 1}" value={c.entityId} onchange={(e) => { c.entityId = e.currentTarget.value; c.is = statesFor(home.byId(c.entityId)!)[0]; }}>{#each withState as d}<option value={d.id}>{d.name}</option>{/each}</select>
 					<span class="text-sm">is</span>
@@ -152,31 +164,37 @@
 					<span class="text-sm">Only on</span>
 					<span class="flex flex-wrap gap-1" role="group" aria-label="Days for condition {i + 1}">{#each DAYS as [d, l]}<Button size="sm" variant={dayOn(c, d) ? 'secondary' : 'outline'} aria-pressed={dayOn(c, d)} onclick={() => flip(c, d)}>{l}</Button>{/each}</span>
 				{/if}
-				<Button size="sm" variant="ghost" class="ml-auto" aria-label="Remove condition {i + 1}" onclick={() => conditions.splice(i, 1)}>Remove</Button>
-			</div></Card.Root>
+				<Button size="icon-sm" variant="ghost" class="ml-auto" aria-label="Remove condition {i + 1}" onclick={() => conditions.splice(i, 1)}><Trash2 /></Button>
+			</div></div>
 		{/each}
 		<div class="flex flex-wrap gap-2" role="group" aria-label="Add a condition">
-			<Button size="sm" variant="outline" disabled={!withState.length} onclick={() => firstWith() && addCondition({ type: 'device_state', entityId: firstWith().id, is: statesFor(firstWith())[0] })}>+ A device is</Button>
-			<Button size="sm" variant="outline" disabled={!sensors.length} onclick={() => addCondition({ type: 'sensor', entityId: sensors[0].id, above: 0 })}>+ A sensor reading</Button>
-			<Button size="sm" variant="outline" onclick={() => addCondition({ type: 'time', after: '18:00', before: '23:00' })}>+ Time of day</Button>
-			<Button size="sm" variant="outline" onclick={() => addCondition({ type: 'mode', mode: 'home' })}>+ Household mode</Button>
-			<Button size="sm" variant="outline" disabled={conditions.some((c) => c.type === 'days')} onclick={() => addCondition({ type: 'days', days: ['mon', 'tue', 'wed', 'thu', 'fri'] })}>+ Days of the week</Button>
+			<Button size="sm" variant="secondary" disabled={!withState.length} onclick={() => firstWith() && addCondition({ type: 'device_state', entityId: firstWith().id, is: statesFor(firstWith())[0] })}>+ A device is</Button>
+			<Button size="sm" variant="secondary" disabled={!sensors.length} onclick={() => addCondition({ type: 'sensor', entityId: sensors[0].id, above: 0 })}>+ A sensor reading</Button>
+			<Button size="sm" variant="secondary" onclick={() => addCondition({ type: 'time', after: '18:00', before: '23:00' })}>+ Time of day</Button>
+			<Button size="sm" variant="secondary" onclick={() => addCondition({ type: 'mode', mode: 'home' })}>+ Household mode</Button>
+			<Button size="sm" variant="secondary" disabled={conditions.some((c) => c.type === 'days')} onclick={() => addCondition({ type: 'days', days: ['mon', 'tue', 'wed', 'thu', 'fri'] })}>+ Days of the week</Button>
 		</div>
-	</section>
+	</div></Collapse></section>
 
-	<section aria-labelledby="then" class="space-y-2">
-		<h2 id="then" class="text-sm font-medium uppercase text-muted-foreground">Then do this, in order</h2>
+	<section aria-labelledby="then" class="space-y-3">
+		<button type="button" class="flex w-full items-center gap-3 text-left" aria-expanded={openThen} onclick={() => (openThen = !openThen)}>
+			<span class="min-w-0 flex-1"><span id="then" class="heading block">Then do this, in order</span><span class="text-sm text-muted-foreground">{actions.length ? `${actions.length} step${actions.length === 1 ? '' : 's'}` : 'Choose what happens'}</span></span>
+			<ChevronDown class="size-4 text-muted-foreground transition-transform duration-300 {openThen ? 'rotate-180' : ''}" />
+		</button>
+		<Collapse open={openThen}><div class="space-y-3 pt-1">
 		<StepsEditor bind:steps={actions} failed={problem?.where === 'action' ? problem.index : null} />
-	</section>
+	</div></Collapse></section>
 
-	{#if preview}
-		<Card.Root class="gap-0 py-0"><div class="p-4"><h2 class="mb-1 text-sm font-medium">In plain words</h2><p class="text-sm text-muted-foreground" data-testid="summary">{preview}</p></div></Card.Root>
-	{:else if previewError}<p role="alert" class="text-sm text-destructive">{previewError}</p>{/if}
-
-	<p class="text-xs text-muted-foreground">Once saved, your home hub runs this on its own. Doors are never unlocked by an automation.</p>
-	{#if error}<p role="alert" class="text-sm text-destructive">{error}</p>{/if}
-	<div class="flex gap-2">
-		<Button onclick={save} disabled={saving || !name.trim() || !triggers.length || !actions.length}>{saving ? 'Saving…' : 'Save automation'}</Button>
-		{#if id !== 'new'}<Button variant="outline" onclick={remove}>Delete</Button>{/if}
+	<div class="h-24 md:hidden"></div>
+	<div class="fixed inset-x-0 bottom-[calc(3.25rem+env(safe-area-inset-bottom))] z-20 space-y-2.5 border-t bg-background/95 px-5 py-3 backdrop-blur-xl md:sticky md:bottom-4 md:rounded-2xl md:border md:bg-card/95 md:px-4 md:shadow-sm">
+		{#if preview}<p class="line-clamp-3 text-sm leading-snug md:line-clamp-none md:text-[0.9375rem]" data-testid="summary"><span class="font-semibold">In plain words: </span>{preview}</p>
+		{:else if previewError}<p role="alert" class="text-sm text-signal">{previewError}</p>
+		{:else}<p class="text-sm text-muted-foreground">Add a trigger and a step to see what this will do.</p>{/if}
+		{#if error}<p role="alert" class="text-sm text-signal">{error}</p>{/if}
+		<div class="flex items-center gap-2">
+			<Button class="flex-1 md:flex-none" onclick={save} disabled={saving || !name.trim() || !triggers.length || !actions.length}>{saving ? 'Saving…' : 'Save automation'}</Button>
+			{#if id !== 'new'}<Button variant="destructive" onclick={remove}>Delete</Button>{/if}
+			<span class="ml-auto hidden text-sm text-muted-foreground md:inline">Your home hub runs this on its own. Doors are never unlocked by an automation.</span>
+		</div>
 	</div>
-</main>
+</Page>

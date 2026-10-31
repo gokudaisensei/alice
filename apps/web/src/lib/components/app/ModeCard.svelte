@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { home } from '#lib/home.svelte.js';
 	import { Button } from '#lib/components/ui/button';
-	import * as Card from '#lib/components/ui/card';
 	import { House, DoorOpen, Moon, Plane } from '@lucide/svelte';
 
 	const icons: Record<string, any> = { home: House, away: DoorOpen, night: Moon, vacation: Plane };
@@ -10,34 +9,31 @@
 </script>
 
 {#if m}
-	<Card.Root class="gap-0 py-0" aria-labelledby="mode-h">
-		<div class="space-y-3 p-4">
-			<div class="flex items-baseline justify-between">
-				<h2 id="mode-h" class="text-sm font-medium uppercase text-muted-foreground">Household mode</h2>
-				{#if m.current}<span class="text-sm text-muted-foreground">Now: <strong class="text-foreground">{label(m.current)}</strong></span>{/if}
-			</div>
-			{#if m.available}
-				<div class="grid grid-cols-4 gap-2" role="group" aria-label="Household mode">
-					{#each m.modes as mode}
-						{@const Icon = icons[mode]}
-						<Button variant={m.current === mode ? 'default' : 'outline'} class="h-auto flex-col gap-1 py-2" disabled={!m.canSet} aria-pressed={m.current === mode} onclick={() => home.setMode(mode)}>
-							<Icon class="size-5" aria-hidden="true" /><span class="text-xs">{label(mode)}</span>
-						</Button>
-					{/each}
-				</div>
-				{#if m.current && m.linkedRoutines[m.current]?.length}
-					<p class="text-sm text-muted-foreground">Connected routines: {m.linkedRoutines[m.current].join(', ')}</p>
-				{/if}
-				<p class="text-xs text-muted-foreground">{m.note}</p>
-				{#if m.suggestion && m.canSet}
-					<div class="flex items-center justify-between gap-2 rounded-md border border-dashed p-3 text-sm">
-						<span>{m.suggestion.reason} Switch to {label(m.suggestion.mode)}?</span>
-						<Button size="sm" variant="secondary" onclick={() => home.setMode(m.suggestion!.mode)}>Switch</Button>
-					</div>
-				{/if}
-			{:else}
-				<p class="text-sm text-muted-foreground">Household modes aren’t available right now.</p>
-			{/if}
+	<section aria-labelledby="mode-h" class="space-y-3">
+		<div class="hidden items-baseline justify-between gap-3 sm:flex">
+			<h2 id="mode-h" class="heading">Mode</h2>
+			{#if m.current && m.linkedRoutines[m.current]?.length}<span class="truncate text-sm text-muted-foreground">Runs {m.linkedRoutines[m.current].join(', ')}</span>{/if}
 		</div>
-	</Card.Root>
+		{#if m.available}
+			<div class="grid grid-cols-4 gap-1 rounded-2xl bg-secondary p-1" role="group" aria-label="Household mode">
+				{#each m.modes as mode}
+					{@const Icon = icons[mode]}
+					{@const active = m.current === mode}
+					<button type="button" disabled={!m.canSet} aria-pressed={active} onclick={() => home.setMode(mode)}
+						class="flex h-12 flex-col items-center justify-center gap-0.5 rounded-xl sm:h-14 text-[0.8125rem] font-medium transition-all duration-200 disabled:opacity-50 {active ? 'bg-card text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.12)]' : 'text-muted-foreground hover:text-foreground'}">
+						<Icon class="size-[18px] {active ? 'text-primary' : ''}" aria-hidden="true" />{label(mode)}
+					</button>
+				{/each}
+			</div>
+			<p class="hidden text-sm text-muted-foreground sm:block">{m.note}</p>
+			{#if m.suggestion && m.canSet}
+				<div class="flex items-center justify-between gap-3 rounded-2xl bg-accent px-4 py-3 text-sm">
+					<span>{m.suggestion.reason} Switch to {label(m.suggestion.mode)}?</span>
+					<Button size="sm" onclick={() => home.setMode(m.suggestion!.mode)}>Switch</Button>
+				</div>
+			{/if}
+		{:else}
+			<p class="rounded-2xl border border-dashed px-4 py-3 text-sm text-muted-foreground">Household modes aren’t available right now.</p>
+		{/if}
+	</section>
 {/if}

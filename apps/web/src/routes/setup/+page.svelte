@@ -6,9 +6,10 @@
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
 	import { Label } from '#lib/components/ui/label';
-	import * as Card from '#lib/components/ui/card';
+	import { page } from '$app/state';
+	import { Fingerprint } from '@lucide/svelte';
 
-	let code = $state('');
+	let code = $state(page.url.searchParams.get('code') ?? '');
 	let name = $state('');
 	let busy = $state(false);
 	let error = $state('');
@@ -30,16 +31,15 @@
 	}
 </script>
 
-<main class="mx-auto flex min-h-dvh max-w-sm items-center p-4">
-	<Card.Root class="w-full">
-		<Card.Header><Card.Title class="text-xl">Set up your passkey</Card.Title><Card.Description>Enter the code you were given. Your name is only used for a first-time setup.</Card.Description></Card.Header>
-		<Card.Content>
-			<form class="space-y-3" onsubmit={enroll}>
-				<div class="space-y-1"><Label for="code">Code</Label><Input id="code" bind:value={code} autocomplete="one-time-code" required /></div>
-				<div class="space-y-1"><Label for="name">Your name</Label><Input id="name" bind:value={name} autocomplete="name" /></div>
-				<Button type="submit" class="w-full" disabled={busy}>{busy ? 'Waiting for passkey…' : 'Create passkey'}</Button>
-				{#if error}<p role="alert" class="text-sm text-destructive">{error}</p>{/if}
-			</form>
-		</Card.Content>
-	</Card.Root>
+<main class="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center px-6 py-12">
+	<span class="mb-8 flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground" aria-hidden="true"><Fingerprint class="size-6" /></span>
+	<h1 class="display">Set up your passkey.</h1>
+	<p class="mt-3 text-[0.9375rem] text-muted-foreground">Your passkey is how you'll sign in on this device: a fingerprint, face or PIN, never a password.</p>
+	<form class="mt-8 space-y-4" onsubmit={enroll}>
+		<div class="space-y-1.5"><Label for="code">Code</Label><Input id="code" bind:value={code} autocomplete="one-time-code" required /></div>
+		<div class="space-y-1.5"><Label for="name">Your name</Label><Input id="name" bind:value={name} autocomplete="name" /><p class="text-sm text-muted-foreground">Only needed the very first time the home is set up.</p></div>
+		<Button type="submit" size="lg" class="w-full" disabled={busy}>{busy ? 'Waiting for your passkey…' : 'Create passkey'}</Button>
+		{#if error}<p role="alert" class="rounded-xl bg-signal-soft px-3 py-2 text-sm text-signal-foreground">{error}</p>{/if}
+	</form>
+	<p class="mt-8 text-sm text-muted-foreground">Already have a passkey? <a class="font-medium text-primary underline-offset-2 hover:underline" href="/login">Sign in</a></p>
 </main>

@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { api, explain, sensitive } from '#lib/api.js';
-	import { Badge } from '#lib/components/ui/badge';
-	import * as Card from '#lib/components/ui/card';
+	import Page from '#lib/components/app/Page.svelte';
+	import Group from '#lib/components/app/Group.svelte';
+	import { Switch } from '#lib/components/ui/switch';
 
 	type Item = { id: string; name: string; kind: 'device' | 'scene' | 'routine'; enabled: boolean };
 	let items = $state<Item[]>([]), cloud = $state<{ loggedIn: boolean } | null | undefined>(undefined), msg = $state(''), busy = $state<Record<string, boolean>>({});
@@ -18,18 +19,17 @@
 	const KIND = { device: 'Device', scene: 'Scene', routine: 'Routine' } as const;
 </script>
 
-<main class="mx-auto max-w-2xl space-y-4 p-4">
-	<h1 class="text-2xl font-semibold">Voice control</h1>
-	<p class="text-sm text-muted-foreground">Choose what Alexa and Google Assistant may control. Nothing is on until you turn it on. Doors, locks and cameras can't be turned on for voice.</p>
-	<Card.Root class="gap-0 py-0"><div class="space-y-1 p-4 text-sm">
-		<p><strong>Good to know:</strong> voice commands go through Home Assistant Cloud and run on your home hub, so they don't check who is speaking and aren't recorded against a person. Only switch on things where that's fine.</p>
+<Page title="Voice control" subtitle="Choose what Alexa and Google Assistant may control. Nothing is on until you turn it on. Doors, locks and cameras can't be turned on for voice." width="md">
+	<div class="space-y-1.5 rounded-2xl bg-secondary p-4 text-sm leading-relaxed">
+		<p><span class="font-semibold">Good to know.</span> Voice commands go through Home Assistant Cloud and run on your home hub, so they don't check who is speaking and aren't recorded against a person. Only turn on things where that's fine.</p>
 		<p class="text-muted-foreground">Voice needs the internet. If it's down, voice stops; the app and your automations keep working.</p>
-		{#if cloud === null}<p class="text-destructive">Couldn't check the Home Assistant Cloud link.</p>{:else if cloud && !cloud.loggedIn}<p class="text-destructive">Home Assistant Cloud isn't linked on this home yet. Our support team sets that up.</p>{/if}
-	</div></Card.Root>
-	{#if msg}<p role="alert" class="text-sm text-destructive">{msg}</p>{/if}
-	<ul class="space-y-1">
+		{#if cloud === null}<p class="text-signal">Couldn't check the Home Assistant Cloud link.</p>{:else if cloud && !cloud.loggedIn}<p class="text-signal">Home Assistant Cloud isn't linked on this home yet. Our support team sets that up.</p>{/if}
+	</div>
+	{#if msg}<p role="alert" class="text-sm text-signal">{msg}</p>{/if}
+	<Group>
 		{#each items as i (i.id)}
-			<li class="flex items-center justify-between gap-2 rounded-md border p-2"><label class="flex min-w-0 items-center gap-2"><input type="checkbox" class="size-4" checked={i.enabled} disabled={!!busy[i.id]} onchange={(e) => set(i, e.currentTarget.checked)} /><span class="truncate">{i.name}</span></label><Badge variant="outline">{KIND[i.kind]}</Badge></li>
-		{:else}<li class="text-sm text-muted-foreground">Nothing to choose from yet.</li>{/each}
-	</ul>
-</main>
+			<label class="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/60"><span class="min-w-0 flex-1"><span class="block truncate text-[0.9375rem] font-medium">{i.name}</span><span class="text-sm text-muted-foreground">{KIND[i.kind]}</span></span>
+				<Switch checked={i.enabled} disabled={!!busy[i.id]} onCheckedChange={(v) => set(i, v)} aria-label="Voice control for {i.name}" /></label>
+		{:else}<p class="p-4 text-sm text-muted-foreground">Nothing to choose from yet.</p>{/each}
+	</Group>
+</Page>

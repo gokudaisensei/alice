@@ -4,7 +4,8 @@
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
 	import { Badge } from '#lib/components/ui/badge';
-	import * as Card from '#lib/components/ui/card';
+	import Page from '#lib/components/app/Page.svelte';
+	import Section from '#lib/components/app/Section.svelte';
 
 	type Check = { id: string; label: string; status: 'ok' | 'warn' | 'fail'; detail: string; advice?: string };
 	type Backup = { id: string; createdAt: number; kind: string; size: number; level: 'failed' | 'integrity_checked' | 'restore_tested'; offDevice: boolean; copies: { name: string; local: boolean; state: string }[]; restoreTest: { at: number; ok: boolean; detail: string } | null };
@@ -22,7 +23,7 @@
 	}
 	onMount(load);
 	const fail = (r: { data: any }) => (msg = r.data?.message ?? explain(r.data?.error));
-	const dot = { ok: 'bg-green-500', warn: 'bg-amber-500', fail: 'bg-destructive' } as const;
+	const dot = { ok: 'bg-ok', warn: 'bg-on', fail: 'bg-signal' } as const;
 	const when = (ts: number) => new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 	const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
 	const LEVEL = { failed: 'Failed its check', integrity_checked: 'Checked · not test-restored', restore_tested: 'Restore tested' } as const;
@@ -49,21 +50,18 @@
 	const toggle = (s: string) => (scopes = scopes.includes(s) ? scopes.filter((x) => x !== s) : [...scopes, s]);
 </script>
 
-<main class="mx-auto max-w-3xl space-y-6 p-4">
-	<h1 class="text-2xl font-semibold">System</h1>
-	{#if msg}<p role="status" class="rounded-lg border p-3 text-sm">{msg}</p>{/if}
+<Page title="System" subtitle="Health, backups, updates and support access for your home." width="md">
+	{#if msg}<p role="status" class="rounded-2xl bg-accent px-4 py-3 text-sm">{msg}</p>{/if}
 
-	<Card.Root><Card.Header><Card.Title>Health</Card.Title>{#if health}<Card.Description>{health.overall === 'ok' ? 'Everything looks good.' : health.overall === 'warn' ? 'A few things need attention.' : 'Something needs attention now.'}</Card.Description>{/if}</Card.Header>
-		<Card.Content class="space-y-3">
+	<Section title="Health" hint={health ? (health.overall === 'ok' ? 'Everything looks good.' : health.overall === 'warn' ? 'A few things need attention.' : 'Something needs attention now.') : undefined}><div class="space-y-4 rounded-2xl border bg-card p-4">
 			{#each health?.checks ?? [] as c}
 				<div class="flex gap-3"><span class="mt-1.5 size-2.5 shrink-0 rounded-full {dot[c.status]}" aria-hidden="true"></span>
 					<div><p class="font-medium">{c.label} <span class="sr-only">{c.status}</span></p><p class="text-sm text-muted-foreground">{c.detail}</p>{#if c.advice}<p class="text-sm">{c.advice}</p>{/if}</div></div>
 			{/each}
 			{#if health}<p class="text-xs text-muted-foreground">Version {health.facts.version} · running {Math.round(health.facts.uptimeSeconds / 3600)} h · {health.facts.memoryMb} MB memory</p>{/if}
-		</Card.Content></Card.Root>
+		</div></Section>
 
-	<Card.Root><Card.Header><Card.Title>Backups</Card.Title><Card.Description>Encrypted copies of the app's data. The home hub's own settings are backed up separately.</Card.Description></Card.Header>
-		<Card.Content class="space-y-4">
+	<Section title="Backups" hint="Encrypted copies of the app's data. The home hub's own settings are backed up separately."><div class="space-y-4 rounded-2xl border bg-card p-4">
 			{#if bk && !bk.recipientSet}
 				<p class="text-sm">First, create a backup key. You'll download a file that is the only way to open a backup. <strong>Keep it somewhere other than this home device</strong>, such as a password manager or a printout.</p>
 				<Button disabled={busy} onclick={makeKey}>Create backup key</Button>
@@ -74,38 +72,36 @@
 			{/if}
 			{#if bk?.recipientSet}
 				<div class="space-y-1">{#each bk.destinations as d}
-					<p class="flex items-center gap-2 text-sm"><span class="size-2 rounded-full {d.writable ? 'bg-green-500' : 'bg-destructive'}"></span>{d.name}{d.local ? ' (this device only)' : ''}: {d.writable ? (d.freeBytes !== null ? `${mb(d.freeBytes)} free` : 'ready') : 'not available'}</p>
+					<p class="flex items-center gap-2 text-sm"><span class="size-2 rounded-full {d.writable ? 'bg-ok' : 'bg-signal'}"></span>{d.name}{d.local ? ' (this device only)' : ''}: {d.writable ? (d.freeBytes !== null ? `${mb(d.freeBytes)} free` : 'ready') : 'not available'}</p>
 				{/each}</div>
-				{#if !bk.destinations.some((d) => !d.local && d.writable)}<p class="text-sm text-destructive">No backup drive or network share is connected. A backup only on this device is lost if the device fails.</p>{/if}
+				{#if !bk.destinations.some((d) => !d.local && d.writable)}<p class="text-sm text-signal">No backup drive or network share is connected. A backup only on this device is lost if the device fails.</p>{/if}
 				<Button disabled={busy} onclick={backupNow}>Back up now</Button>
 				<ul class="space-y-2">{#each bk.backups.slice(0, 8) as b (b.id)}
-					<li class="space-y-1 rounded-lg border p-3"><div class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{when(b.createdAt)} <span class="text-sm font-normal text-muted-foreground">· {mb(b.size)} · {b.kind === 'auto' ? 'automatic' : 'manual'}</span></span><Badge variant={b.level === 'restore_tested' ? 'default' : 'outline'}>{LEVEL[b.level]}</Badge></div>
+					<li class="space-y-1 rounded-xl border p-3"><div class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{when(b.createdAt)} <span class="text-sm font-normal text-muted-foreground">· {mb(b.size)} · {b.kind === 'auto' ? 'automatic' : 'manual'}</span></span><Badge variant={b.level === 'restore_tested' ? 'default' : 'outline'}>{LEVEL[b.level]}</Badge></div>
 						<p class="text-xs text-muted-foreground">{b.copies.map((c) => `${c.name}: ${c.state === 'ok' ? 'intact' : c.state}`).join(' · ')}</p>
-						{#if b.restoreTest}<p class="text-xs {b.restoreTest.ok ? '' : 'text-destructive'}">{b.restoreTest.detail}</p>{/if}
-						<div class="flex gap-1"><Button size="sm" variant="outline" onclick={() => (testing = testing === b.id ? null : b.id)}>Test restore</Button><Button size="sm" variant="ghost" onclick={() => download(b)}>Download</Button></div>
+						{#if b.restoreTest}<p class="text-xs {b.restoreTest.ok ? '' : 'text-signal'}">{b.restoreTest.detail}</p>{/if}
+						<div class="flex gap-1"><Button size="sm" variant="secondary" onclick={() => (testing = testing === b.id ? null : b.id)}>Test restore</Button><Button size="sm" variant="ghost" onclick={() => download(b)}>Download</Button></div>
 						{#if testing === b.id}<div class="space-y-2 pt-1"><label class="text-sm" for="id-{b.id}">Paste your backup key. It's used once, here, and never stored.</label><Input id="id-{b.id}" type="password" autocomplete="off" bind:value={identity} placeholder="AGE-SECRET-KEY-…" /><Button size="sm" disabled={busy || !identity.trim()} onclick={() => restoreTest(b)}>Run test</Button></div>{/if}
 					</li>{:else}<li class="text-sm text-muted-foreground">No backups yet.</li>{/each}</ul>
 				<p class="text-xs text-muted-foreground">To restore for real after a failure, use the offline restore command in the recovery guide; it needs your key.</p>
 			{/if}
-		</Card.Content></Card.Root>
+		</div></Section>
 
-	<Card.Root><Card.Header><Card.Title>Updates</Card.Title><Card.Description>Updates are checked for the home device's signature before they are installed, and undone automatically if they don't start properly.</Card.Description></Card.Header>
-		<Card.Content class="space-y-3">
+	<Section title="Updates" hint="Updates are checked for the home device's signature before they are installed, and undone automatically if they don't start properly."><div class="space-y-4 rounded-2xl border bg-card p-4">
 			{#if upd && !upd.configured}<p class="text-sm text-muted-foreground">Updates on this device are installed by your support team.</p>
 			{:else if upd}
 				<p class="text-sm">You have version <strong>{upd.current}</strong>.{#if upd.state === 'applying'} An update is being installed right now.{/if}</p>
-				{#if upd.state === 'failed'}<p class="text-sm text-destructive">{upd.message}</p>{/if}
+				{#if upd.state === 'failed'}<p class="text-sm text-signal">{upd.message}</p>{/if}
 				{#if upd.available}
-					<div class="space-y-2 rounded-lg border p-3"><p class="font-medium">Version {upd.available.version} is ready</p>{#if upd.available.notes}<p class="text-sm text-muted-foreground">{upd.available.notes}</p>{/if}
+					<div class="space-y-2 rounded-xl border p-3"><p class="font-medium">Version {upd.available.version} is ready</p>{#if upd.available.notes}<p class="text-sm text-muted-foreground">{upd.available.notes}</p>{/if}
 						<p class="text-xs text-muted-foreground">Takes a few minutes. The app is unavailable meanwhile; your devices and automations keep running on the home hub. A safety copy of your data is made first.</p>
 						<Button disabled={busy || upd.state === 'applying'} onclick={install}>Install now</Button></div>
 				{:else if upd.state !== 'applying'}<p class="text-sm text-muted-foreground">You're up to date.{#if upd.lastCheckAt} Last checked {new Date(upd.lastCheckAt).toLocaleString()}.{/if}</p>{/if}
 				<p class="text-xs text-muted-foreground">Rarely, an urgent security fix may be installed without waiting for you. You'll always be told before it starts and after it finishes.</p>
 			{/if}
-		</Card.Content></Card.Root>
+		</div></Section>
 
-	<Card.Root><Card.Header><Card.Title>Support access</Card.Title><Card.Description>Our support team can only look at your home while you allow it. You can end it at any time.</Card.Description></Card.Header>
-		<Card.Content class="space-y-3">
+	<Section title="Support access" hint="Our support team can only look at your home while you allow it. You can end it at any time."><div class="space-y-4 rounded-2xl border bg-card p-4">
 			{#if sup?.active}
 				<p class="text-sm">Allowed until <strong>{when(sup.active.expiresAt)}</strong> for: {sup.active.scopes.map((s: string) => (s === 'diagnostics' ? 'health checks' : 'a read-only look at your setup')).join(' and ')}. {sup.active.connected ? `${sup.active.operatorName} is connected.` : 'Nobody has connected yet.'}</p>
 				<Button variant="destructive" onclick={revoke}>End support access now</Button>
@@ -116,5 +112,5 @@
 				<label class="flex items-center gap-2 text-sm">For <select class="h-9 rounded-md border bg-background px-2" bind:value={hours}>{#each [1, 4, 24, 72] as h}<option value={h}>{h} hour{h === 1 ? '' : 's'}</option>{/each}</select></label>
 				<Button disabled={busy || !scopes.length} onclick={grant}>Allow support access</Button>
 			{/if}
-		</Card.Content></Card.Root>
-</main>
+		</div></Section>
+</Page>

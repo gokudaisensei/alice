@@ -7,12 +7,17 @@
 	import { session } from '#lib/session.svelte.js';
 	import { api } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
+	import { chrome } from '#lib/chrome.svelte.js';
 	import { notifications } from '#lib/notifications.svelte.js';
+	import { tabs, manageNav, type NavItem } from '#lib/nav.js';
 	import Notice from '#lib/components/app/Notice.svelte';
 	import HubBanner from '#lib/components/app/HubBanner.svelte';
 	import SupportBanner from '#lib/components/app/SupportBanner.svelte';
 	import UpdateBanner from '#lib/components/app/UpdateBanner.svelte';
+	import CommandPalette from '#lib/components/app/CommandPalette.svelte';
+	import * as DropdownMenu from '#lib/components/ui/dropdown-menu';
 	import { Button } from '#lib/components/ui/button';
+	import { LogOut, Moon, Search, Settings, Sun, SunMoon } from '@lucide/svelte';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
@@ -22,72 +27,107 @@
 		await session.refresh();
 		if (!session.me && !publicPaths.includes(page.url.pathname) && !page.url.pathname.startsWith('/ops')) goto('/login');
 	});
+	$effect(() => { if (session.me) { home.load(); home.connect(); notifications.start(); } else { home.disconnect(); notifications.stop(); } });
 
-	// Live updates only while signed in; everything is torn down on sign-out.
-	$effect(() => {
-		if (session.me) { home.load(); home.connect(); notifications.start(); } else { home.disconnect(); notifications.stop(); }
-	});
-
-	// Light/dark: the user's own choice, defaulting to the device setting.
+	// Light/dark: the person's own choice, defaulting to the device setting.
 	$effect(() => {
 		const pref = home.prefs?.appearance ?? 'system';
 		const mq = matchMedia('(prefers-color-scheme: dark)');
-		const apply = () => document.documentElement.classList.toggle('dark', pref === 'dark' || (pref === 'system' && mq.matches));
-		apply();
-		mq.addEventListener('change', apply);
+		const apply = () => { const dark = pref === 'dark' || (pref === 'system' && mq.matches); document.documentElement.classList.toggle('dark', dark); document.documentElement.style.colorScheme = dark ? 'dark' : 'light'; };
+		apply(); mq.addEventListener('change', apply);
 		return () => mq.removeEventListener('change', apply);
 	});
 
-	const nav = $derived([
-		{ href: '/', label: 'Home' },
-		{ href: '/rooms', label: 'Rooms' },
-		{ href: '/devices', label: 'Devices' },
-		{ href: '/scenes', label: 'Scenes' },
-		...(session.can('automation.manage') ? [{ href: '/automations', label: 'Automations' }] : []),
-		...(home.devices.some((d) => d.category === 'energy') ? [{ href: '/energy', label: 'Energy' }] : []),
-		{ href: '/notifications', label: 'Alerts', badge: notifications.unread },
-		{ href: '/settings', label: 'Settings' }
-	]);
-	const adminNav = $derived([
-		{ href: '/admin/rooms', label: 'Rooms & devices', show: session.can('admin.access') && session.can('rooms.manage') },
-		{ href: '/admin/users', label: 'People', show: session.can('admin.access') && session.can('users.manage') },
-		{ href: '/admin/voice', label: 'Voice', show: session.can('admin.access') },
-		{ href: '/admin/system', label: 'System', show: session.can('admin.access') }
-	].filter((n) => n.show));
-	const here = (href: string) => (href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href));
+	const nav = $derived(tabs().map((n) => (n.href === '/activity' ? { ...n, badge: notifications.unread } : n)));
+	const manage = $derived(manageNav(session.can));
+	const path = $derived(page.url.pathname);
+	const here = (n: NavItem) => (n.href === '/' ? path === '/' : [n.href, ...(n.match ?? [])].some((h) => path === h || path.startsWith(h + '/')));
+	const initial = $derived((session.me?.displayName ?? '?').trim().charAt(0).toUpperCase());
+	const roleLabel = $derived(session.me?.role === 'admin' ? 'Admin' : session.me?.role === 'member' ? 'Member' : 'Guest');
 
-	async function logout() {
-		await api('POST', '/api/auth/logout');
-		session.me = null;
-		goto('/login');
-	}
+	async function logout() { await api('POST', '/api/auth/logout'); session.me = null; goto('/login'); }
+	function onKey(e: KeyboardEvent) { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && session.me) { e.preventDefault(); chrome.search = !chrome.search; } }
+	const setAppearance = (a: 'system' | 'light' | 'dark') => home.savePrefs({ appearance: a });
 </script>
 
-<svelte:head><link rel="icon" href={favicon} /><title>Home</title></svelte:head>
+<svelte:window onkeydown={onKey} />
+<svelte:head><link rel="icon" href={favicon} /><title>Home</title><meta name="theme-color" content="#f5f6f7" media="(prefers-color-scheme: light)" /><meta name="theme-color" content="#0b1013" media="(prefers-color-scheme: dark)" /></svelte:head>
+
+{#snippet mark()}
+	<span class="flex size-8 items-center justify-center rounded-[10px] bg-primary text-primary-foreground" aria-hidden="true">
+		<svg viewBox="0 0 24 24" class="size-[18px]" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.2 12 4.5l8 6.7"/><path d="M6.2 10v9.5h11.6V10"/><path d="M10 19.5v-5h4v5"/></svg>
+	</span>
+{/snippet}
+
+{#snippet navLink(n: NavItem)}
+	<a href={n.href} aria-current={here(n) ? 'page' : undefined}
+		class="group flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[0.9375rem] font-medium transition-colors {here(n) ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
+		<n.icon class="size-[18px] shrink-0 {here(n) ? 'text-primary' : ''}" />
+		<span class="flex-1 truncate">{n.label}</span>
+		{#if n.badge}<span class="min-w-5 rounded-full bg-primary px-1.5 text-center text-xs font-semibold text-primary-foreground" aria-label="{n.badge} unread">{n.badge}</span>{/if}
+	</a>
+{/snippet}
 
 {#if page.url.pathname.startsWith('/ops')}
 	{@render children()}
 {:else if session.me}
-	<div class="min-h-dvh md:grid md:grid-cols-[14rem_1fr]">
-		<aside class="hidden border-r p-4 md:flex md:flex-col md:gap-1">
-			<p class="mb-4 font-semibold">My Home</p>
-			{#each nav as n}
-				<Button variant={here(n.href) ? 'secondary' : 'ghost'} href={n.href} class="justify-start">{n.label}{#if n.badge}<span class="ml-auto rounded-full bg-primary px-1.5 text-xs text-primary-foreground" aria-label="{n.badge} unread">{n.badge}</span>{/if}</Button>
-			{/each}
-			{#if adminNav.length}
-				<p class="mt-4 px-3 text-xs font-medium uppercase text-muted-foreground">Manage</p>
-				{#each adminNav as n}
-					<Button variant={here(n.href) ? 'secondary' : 'ghost'} href={n.href} class="justify-start">{n.label}</Button>
-				{/each}
+	<div class="min-h-dvh md:grid md:grid-cols-[15.5rem_1fr]">
+		<aside class="sticky top-0 hidden h-dvh flex-col gap-1 border-r bg-raised px-3 py-4 md:flex">
+			<a href="/" class="mb-5 flex items-center gap-2.5 px-1.5">{@render mark()}<span class="text-[1.0625rem] font-semibold tracking-tight">Home</span></a>
+			<nav class="flex flex-col gap-0.5" aria-label="Main">{#each nav.slice(0, 4) as n (n.href)}{@render navLink(n)}{/each}</nav>
+			{#if manage.length}
+				<p class="mb-1 mt-6 px-2.5 text-xs font-medium text-muted-foreground">Manage</p>
+				<nav class="flex flex-col gap-0.5" aria-label="Manage">{#each manage as n (n.href)}{@render navLink(n)}{/each}</nav>
 			{/if}
-			<Button variant="ghost" class="mt-auto justify-start" onclick={logout}>Sign out</Button>
+			<div class="mt-auto">
+				<DropdownMenu.Root>
+					<DropdownMenu.Trigger class="flex w-full items-center gap-2.5 rounded-lg p-2 text-left transition-colors hover:bg-muted">
+						<span class="flex size-8 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">{initial}</span>
+						<span class="min-w-0 flex-1"><span class="block truncate text-sm font-medium leading-tight">{session.me.displayName}</span><span class="block text-xs text-muted-foreground">{roleLabel}</span></span>
+					</DropdownMenu.Trigger>
+					<DropdownMenu.Content align="start" side="top" class="w-52">
+						<DropdownMenu.Item onSelect={() => goto('/you')}><Settings class="size-4" />Settings</DropdownMenu.Item>
+						<DropdownMenu.Separator />
+						<DropdownMenu.Label>Appearance</DropdownMenu.Label>
+						<DropdownMenu.Item onSelect={() => setAppearance('system')}><SunMoon class="size-4" />Match device</DropdownMenu.Item>
+						<DropdownMenu.Item onSelect={() => setAppearance('light')}><Sun class="size-4" />Light</DropdownMenu.Item>
+						<DropdownMenu.Item onSelect={() => setAppearance('dark')}><Moon class="size-4" />Dark</DropdownMenu.Item>
+						<DropdownMenu.Separator />
+						<DropdownMenu.Item onSelect={logout}><LogOut class="size-4" />Sign out</DropdownMenu.Item>
+					</DropdownMenu.Content>
+				</DropdownMenu.Root>
+			</div>
 		</aside>
-		<div class="pb-20 md:pb-0"><HubBanner /><SupportBanner /><UpdateBanner />{@render children()}</div>
-		<nav class="fixed inset-x-0 bottom-0 flex gap-1 overflow-x-auto border-t bg-background p-2 md:hidden [&>*]:shrink-0 [&>*]:flex-1" aria-label="Main">
-			{#each nav as n}
-				<Button variant={here(n.href) ? 'secondary' : 'ghost'} href={n.href}>{n.label}{#if n.badge}<span class="ml-1 rounded-full bg-primary px-1.5 text-xs text-primary-foreground" aria-label="{n.badge} unread">{n.badge}</span>{/if}</Button>
+
+		<div class="min-w-0">
+			<!-- Desktop: a search field. Phone: nothing at the top until the large title scrolls away, then a slim title bar. -->
+			<header class="sticky top-0 z-30 hidden h-14 items-center gap-3 border-b bg-background/80 px-10 backdrop-blur-xl md:flex">
+				<button type="button" onclick={() => (chrome.search = true)} class="flex h-9 w-full max-w-sm items-center gap-2 rounded-xl border bg-card px-3 text-sm text-muted-foreground transition-colors hover:border-input">
+					<Search class="size-4" /><span class="flex-1 text-left">Search or jump to…</span><kbd class="rounded-md border bg-muted px-1.5 text-[11px] font-medium">⌘K</kbd>
+				</button>
+				<div class="ml-auto flex items-center gap-1">
+					<Button variant="ghost" size="icon" href="/activity" class="relative" aria-label="Alerts{notifications.unread ? `, ${notifications.unread} unread` : ''}">
+						<svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>{#if notifications.unread}<span class="absolute right-1.5 top-1.5 size-2 rounded-full bg-signal ring-2 ring-background"></span>{/if}
+					</Button>
+				</div>
+			</header>
+			<div class="pointer-events-none fixed inset-x-0 top-0 z-30 flex h-11 items-center justify-center border-b bg-background/85 backdrop-blur-xl transition-opacity duration-200 md:hidden {chrome.compact ? 'opacity-100' : 'opacity-0'}" aria-hidden={!chrome.compact}>
+				<span class="text-[0.9375rem] font-semibold tracking-[-0.01em]">{chrome.title}</span>
+			</div>
+			<HubBanner /><SupportBanner /><UpdateBanner />
+			<div class="pb-[4.5rem] md:pb-0">{@render children()}</div>
+		</div>
+
+		<nav class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t bg-background/90 px-1 pb-[max(0.125rem,env(safe-area-inset-bottom))] pt-0.5 backdrop-blur-xl md:hidden" aria-label="Main">
+			{#each nav as t (t.href)}
+				<a href={t.href} aria-current={here(t) ? 'page' : undefined} class="relative flex flex-col items-center gap-px rounded-lg py-1 text-[10px] font-medium {here(t) ? 'text-primary' : 'text-muted-foreground'}">
+					{#if t.href === '/you'}<span class="flex size-[21px] items-center justify-center rounded-full text-[11px] font-semibold {here(t) ? 'bg-primary text-primary-foreground' : 'bg-secondary'}">{initial}</span>{:else}<t.icon class="size-[21px]" />{/if}{t.label}
+					{#if t.badge}<span class="absolute right-[calc(50%-18px)] top-0.5 size-2 rounded-full bg-signal ring-2 ring-background"></span>{/if}
+				</a>
 			{/each}
 		</nav>
+
+		<CommandPalette bind:open={chrome.search} />
 		<Notice />
 	</div>
 {:else if session.loaded || publicPaths.includes(page.url.pathname)}

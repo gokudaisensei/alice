@@ -3,7 +3,7 @@
 	import { actionsFor, type Step } from '#lib/steps.js';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
-	import * as Card from '#lib/components/ui/card';
+	import { ArrowDown, ArrowUp, Trash2 } from '@lucide/svelte';
 
 	let { steps = $bindable(), failed = null }: { steps: Step[]; failed?: number | null } = $props();
 
@@ -28,47 +28,47 @@
 
 <ol class="space-y-2">
 	{#each steps as s, i}
-		<li><Card.Root class="gap-0 py-0 {failed === i ? 'border-destructive' : ''}"><div class="space-y-2 p-3">
+		<li class="rounded-2xl border bg-card {failed === i ? 'border-signal ring-2 ring-signal/20' : ''}"><div class="space-y-3 p-3.5">
 			<div class="flex items-center justify-between gap-2">
-				<span class="text-sm font-medium">Step {i + 1}</span>
+				<span class="flex items-center gap-2 text-sm font-medium"><span class="flex size-6 items-center justify-center rounded-full bg-secondary text-xs font-semibold tabular-nums">{i + 1}</span>{s.type === 'device' ? 'Device' : s.type === 'scene' ? 'Scene' : s.type === 'mode' ? 'Mode' : 'Wait'}</span>
 				<span class="flex gap-1">
-					<Button size="sm" variant="ghost" aria-label="Move step {i + 1} up" disabled={i === 0} onclick={() => move(i, -1)}>↑</Button>
-					<Button size="sm" variant="ghost" aria-label="Move step {i + 1} down" disabled={i === steps.length - 1} onclick={() => move(i, 1)}>↓</Button>
-					<Button size="sm" variant="ghost" aria-label="Remove step {i + 1}" onclick={() => steps.splice(i, 1)}>Remove</Button>
+					<Button size="icon-sm" variant="ghost" aria-label="Move step {i + 1} up" disabled={i === 0} onclick={() => move(i, -1)}><ArrowUp /></Button>
+					<Button size="icon-sm" variant="ghost" aria-label="Move step {i + 1} down" disabled={i === steps.length - 1} onclick={() => move(i, 1)}><ArrowDown /></Button>
+					<Button size="icon-sm" variant="ghost" aria-label="Remove step {i + 1}" onclick={() => steps.splice(i, 1)}><Trash2 /></Button>
 				</span>
 			</div>
 			{#if s.type === 'device'}
 				<div class="flex flex-wrap gap-2">
-					<select class="h-9 min-w-40 flex-1 rounded-md border bg-background px-2 text-sm" aria-label="Device for step {i + 1}" value={s.entityId} onchange={(e) => onDevice(s, e.currentTarget.value)}>
+					<select class="field min-w-40 flex-1" aria-label="Device for step {i + 1}" value={s.entityId} onchange={(e) => onDevice(s, e.currentTarget.value)}>
 						{#each controllable as d}<option value={d.id}>{d.name}</option>{/each}
 					</select>
-					<select class="h-9 rounded-md border bg-background px-2 text-sm" aria-label="Action for step {i + 1}" value={s.action} onchange={(e) => onAction(s, e.currentTarget.value)}>
+					<select class="field" aria-label="Action for step {i + 1}" value={s.action} onchange={(e) => onAction(s, e.currentTarget.value)}>
 						{#each optsOf(s.entityId) as a}<option value={a.action}>{a.label}</option>{/each}
 					</select>
 					{#each [optsOf(s.entityId).find((a) => a.action === s.action)?.input] as inp}
 						{#if inp?.kind === 'number'}
 							<span class="flex items-center gap-1"><Input type="number" class="w-24" min={inp.min} max={inp.max} step={inp.step} bind:value={s.value as number} aria-label="Value for step {i + 1}" /><span class="text-sm text-muted-foreground">{inp.unit}</span></span>
 						{:else if inp?.kind === 'select'}
-							<select class="h-9 rounded-md border bg-background px-2 text-sm capitalize" aria-label="Value for step {i + 1}" bind:value={s.value}>{#each inp.options as o}<option value={o}>{o}</option>{/each}</select>
+							<select class="field capitalize" aria-label="Value for step {i + 1}" bind:value={s.value}>{#each inp.options as o}<option value={o}>{o}</option>{/each}</select>
 						{/if}
 					{/each}
 				</div>
 			{:else if s.type === 'scene'}
-				<select class="h-9 w-full rounded-md border bg-background px-2 text-sm" aria-label="Scene for step {i + 1}" bind:value={s.entityId}>{#each home.scenes as sc}<option value={sc.id}>{sc.name}</option>{/each}</select>
+				<select class="field w-full" aria-label="Scene for step {i + 1}" bind:value={s.entityId}>{#each home.scenes as sc}<option value={sc.id}>{sc.name}</option>{/each}</select>
 			{:else if s.type === 'mode'}
-				<select class="h-9 rounded-md border bg-background px-2 text-sm capitalize" aria-label="Mode for step {i + 1}" bind:value={s.mode}>{#each home.mode?.modes ?? [] as m}<option value={m}>{m}</option>{/each}</select>
+				<select class="field capitalize" aria-label="Mode for step {i + 1}" bind:value={s.mode}>{#each home.mode?.modes ?? [] as m}<option value={m}>{m}</option>{/each}</select>
 			{:else}
 				<span class="flex items-center gap-2 text-sm">Wait <Input type="number" class="w-24" min={1} max={600} bind:value={s.seconds} aria-label="Seconds to wait in step {i + 1}" /> seconds</span>
 			{/if}
-		</div></Card.Root></li>
+		</div></li>
 	{:else}
-		<li class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No steps yet. Add one below.</li>
+		<li class="rounded-2xl border border-dashed p-6 text-center text-sm text-muted-foreground">No steps yet. Add one below.</li>
 	{/each}
 </ol>
 
-<div class="mt-2 flex flex-wrap gap-2" role="group" aria-label="Add a step">
-	<Button size="sm" variant="outline" onclick={addDevice} disabled={!controllable.length}>+ Device</Button>
-	<Button size="sm" variant="outline" onclick={() => home.scenes[0] && steps.push({ type: 'scene', entityId: home.scenes[0].id })} disabled={!home.scenes.length}>+ Scene</Button>
-	<Button size="sm" variant="outline" onclick={() => steps.push({ type: 'mode', mode: 'home' })}>+ Mode</Button>
-	<Button size="sm" variant="outline" onclick={() => steps.push({ type: 'delay', seconds: 5 })}>+ Wait</Button>
+<div class="mt-3 flex flex-wrap gap-2" role="group" aria-label="Add a step">
+	<Button size="sm" variant="secondary" onclick={addDevice} disabled={!controllable.length}>+ Device</Button>
+	<Button size="sm" variant="secondary" onclick={() => home.scenes[0] && steps.push({ type: 'scene', entityId: home.scenes[0].id })} disabled={!home.scenes.length}>+ Scene</Button>
+	<Button size="sm" variant="secondary" onclick={() => steps.push({ type: 'mode', mode: 'home' })}>+ Mode</Button>
+	<Button size="sm" variant="secondary" onclick={() => steps.push({ type: 'delay', seconds: 5 })}>+ Wait</Button>
 </div>

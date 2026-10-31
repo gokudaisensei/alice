@@ -1,55 +1,92 @@
+@import '@fontsource-variable/bricolage-grotesque/standard.css';
 @import 'tailwindcss';
 
 @custom-variant dark (&:is(.dark *));
 
+/* State variants the shadcn-svelte components are written against (Bits UI sets data-state or a bare data-* attribute). */
+@custom-variant data-open { &:where([data-state="open"], [data-open]:not([data-open="false"])) { @slot; } }
+@custom-variant data-closed { &:where([data-state="closed"], [data-closed]:not([data-closed="false"])) { @slot; } }
+@custom-variant data-checked { &:where([data-state="checked"], [data-checked]:not([data-checked="false"])) { @slot; } }
+@custom-variant data-unchecked { &:where([data-state="unchecked"], [data-unchecked]:not([data-unchecked="false"])) { @slot; } }
+@custom-variant data-active { &:where([data-state="active"], [data-active]:not([data-active="false"])) { @slot; } }
+@custom-variant data-selected { &:where([data-selected]:not([data-selected="false"]), [data-state="selected"]) { @slot; } }
+@custom-variant data-disabled { &:where([data-disabled]:not([data-disabled="false"])) { @slot; } }
+@custom-variant data-horizontal { &:where([data-orientation="horizontal"]) { @slot; } }
+@custom-variant data-vertical { &:where([data-orientation="vertical"]) { @slot; } }
+@custom-variant data-inset { &:where([data-inset]:not([data-inset="false"])) { @slot; } }
+@custom-variant data-highlighted { &:where([data-highlighted]) { @slot; } }
+@custom-variant data-placeholder { &:where([data-placeholder]) { @slot; } }
+
+/*
+ * Palette. Teal is the only interactive colour. Ember means "on". Signal means "look at this". Nothing else is coloured.
+ * Depth comes from three neutral layers (ground, surface, raised) and hairlines, not from shadows.
+ */
 :root {
 	--radius: 0.75rem;
-	--background: oklch(1 0 0);
-	--foreground: oklch(0.145 0 0);
-	--card: oklch(1 0 0);
-	--card-foreground: oklch(0.145 0 0);
-	--popover: oklch(1 0 0);
-	--popover-foreground: oklch(0.145 0 0);
-	--primary: oklch(0.205 0 0);
-	--primary-foreground: oklch(0.985 0 0);
-	--secondary: oklch(0.97 0 0);
-	--secondary-foreground: oklch(0.205 0 0);
-	--muted: oklch(0.97 0 0);
-	--muted-foreground: oklch(0.556 0 0);
-	--accent: oklch(0.97 0 0);
-	--accent-foreground: oklch(0.205 0 0);
-	--destructive: oklch(0.577 0.245 27.325);
-	--border: oklch(0.922 0 0);
-	--input: oklch(0.922 0 0);
-	--ring: oklch(0.708 0 0);
+	--background: #f5f6f7;
+	--foreground: #0f1417;
+	--card: #ffffff;
+	--card-foreground: #0f1417;
+	--popover: #ffffff;
+	--popover-foreground: #0f1417;
+	--primary: #1f6f80;
+	--primary-foreground: #ffffff;
+	--secondary: #eceff1;
+	--secondary-foreground: #0f1417;
+	--muted: #eef0f2;
+	--muted-foreground: #5b676d;
+	--accent: #e8eef0;
+	--accent-foreground: #0f1417;
+	--destructive: #c4452d;
+	--border: #e2e6e9;
+	--input: #d6dce0;
+	--ring: #1f6f80;
+	--raised: #fafbfb;
+	--on: #f2a63b;
+	--on-soft: #fdf0d6;
+	--on-foreground: #4a2f00;
+	--signal: #c4452d;
+	--signal-soft: #fbe6e0;
+	--signal-foreground: #6e1f10;
+	--ok: #2f8a5b;
 }
 
 .dark {
-	--background: oklch(0.145 0 0);
-	--foreground: oklch(0.985 0 0);
-	--card: oklch(0.205 0 0);
-	--card-foreground: oklch(0.985 0 0);
-	--popover: oklch(0.205 0 0);
-	--popover-foreground: oklch(0.985 0 0);
-	--primary: oklch(0.922 0 0);
-	--primary-foreground: oklch(0.205 0 0);
-	--secondary: oklch(0.269 0 0);
-	--secondary-foreground: oklch(0.985 0 0);
-	--muted: oklch(0.269 0 0);
-	--muted-foreground: oklch(0.708 0 0);
-	--accent: oklch(0.269 0 0);
-	--accent-foreground: oklch(0.985 0 0);
-	--destructive: oklch(0.704 0.191 22.216);
-	--border: oklch(1 0 0 / 10%);
-	--input: oklch(1 0 0 / 15%);
-	--ring: oklch(0.556 0 0);
+	--background: #0b1013;
+	--foreground: #eef2f4;
+	--card: #121a1f;
+	--card-foreground: #eef2f4;
+	--popover: #151e24;
+	--popover-foreground: #eef2f4;
+	--primary: #66bdd0;
+	--primary-foreground: #05212a;
+	--secondary: #1a252b;
+	--secondary-foreground: #eef2f4;
+	--muted: #172026;
+	--muted-foreground: #92a2aa;
+	--accent: #1e2b32;
+	--accent-foreground: #eef2f4;
+	--destructive: #f0907a;
+	--border: #222e35;
+	--input: #2c3a42;
+	--ring: #66bdd0;
+	--raised: #172128;
+	--on: #f4b54a;
+	--on-soft: #2e2410;
+	--on-foreground: #fbe3b3;
+	--signal: #f0907a;
+	--signal-soft: #35201b;
+	--signal-foreground: #fbd5cb;
+	--ok: #5fc08a;
 }
 
 @theme inline {
+	--font-sans: 'Bricolage Grotesque Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
 	--radius-sm: calc(var(--radius) - 4px);
 	--radius-md: calc(var(--radius) - 2px);
 	--radius-lg: var(--radius);
 	--radius-xl: calc(var(--radius) + 4px);
+	--radius-tile: 1.25rem;
 	--color-background: var(--background);
 	--color-foreground: var(--foreground);
 	--color-card: var(--card);
@@ -68,9 +105,77 @@
 	--color-border: var(--border);
 	--color-input: var(--input);
 	--color-ring: var(--ring);
+	--color-raised: var(--raised);
+	--color-on: var(--on);
+	--color-on-soft: var(--on-soft);
+	--color-on-foreground: var(--on-foreground);
+	--color-signal: var(--signal);
+	--color-signal-soft: var(--signal-soft);
+	--color-signal-foreground: var(--signal-foreground);
+	--color-ok: var(--ok);
 }
 
 @layer base {
 	* { @apply border-border outline-ring/50; }
-	body { @apply bg-background text-foreground; }
+	html { -webkit-text-size-adjust: 100%; }
+	body {
+		@apply bg-background text-foreground antialiased;
+		font-family: var(--font-sans);
+		font-optical-sizing: auto;
+		font-feature-settings: 'ss01' 0, 'kern' 1;
+		letter-spacing: -0.006em;
+	}
+	:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+	::selection { background: color-mix(in oklab, var(--primary) 28%, transparent); }
+	@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; } }
+}
+
+/* Type scale. Display is narrow, heavy and tightly tracked; it is used once per screen, for the sentence that matters. */
+@utility display {
+	font-size: clamp(1.875rem, 1.3rem + 2.6vw, 3.5rem);
+	line-height: 1.02;
+	font-weight: 700;
+	letter-spacing: -0.035em;
+	font-stretch: 88%;
+	font-variation-settings: 'opsz' 96;
+	text-wrap: balance;
+}
+@utility title {
+	font-size: clamp(1.625rem, 1.3rem + 1.4vw, 2.5rem);
+	line-height: 1.05;
+	font-weight: 650;
+	letter-spacing: -0.03em;
+	font-stretch: 90%;
+	font-variation-settings: 'opsz' 72;
+}
+@utility heading {
+	font-size: 1.0625rem;
+	line-height: 1.25;
+	font-weight: 620;
+	letter-spacing: -0.015em;
+}
+@utility figure {
+	font-weight: 650;
+	letter-spacing: -0.03em;
+	font-stretch: 90%;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Native selects and similar plain fields, matched to Input. */
+@utility field {
+	height: 2.5rem;
+	border-radius: 0.75rem;
+	border: 1px solid var(--input);
+	background: var(--card);
+	padding-inline: 0.75rem;
+	font-size: 0.875rem;
+	outline: none;
+	&:focus-visible { box-shadow: 0 0 0 4px color-mix(in oklab, var(--ring) 25%, transparent); border-color: var(--ring); }
+	&:disabled { opacity: 0.5; }
+}
+
+/* Horizontal scrollers: swipe, no scrollbar. */
+@utility no-scrollbar {
+	scrollbar-width: none;
+	&::-webkit-scrollbar { display: none; }
 }

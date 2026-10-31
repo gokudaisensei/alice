@@ -2,10 +2,14 @@
 	import { api } from '#lib/api.js';
 	import { home, type Device } from '#lib/home.svelte.js';
 	import DeviceCard from '#lib/components/app/DeviceCard.svelte';
+	import { tileClass } from '#lib/tiles.js';
 	import { Input } from '#lib/components/ui/input';
-	import { Button } from '#lib/components/ui/button';
+	import Page from '#lib/components/app/Page.svelte';
+	import Empty from '#lib/components/app/Empty.svelte';
+	import { Search } from '@lucide/svelte';
 
-	let q = $state('');
+	import { page } from '$app/state';
+	let q = $state(page.url.searchParams.get('q') ?? '');
 	let hits = $state<string[] | null>(null);
 	let filter = $state('all');
 	let timer: ReturnType<typeof setTimeout>;
@@ -26,16 +30,18 @@
 	const list = $derived<Device[]>(home.devices.filter((d) => (hits ? hits.includes(d.id) : true) && (filter === 'all' || d.category === filter)));
 </script>
 
-<main class="mx-auto max-w-3xl space-y-4 p-4">
-	<h1 class="text-2xl font-semibold">Devices</h1>
-	<Input type="search" placeholder="Search by name, room or type" bind:value={q} aria-label="Search devices" />
-	<div class="flex flex-wrap gap-2" role="group" aria-label="Filter by type">
-		<Button size="sm" variant={filter === 'all' ? 'default' : 'outline'} onclick={() => (filter = 'all')}>All</Button>
-		{#each cats as c}<Button size="sm" variant={filter === c ? 'default' : 'outline'} onclick={() => (filter = c)}>{labels[c] ?? c}</Button>{/each}
+<Page title="Devices" subtitle="Everything you can control, in one place." width="xl">
+	<div class="space-y-3">
+		<div class="relative"><Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" class="pl-9" placeholder="Search by name, room or type" bind:value={q} aria-label="Search devices" /></div>
+		<div class="-mx-5 flex gap-1.5 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:px-0" role="group" aria-label="Filter by type">
+			{#each [['all', 'All'], ...cats.map((c) => [c, labels[c] ?? c])] as [key, text]}
+				<button type="button" aria-pressed={filter === key} onclick={() => (filter = key)} class="h-8 shrink-0 rounded-full px-3.5 text-sm font-medium transition-colors {filter === key ? 'bg-foreground text-background' : 'bg-secondary text-muted-foreground hover:text-foreground'}">{text}</button>
+			{/each}
+		</div>
 	</div>
 	{#if list.length}
-		<div class="grid gap-3 sm:grid-cols-2">{#each list as d (d.id)}<DeviceCard device={d} />{/each}</div>
+		<div class="grid grid-flow-dense grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3">{#each list as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div>
 	{:else if home.loaded}
-		<p class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{q ? 'No devices match your search.' : 'No devices are available to you yet. Ask the person who manages your home to share some.'}</p>
+		<Empty title={q ? 'No devices match' : 'No devices yet'} description={q ? 'Try a different name, room or type.' : 'Nothing has been shared with you yet. Ask the person who manages your home.'} />
 	{/if}
-</main>
+</Page>

@@ -48,6 +48,16 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | M7 | Hub stop/start, wrong key, app restart | ✅ on a real HA (`real-ha.test.ts`, with `HA_REAL_DOCKER`) |
 | M7 | Resource profile | 🟡 measured on x86 in the real container (512 MB / 1 CPU limit): ~40 MB idle, 90 MB peak, 8.7k requests/s with 25 clients and 5 live streams, 0 errors. **Not measured on a Pi**; CPU figures won't transfer, memory should |
 
+## Interface redesign
+| Area | Caveat | Status |
+|---|---|---|
+| Phone | Press-and-hold-then-slide to dim a light is built with pointer events and checked only for logic and layout in a desktop browser; **not tried on a real touch screen** (iOS Safari and Android Chrome scroll and gesture handling differ) | ⛔ |
+| Phone | Bottom drawers swipe to close but have a single height (no half/full detents) | ➖ |
+| Search | "Turn off the kitchen lights" is understood by fixed rules (`lib/intent.ts`, unit tested): on/off, dim to N%, lock, run a scene or routine. It never unlocks, and says nothing rather than guess between near matches. Verified once against the real hub | ✅ |
+| Personal | The "often used" row counts this person's own taps (3 or more); time-of-day suggestions match scene and routine *names* (night, morning, evening). Both only suggest | ✅ |
+| History | The device drawer's 24-hour strip comes from HA's history API. Verified against the real hub; the time before HA's first record is left blank | ✅ |
+| Layout | Checked on a 375 px phone (light and dark) and a 1280 px desktop for Home, Routines, Activity, You and the automation builder; not every page in every combination | 🟡 |
+
 ## Re-running the real-world checks
 ```
 # Real Home Assistant (container already seeded; token in the scratchpad)

@@ -1,21 +1,26 @@
 <script lang="ts">
 	import { home } from '#lib/home.svelte.js';
 	import { session } from '#lib/session.svelte.js';
-	import * as Card from '#lib/components/ui/card';
+	import Page from '#lib/components/app/Page.svelte';
+	import Empty from '#lib/components/app/Empty.svelte';
+	import { Button } from '#lib/components/ui/button';
+	import { ChevronRight } from '@lucide/svelte';
+	const on = (id: string) => home.inRoom(id).filter((d) => d.state === 'on' && d.available).length;
 </script>
 
-<main class="mx-auto max-w-3xl space-y-4 p-4">
-	<h1 class="text-2xl font-semibold">Rooms</h1>
+<Page title="Rooms" subtitle="Jump to a room to see everything in it." width="lg">
 	{#if home.orderedRooms.length}
 		<div class="grid gap-3 sm:grid-cols-2">
 			{#each home.orderedRooms as r (r.id)}
-				<a href="/rooms/{r.id}" class="block rounded-xl focus-visible:outline-2">
-					<Card.Root class="transition-colors hover:bg-accent"><Card.Header class="p-4"><Card.Title>{r.name}</Card.Title><Card.Description>{home.inRoom(r.id).length} devices · {home.inRoom(r.id).filter((d) => d.state === 'on').length} on</Card.Description></Card.Header></Card.Root>
+				<a href="/rooms/{r.id}" class="group flex items-center gap-3 rounded-tile border bg-card p-4 transition-colors hover:bg-muted/60">
+					<span class="size-2.5 shrink-0 rounded-full {on(r.id) ? 'bg-on' : 'bg-border'}" aria-hidden="true"></span>
+					<span class="min-w-0 flex-1"><span class="block truncate text-base font-semibold tracking-[-0.015em]">{r.name}</span><span class="text-sm text-muted-foreground">{home.inRoom(r.id).length} device{home.inRoom(r.id).length === 1 ? '' : 's'}{#if on(r.id)} · {on(r.id)} on{/if}</span></span>
+					<ChevronRight class="size-4 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" />
 				</a>
 			{/each}
 		</div>
 	{:else if home.loaded}
-		<p class="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">No rooms yet.{#if session.can('rooms.manage')} <a class="underline" href="/admin/rooms">Set up your rooms</a>.{/if}</p>
+		<Empty title="No rooms yet" description="Rooms group your devices so they're easy to find.">{#if session.can('rooms.manage')}<Button href="/admin/rooms">Set up rooms</Button>{/if}</Empty>
 	{/if}
-	{#if home.devices.some((d) => !d.roomId)}<a class="text-sm underline" href="/devices">Devices not in a room</a>{/if}
-</main>
+	{#if home.devices.some((d) => !d.roomId)}<p class="text-sm text-muted-foreground">Some devices aren't in a room. <a class="font-medium text-primary hover:underline" href="/devices">See all devices</a></p>{/if}
+</Page>

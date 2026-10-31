@@ -1,15 +1,16 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { api, explain, reauth } from '#lib/api.js';
+	import { api, explain, sensitive } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
-	import { Button } from '#lib/components/ui/button';
-	import * as Card from '#lib/components/ui/card';
+	import Page from '#lib/components/app/Page.svelte';
+	import Group from '#lib/components/app/Group.svelte';
+	import { Switch } from '#lib/components/ui/switch';
 
 	const uid = $derived(page.params.id);
 	let roleDefault = $state<'all' | 'none'>('all');
 	let overrides = $state<Record<string, boolean>>({});
-	let all = $state<{ id: string; name: string }[]>([]);
+	let all = $state<{ id: string; name: string; kind: string }[]>([]);
 	let error = $state('');
 
 	onMount(async () => {
@@ -18,31 +19,26 @@
 		roleDefault = a.data.roleDefault;
 		overrides = Object.fromEntries(a.data.overrides.map((o: any) => [o.id, !!o.allowed]));
 		all = [
-			...d.data.devices.filter((y: any) => y.ordinary).map((y: any) => ({ id: y.id, name: y.name })),
-			...x.data.scenes.map((y: any) => ({ id: y.id, name: `Scene: ${y.name}` })),
-			...x.data.routines.map((y: any) => ({ id: y.id, name: `Routine: ${y.name}` }))
+			...d.data.devices.filter((y: any) => y.ordinary).map((y: any) => ({ id: y.id, name: y.name, kind: 'Device' })),
+			...x.data.scenes.map((y: any) => ({ id: y.id, name: y.name, kind: 'Scene' })),
+			...x.data.routines.map((y: any) => ({ id: y.id, name: y.name, kind: 'Routine' }))
 		];
 	});
 	const allowed = (id: string) => overrides[id] ?? roleDefault === 'all';
 
 	async function toggle(id: string) {
 		const want = !allowed(id);
-		const body = want ? { allow: [id] } : { deny: [id] };
-		let r = await api('PUT', `/api/admin/users/${uid}/devices`, body);
-		if (r.status === 401 && r.data?.error === 'reauth_required' && (await reauth())) r = await api('PUT', `/api/admin/users/${uid}/devices`, body);
+		const r = await sensitive('PUT', `/api/admin/users/${uid}/devices`, want ? { allow: [id] } : { deny: [id] });
 		if (r.ok) overrides[id] = want; else home.say('error', explain(r.data?.error));
 	}
 </script>
 
-<main class="mx-auto max-w-2xl space-y-4 p-4">
-	<a href="/admin/users" class="text-sm text-muted-foreground underline">← People</a>
-	<h1 class="text-2xl font-semibold">Device, scene & routine access</h1>
-	<p class="text-sm text-muted-foreground">{roleDefault === 'none' ? 'Guests can only use the devices you tick below.' : 'This person can use every device unless you untick it.'}</p>
-	{#if error}<p role="alert" class="text-destructive">{error}</p>{/if}
-	<Card.Root><Card.Content class="divide-y p-0">
+<Page title="What they can use" subtitle={roleDefault === 'none' ? 'Guests can only use what you switch on below.' : 'This person can use everything unless you switch it off.'} back={{ href: '/admin/users', label: 'People' }} width="md">
+	{#if error}<p role="alert" class="text-sm text-signal">{error}</p>{/if}
+	<Group>
 		{#each all as d (d.id)}
-			<label class="flex items-center justify-between p-4"><span>{d.name}</span>
-				<input type="checkbox" class="size-5" checked={allowed(d.id)} onchange={() => toggle(d.id)} aria-label="Allow {d.name}" /></label>
+			<label class="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/60"><span class="min-w-0 flex-1"><span class="block truncate text-[0.9375rem] font-medium">{d.name}</span><span class="text-sm text-muted-foreground">{d.kind}</span></span>
+				<Switch checked={allowed(d.id)} onCheckedChange={() => toggle(d.id)} aria-label="Allow {d.name}" /></label>
 		{/each}
-	</Card.Content></Card.Root>
-</main>
+	</Group>
+</Page>
