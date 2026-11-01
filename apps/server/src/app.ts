@@ -9,6 +9,7 @@ import { authRoutes } from "./auth";
 import type { HaApi } from "./ha";
 import { createDeviceService, deviceRoutes } from "./devices";
 import { manageRoutes } from "./manage";
+import { createSync, syncRoutes } from "./sync";
 import { prefsRoutes } from "./prefs";
 import { modeRoutes } from "./modes";
 import { createSceneService, sceneRoutes } from "./scenes";
@@ -43,6 +44,7 @@ export function buildCsp(webDir?: string): string {
 
 export function createApp(deps: AppDeps) {
   const devices = createDeviceService(deps.db, deps.ha);
+  const sync = createSync(deps.ha);
   const csp = buildCsp(deps.webDir);
   const scenes = createSceneService(deps.db, deps.ha, devices), routines = createRoutineService(deps.db, deps.ha, devices);
   const automations = createAutomationService(deps.db, deps.ha, devices, routines);
@@ -73,6 +75,13 @@ export function createApp(deps: AppDeps) {
         }
       }
     })
+    .onAfterResponse(({ request, set }) => {
+      // Anything a person changes (rooms, groups, scenes, access...) tells every other open screen to refresh. Device commands already arrive as device events.
+      const path = new URL(request.url).pathname;
+      if (request.method === "GET" || request.method === "HEAD" || !path.startsWith("/api/") || Number(set.status ?? 200) >= 400) return;
+      if (/^\/api\/(auth|me|ops|sync|stream|notifications)\b/.test(path) || /\/(command|activate|run)$/.test(path)) return;
+      sync.bump();
+    })
     .use(authRoutes({ db: deps.db, webauthn: deps.webauthn, origin: deps.origin, cookieSecure: deps.cookieSecure }))
     .use(adminRoutes(deps.db, deps.cookieSecure))
     .use(deviceRoutes(deps.db, deps.ha, deps.cookieSecure, devices, (u, q) => ({ scenes: scenes.search(u, q), routines: routines.search(u, q) })))
@@ -89,6 +98,7 @@ export function createApp(deps: AppDeps) {
     .use(notifyRoutes(deps.db, deps.cookieSecure, notifier))
     .use(insightRoutes(deps.db, deps.cookieSecure, insights, deps.now))
     .use(manageRoutes(deps.db, deps.ha, deps.cookieSecure))
+    .use(syncRoutes(deps.db, deps.cookieSecure, sync, devices))
     .use(prefsRoutes(deps.db, deps.cookieSecure, devices))
     // For the container health check and the updater: is THIS app up, and which version. Deliberately independent of Home Assistant.
     .get("/healthz", ({ set }) => {

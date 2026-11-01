@@ -1,13 +1,22 @@
 <script lang="ts">
+	import { slide } from 'svelte/transition';
+	import { dur } from '#lib/motion.js';
+	import { onMount } from 'svelte';
 	import { home } from '#lib/home.svelte.js';
-	import { WifiOff } from '@lucide/svelte';
+	import { CloudOff } from '@lucide/svelte';
+	let now = $state(Date.now());
+	onMount(() => { const t = setInterval(() => (now = Date.now()), 20_000); return () => clearInterval(t); });
+	const ago = $derived.by(() => {
+		if (!home.lastOkAt) return null;
+		const m = Math.max(0, Math.round((now - home.lastOkAt) / 60_000));
+		return m < 1 ? 'just now' : m === 1 ? '1 minute ago' : m < 60 ? `${m} minutes ago` : `${Math.round(m / 60)} hours ago`;
+	});
 </script>
 
 {#if home.haHealth !== 'ok'}
-	<div role="alert" class="flex items-start gap-2.5 border-b bg-signal-soft px-4 py-2.5 text-sm text-signal-foreground md:px-10">
-		<WifiOff class="mt-0.5 size-4 shrink-0" />
-		<p>{home.haHealth === 'auth_failed'
-			? 'The home hub rejected the app’s connection. Please contact support.'
-			: 'Can’t reach the home hub. Devices show their last known state and can’t be controlled until it’s back. Check that it is powered on and connected to your network.'}</p>
+	<div transition:slide={{ duration: dur(240) }} role="status" class="flex items-start gap-2.5 border-b bg-secondary px-4 py-2.5 text-sm md:px-10">
+		<CloudOff class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+		<p>{#if home.haHealth === 'auth_failed'}<span class="font-medium">The hub refused the app’s access.</span> Please contact support.
+			{:else}<span class="font-medium">Can’t reach the home hub.</span> {#if ago}Showing how things were {ago}. {/if}Controls are paused until it’s back. Check that it has power and is on your network.{/if}</p>
 	</div>
 {/if}

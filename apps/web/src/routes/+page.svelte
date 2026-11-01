@@ -1,12 +1,17 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { fade } from 'svelte/transition';
+	import { dur } from '#lib/motion.js';
+	import { page } from '$app/state';
+	import { replaceState } from '$app/navigation';
 	import { api } from '#lib/api.js';
 	import { chrome } from '#lib/chrome.svelte.js';
 	import { home, type Device } from '#lib/home.svelte.js';
 	import { notifications } from '#lib/notifications.svelte.js';
 	import { session } from '#lib/session.svelte.js';
 	import { viewport } from '#lib/viewport.svelte.js';
-	import { tileClass } from '#lib/tiles.js';
+	import { haptics } from '#lib/haptics.js';
+	import { tileClass, isWide } from '#lib/tiles.js';
 	import DeviceCard from '#lib/components/app/DeviceCard.svelte';
 	import Insights from '#lib/components/app/Insights.svelte';
 	import ModeCard from '#lib/components/app/ModeCard.svelte';
@@ -15,7 +20,7 @@
 	import Group from '#lib/components/app/Group.svelte';
 	import Row from '#lib/components/app/Row.svelte';
 	import { Button } from '#lib/components/ui/button';
-	import { Check, ChevronDown, Lightbulb, Lock, LockOpen, Plug, Search, ShieldAlert, Sparkles, Thermometer, Tv, Video, WifiOff, X, Zap } from '@lucide/svelte';
+	import { Check, ChevronDown, Gauge, GripVertical, Lightbulb, Loader2, Lock, LockOpen, Plug, Search, ShieldAlert, Sparkles, Thermometer, Tv, Video, WifiOff, X, Zap } from '@lucide/svelte';
 
 	const t = $derived(home.prefs?.template ?? 'comfort');
 	const sections = $derived(home.prefs?.sections ?? ['favorites', 'rooms']);
@@ -45,6 +50,7 @@
 	const meter = $derived(home.devices.find((d) => d.category === 'energy' && d.available && d.reading?.unit === 'W'));
 	const playing = $derived(by('media').filter((d) => d.state === 'playing').length);
 	const cams = $derived(by('camera'));
+	const sensors = $derived(home.devices.filter((d) => (d.category === 'sensor' || d.category === 'energy') && d.reading && d.available && Number.isFinite(Number(d.reading.value))).slice(0, 8));
 	const plugs = $derived(home.devices.filter((d) => ['switch', 'fan'].includes(d.category)));
 	type Chip = { key: string; label: string; value: string; icon: any; tone: 'on' | 'signal' | 'none'; cats: string[] };
 	const chips = $derived.by<Chip[]>(() => {
@@ -68,6 +74,7 @@
 	const toggleChip = (c: Chip) => { if (c.key === 'energy') location.href = '/activity?tab=energy'; else filter = filter === c.key ? null : c.key; };
 	async function allOff(ds: Device[]) { for (const d of ds.filter((x) => x.state === 'on')) await home.command(d.id, 'turn_off'); }
 	async function lockAll() { for (const d of unlocked) await home.command(d.id, 'lock'); }
+	const toneIcon = { on: 'bg-on text-on-foreground', signal: 'bg-signal text-white', none: 'bg-secondary text-muted-foreground' };
 	const toneChip = { on: 'bg-on-soft text-on-foreground border-transparent', signal: 'bg-signal-soft text-signal-foreground border-transparent', none: 'bg-card' };
 
 	// ---- quick actions: a suggestion that fits the time of day comes first. It only suggests; it never acts. ----
@@ -80,7 +87,6 @@
 		];
 		for (const q of all) q.suggested = WHEN.some(([re, ok]) => re.test(q.label) && ok(hour));
 		all.sort((a, b) => Number(!!b.suggested) - Number(!!a.suggested));
-		if (lightsOn.length) all.splice(all.some((q) => q.suggested) ? 1 : 0, 0, { id: 'alloff', label: 'All lights off', run: () => allOff(lightsOn) });
 		return all.slice(0, 8);
 	});
 
@@ -92,6 +98,54 @@
 	const flip = (id: string, i: number) => { openRooms[id] = !isRoomOpen(id, i); try { localStorage.setItem('rooms-open', JSON.stringify(openRooms)); } catch {} };
 	const roomsWithDevices = $derived(home.orderedRooms.map((r) => ({ ...r, devices: home.inRoom(r.id) })).filter((r) => r.devices.length));
 	const unplaced = $derived(home.devices.filter((d) => !d.roomId && !['sensor', 'energy'].includes(d.category)));
+
+	// ---- hold a chip to do it for everything of that kind ----
+	let holdTimer: ReturnType<typeof setTimeout> | undefined, held = false;
+	const bulk = (c: Chip) => (c.key === 'lights' && lightsOn.length ? () => allOff(lightsOn) : c.key === 'security' && unlocked.length ? lockAll : c.key === 'plugs' && plugs.some((d) => d.state === 'on') ? () => allOff(plugs) : null);
+	function chipDown(c: Chip) { held = false; const act = bulk(c); if (!act) return; holdTimer = setTimeout(() => { held = true; haptics.grab(); Promise.resolve(act()).then(() => haptics.success()); }, 480); }
+	const chipUp = () => clearTimeout(holdTimer);
+
+	// ---- quick actions show that they are working, and that they worked ----
+	let qState = $state<Record<string, 'run' | 'ok'>>({});
+	async function runQuick(q: Quick) {
+		haptics.tap(); qState[q.id] = 'run';
+		try { await q.run(); qState[q.id] = 'ok'; } catch { delete qState[q.id]; }
+		setTimeout(() => delete qState[q.id], 1400);
+	}
+
+	// ---- reorder favorites: hold and drag, like arranging apps ----
+	let editing = $state(false), dragId = $state<string | null>(null), dragDx = $state(0), dragDy = $state(0), overId = $state<string | null>(null), sx = 0, sy = 0;
+	function favDown(e: PointerEvent, id: string) { dragId = id; sx = e.clientX; sy = e.clientY; dragDx = 0; dragDy = 0; (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); haptics.grab(); }
+	function favMove(e: PointerEvent) {
+		if (!dragId) return;
+		dragDx = e.clientX - sx; dragDy = e.clientY - sy;
+		const hit = document.elementsFromPoint(e.clientX, e.clientY).map((n) => (n as HTMLElement).closest?.('[data-fav]') as HTMLElement | null).find((n) => n && n.dataset.fav !== dragId);
+		const id = hit?.dataset.fav ?? null;
+		if (id !== overId) { overId = id; if (id) haptics.tap(); }
+	}
+	async function favUp() {
+		if (!dragId) return;
+		const ids = home.favoriteDevices.map((d) => d.id), from = ids.indexOf(dragId);
+		if (overId) { ids.splice(ids.indexOf(overId), 0, ids.splice(from, 1)[0]); await home.saveFavorites(ids, home.prefs?.favorites.rooms ?? []); haptics.success(); }
+		dragId = null; overId = null; dragDx = 0; dragDy = 0;
+	}
+
+	// ---- shortcuts from the app icon (?do=lock-all, ?do=lights-off, ?do=good-night) ----
+	let handled = false;
+	$effect(() => {
+		if (handled || !home.loaded) return;
+		const what = page.url.searchParams.get('do'); if (!what) { handled = true; return; }
+		handled = true;
+		if (what === 'lock-all') { if (unlocked.length) lockAll(); else home.say('ok', 'Everything is already locked.'); }
+		else if (what === 'lights-off') { if (lightsOn.length) allOff(lightsOn); else home.say('ok', 'The lights are already off.'); }
+		else if (what === 'good-night') { const q = quick.find((x) => /good ?night/i.test(x.label)) ?? quick.find((x) => /night|bed|sleep/i.test(x.label)); if (q) runQuick(q); else home.say('error', 'There isn’t a “Good night” routine yet. You can make one under Routines.'); }
+		const u = new URL(location.href); u.searchParams.delete('do'); replaceState(u, {});
+	});
+
+	// ---- tips, once ----
+	let tipsDone = $state(true);
+	onMount(() => { try { tipsDone = localStorage.getItem('tips-done') === '1'; } catch { tipsDone = false; } });
+	const dismissTips = () => { tipsDone = true; try { localStorage.setItem('tips-done', '1'); } catch {} };
 
 	// ---- getting started ----
 	let pushHere = $state(false), others = $state(false), hidden = $state(false), setupOpen = $state<boolean | null>(null);
@@ -131,12 +185,12 @@
 	</section>
 {/snippet}
 
-<main class="mx-auto w-full max-w-6xl px-5 pb-10 pt-4 md:px-10 md:pb-16 md:pt-10 lg:grid lg:grid-cols-[minmax(0,1fr)_19.5rem] lg:gap-x-14">
-	<div class="min-w-0 space-y-6 md:space-y-9">
+<main class="mx-auto w-full max-w-6xl px-5 pb-10 pt-4 md:px-10 md:pb-16 md:pt-10 xl:grid xl:grid-cols-[minmax(0,1fr)_19.5rem] xl:gap-x-12">
+	<div class="stagger min-w-0 space-y-6 md:space-y-9">
 		<header class="flex items-start justify-between gap-4">
 			<div class="min-w-0">
 				<p class="text-[0.9375rem] text-muted-foreground">{greeting}{session.me ? `, ${session.me.displayName.split(' ')[0]}` : ''}</p>
-				<h1 class="display mt-1.5 max-w-[22ch]" aria-live="polite">{headline}</h1>
+				{#key headline}<h1 class="display mt-1.5 max-w-[22ch]" aria-live="polite" in:fade={{ duration: dur(260) }}>{headline}</h1>{/key}
 			</div>
 			<button type="button" class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground md:hidden" aria-label="Search" onclick={() => (chrome.search = true)}><Search class="size-4" /></button>
 		</header>
@@ -157,15 +211,25 @@
 		{/if}
 
 		{#if home.loaded && chips.length}
-			<div class="-mx-5 flex gap-2 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0" role="group" aria-label="Status">
+			<div class="-mx-5 flex snap-x snap-proximity scroll-px-5 gap-2 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0" role="group" aria-label="Status">
 				{#each chips as c (c.key)}
-					<button type="button" aria-pressed={filter === c.key} onclick={() => toggleChip(c)} class="flex min-w-[6.5rem] shrink-0 flex-col items-start gap-1 rounded-2xl border px-3 py-2.5 text-left transition-all {toneChip[c.tone]} {filter === c.key ? 'ring-2 ring-primary' : ''}">
-						<c.icon class="size-[18px] opacity-80" aria-hidden="true" />
-						<span class="figure text-[1.0625rem] leading-none">{c.value}</span>
-						<span class="text-xs opacity-75">{c.label}</span>
+					<button type="button" aria-pressed={filter === c.key} onpointerdown={() => chipDown(c)} onpointerup={chipUp} onpointerleave={chipUp} onpointercancel={chipUp} oncontextmenu={(e) => e.preventDefault()} onclick={() => { if (held) { held = false; return; } haptics.tap(); toggleChip(c); }} class="flex h-14 min-w-[8rem] shrink-0 snap-start items-center gap-2.5 rounded-2xl border pl-2.5 pr-4 text-left transition-[background-color,transform] duration-150 active:scale-[0.97] {toneChip[c.tone]} {filter === c.key ? 'shadow-[inset_0_0_0_999px_color-mix(in_oklab,var(--foreground)_8%,transparent)]' : ''}">
+						<span class="flex size-9 shrink-0 items-center justify-center rounded-full {toneIcon[c.tone]}"><c.icon class="size-[18px]" aria-hidden="true" /></span>
+						<span class="min-w-0"><span class="block text-xs leading-none opacity-70">{c.label}</span><span class="figure mt-1.5 block whitespace-nowrap text-[1.0625rem] leading-none">{c.value}</span></span>
 					</button>
 				{/each}
 			</div>
+		{/if}
+
+		{#if home.loaded && !tipsDone && home.devices.length && !active}
+			<section class="rounded-2xl bg-accent px-4 py-3.5" aria-label="Tips">
+				<div class="flex items-start gap-3"><Lightbulb class="mt-0.5 size-5 shrink-0 text-primary" />
+					<div class="min-w-0 flex-1 space-y-1 text-sm leading-snug"><p class="font-semibold">Quick tips</p>
+						<p>Tap a device's <span class="font-medium">icon</span> to switch it. Tap <span class="font-medium">anywhere else</span> for details.</p>
+						<p>Press and hold a light, then slide sideways to dim it.</p>
+						<p>Press and hold a status chip to switch them all off, or lock every door.</p></div>
+					<Button size="sm" variant="secondary" onclick={dismissTips}>Got it</Button></div>
+			</section>
 		{/if}
 
 		{#if active}
@@ -176,7 +240,7 @@
 				{/snippet}
 				<div class="space-y-5">
 					{#each filteredByRoom as r (r.id ?? 'none')}
-						<div class="space-y-2"><h3 class="text-sm font-medium text-muted-foreground">{r.name}</h3><div class="grid grid-flow-dense grid-cols-2 gap-2.5 sm:gap-3">{#each r.devices as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div></div>
+						<div class="space-y-2"><h3 class="text-sm font-medium text-muted-foreground">{r.name}</h3><div class="tile-grid">{#each r.devices as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div></div>
 					{/each}
 				</div>
 			</Section>
@@ -185,9 +249,9 @@
 
 			{#if home.loaded && quick.length}
 				<Section>
-					<div class="-mx-5 flex gap-2 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
+					<div class="-mx-5 flex snap-x snap-proximity scroll-px-5 gap-2 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
 						{#each quick as q (q.id)}
-							<button type="button" disabled={q.busy || home.haHealth !== 'ok'} onclick={() => q.run()} class="flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-4 text-sm font-medium transition-colors disabled:opacity-50 {q.suggested ? 'border-primary/40 bg-primary/10 text-primary' : 'bg-card hover:bg-muted'}">{#if q.suggested}<Sparkles class="size-3.5" />{/if}{q.label}</button>
+							<button type="button" disabled={q.busy || home.haHealth !== 'ok'} onclick={() => runQuick(q)} class="flex h-11 shrink-0 snap-start items-center gap-1.5 rounded-full border px-4 text-[0.9375rem] font-medium transition-[background-color,transform] duration-150 active:scale-[0.97] disabled:opacity-50 {q.suggested ? 'border-primary/40 bg-primary/10 text-primary' : 'bg-card hover:bg-muted'}">{#if qState[q.id] === 'run'}<Loader2 class="size-4 animate-spin" />{:else if qState[q.id] === 'ok'}<Check class="size-4 animate-in text-ok duration-200 zoom-in-50" strokeWidth={3} />{:else if q.suggested}<Sparkles class="size-3.5" />{/if}{q.label}</button>
 						{/each}
 					</div>
 				</Section>
@@ -196,23 +260,49 @@
 			{#if home.loaded}
 				{#if sections.includes('favorites')}
 					<Section title="Favorites">
+						{#snippet actions()}{#if home.favoriteDevices.length > 1 && t !== 'minimal'}<Button size="sm" variant={editing ? 'default' : 'ghost'} onclick={() => { haptics.tap(); editing = !editing; }}>{editing ? 'Done' : 'Edit'}</Button>{/if}{/snippet}
 						{#if home.favoriteDevices.length}
-							<div class={t === 'minimal' ? 'space-y-2' : 'grid grid-flow-dense grid-cols-2 gap-2.5 sm:gap-3'}>
-								{#each home.favoriteDevices as d (d.id)}<div class={t === 'minimal' ? '' : tileClass(d)}><DeviceCard device={d} compact={t === 'minimal'} /></div>{/each}
-							</div>
+							{#if editing}
+								<p class="text-sm text-muted-foreground">Hold a tile and drag it onto another to move it.</p>
+								<div class="tile-grid" role="list">
+									{#each home.favoriteDevices as d (d.id)}
+										<div role="listitem" data-fav={d.id} class="relative h-full {isWide(d) ? 'col-span-2' : ''} {dragId === d.id ? 'z-30 shadow-2xl' : 'jiggle'} {overId === d.id ? 'rounded-tile shadow-[inset_0_0_0_999px_color-mix(in_oklab,var(--primary)_12%,transparent)]' : ''}" style={dragId === d.id ? `transform: translate(${dragDx}px, ${dragDy}px) scale(1.04)` : ''}>
+											<div class="pointer-events-none h-full"><DeviceCard device={d} /></div>
+											<div role="presentation" class="absolute inset-0 z-20 flex cursor-grab items-start justify-end p-2" style="touch-action: none" onpointerdown={(e) => favDown(e, d.id)} onpointermove={favMove} onpointerup={favUp} onpointercancel={favUp}><GripVertical class="size-4 text-muted-foreground/70" /></div>
+										</div>
+									{/each}
+								</div>
+							{:else}
+								<div class={t === 'minimal' ? 'space-y-2' : 'tile-grid'}>
+									{#each home.favoriteDevices as d (d.id)}<div class={t === 'minimal' ? '' : tileClass(d)}><DeviceCard device={d} compact={t === 'minimal'} /></div>{/each}
+								</div>
+							{/if}
 						{:else}
 							<p class="rounded-2xl border border-dashed px-5 py-8 text-center text-sm text-muted-foreground">
 								{#if home.devices.length}Star a device to keep it here. <a class="font-medium text-primary underline-offset-2 hover:underline" href="/devices">Browse devices</a>
 								{:else}Nothing has been shared with you yet. Ask the person who manages your home.{/if}</p>
 						{/if}
-						{#if often.length}
-							<div class="-mx-5 flex items-center gap-2 overflow-x-auto no-scrollbar px-5 pb-1 pt-1 md:mx-0 md:flex-wrap md:px-0" role="group" aria-label="Often used">
+						{#if often.length && !editing}
+							<div class="-mx-5 flex snap-x snap-proximity scroll-px-5 items-center gap-2 overflow-x-auto no-scrollbar px-5 pb-1 pt-1 md:mx-0 md:flex-wrap md:px-0" role="group" aria-label="Often used">
 								<span class="shrink-0 text-sm text-muted-foreground">Often used</span>
 								{#each often as d (d.id)}
-									<button type="button" onclick={() => home.command(d.id, d.state === 'on' ? 'turn_off' : 'turn_on')} aria-pressed={d.state === 'on'} class="flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors {d.state === 'on' ? 'border-transparent bg-on-soft text-on-foreground' : 'bg-card hover:bg-muted'}"><span class="size-1.5 rounded-full {d.state === 'on' ? 'bg-on' : 'bg-border'}"></span>{d.name}</button>
+									<button type="button" onclick={() => { haptics.tap(); home.command(d.id, d.state === 'on' ? 'turn_off' : 'turn_on'); }} aria-pressed={d.state === 'on'} class="flex h-10 shrink-0 snap-start items-center gap-2 rounded-full border px-3.5 text-sm font-medium transition-[background-color,transform] duration-150 active:scale-[0.97] {d.state === 'on' ? 'border-transparent bg-on-soft text-on-foreground' : 'bg-card hover:bg-muted'}"><span class="size-1.5 rounded-full {d.state === 'on' ? 'bg-on' : 'bg-border'}"></span>{d.name}</button>
 								{/each}
 							</div>
 						{/if}
+					</Section>
+				{/if}
+
+				{#if sections.includes('sensors') && sensors.length}
+					<Section title="At a glance">
+						<div class="-mx-5 flex snap-x snap-proximity scroll-px-5 gap-2 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0">
+							{#each sensors as d (d.id)}
+								<div class="flex h-14 min-w-[8rem] shrink-0 snap-start items-center gap-2.5 rounded-2xl border bg-card pl-2.5 pr-4">
+									<span class="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground">{#if d.category === 'energy'}<Zap class="size-[18px]" />{:else}<Gauge class="size-[18px]" />{/if}</span>
+									<span class="min-w-0"><span class="block max-w-[7rem] truncate text-xs leading-none text-muted-foreground">{d.name}</span><span class="figure mt-1.5 block whitespace-nowrap text-[1.0625rem] leading-none">{d.reading?.value}<span class="ml-0.5 text-sm font-medium text-muted-foreground">{d.reading?.unit ?? ''}</span></span></span>
+								</div>
+							{/each}
+						</div>
 					</Section>
 				{/if}
 
@@ -229,7 +319,7 @@
 											<span class="min-w-0 flex-1"><span class="block truncate text-base font-semibold tracking-[-0.015em]">{r.name}</span><span class="text-sm text-muted-foreground">{on ? `${on} on · ` : ''}{r.devices.length} device{r.devices.length === 1 ? '' : 's'}</span></span>
 											<ChevronDown class="size-4 text-muted-foreground transition-transform duration-300 {open ? 'rotate-180' : ''}" />
 										</button>
-										<Collapse {open}><div class="grid grid-cols-2 gap-2.5 px-3 pb-3 sm:gap-3">{#each r.devices as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div></Collapse>
+										<Collapse {open}><div class="tile-grid px-3 pb-3">{#each r.devices as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div></Collapse>
 									</div>
 								{/each}
 							</div>
@@ -249,7 +339,7 @@
 				{/if}
 
 				{#if !viewport.wide}
-					<Insights />
+					{#if session.me?.role !== 'guest'}<Insights />{/if}
 					{#if showSetup}{@render setup()}{/if}
 				{/if}
 			{/if}
@@ -278,7 +368,7 @@
 					{/if}
 				</Group>
 			{/if}
-			<Insights />
+			{#if session.me?.role !== 'guest'}<Insights />{/if}
 		</aside>
 	{/if}
 </main>

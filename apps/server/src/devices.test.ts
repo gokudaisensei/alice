@@ -39,7 +39,7 @@ test("members see household devices; unsupported ones stay out of the household 
   expect(list).toContain("light.kitchen");
   expect(list).not.toContain("cover.blind");
   const { admin, t } = await home();
-  const all = (await t.call("GET", "/api/admin/devices", { cookie: admin })).json.devices;
+  const all = (await t.call("GET", "/api/admin/devices?all=1", { cookie: admin })).json.devices;
   expect(all.find((d: any) => d.id === "cover.blind")).toMatchObject({ ordinary: false });
 });
 
@@ -320,4 +320,45 @@ test("a device's day is available only to people who can use it, and is honest w
   expect((await t.call("GET", "/api/devices/light.kitchen/history", { cookie: g.cookie })).status).toBe(404);
   t.ha.setStale(true);
   expect((await t.call("GET", "/api/devices/light.kitchen/history", { cookie: a.cookie! })).status).toBe(503);
+});
+
+test("the hub's housekeeping sensors are not devices, but real readings are", async () => {
+  const t = setup(); const a = await t.bootstrapAdmin("a1");
+  t.ha.entities.set("sensor.backup_last_attempted_automatic_backup", ent("sensor.backup_last_attempted_automatic_backup", "2026-10-31T10:00:00+00:00", { device_class: "timestamp" }));
+  t.ha.entities.set("sensor.backup_backup_manager_state", ent("sensor.backup_backup_manager_state", "idle", { device_class: "enum" }));
+  t.ha.entities.set("sensor.mystery_text", ent("sensor.mystery_text", "hello"));
+  t.ha.entities.set("sensor.offline_temp", ent("sensor.offline_temp", "unavailable", { device_class: "temperature", unit_of_measurement: "°C" }));
+  const ids = ((await t.call("GET", "/api/devices", { cookie: a.cookie! })).json.devices as any[]).map((d) => d.id);
+  expect(ids).toContain("sensor.temp");
+  expect(ids).toContain("sensor.offline_temp"); // a real sensor that is offline is still a device
+  for (const hidden of ["sensor.backup_last_attempted_automatic_backup", "sensor.backup_backup_manager_state", "sensor.mystery_text"]) expect(ids).not.toContain(hidden);
+});
+
+test("the admin device list is searchable and paged, so a huge home is never one long scroll", async () => {
+  const t = setup(); const a = await t.bootstrapAdmin("a1");
+  for (let i = 0; i < 150; i++) t.ha.entities.set(`light.bulk_${i}`, ent(`light.bulk_${i}`, "off", { friendly_name: `Bulk ${String(i).padStart(3, "0")}` }));
+  const get = async (q: string) => (await t.call("GET", `/api/admin/devices${q}`, { cookie: a.cookie! })).json;
+  const first = await get("?limit=50");
+  expect([first.devices.length, first.total > 150]).toEqual([50, true]);
+  expect((await get("?q=bulk 14&limit=100")).devices.map((d: any) => d.name)).toEqual(Array.from({ length: 10 }, (_, i) => `Bulk 14${i}`));
+  expect((await get("?offset=100&limit=100")).devices.length).toBeGreaterThan(0);
+  expect((await get("?q=kitchen")).devices.some((d: any) => d.id === "light.kitchen")).toBe(true);
+});
+
+test("devices move in and out of a room in bulk, and a group can be edited", async () => {
+  const t = setup(); const a = await t.bootstrapAdmin("a1"); const m = await t.addUser(a.cookie!, "member", "m1");
+  const call = (method: string, path: string, body?: any, cookie = a.cookie!) => t.call(method, path, { cookie, body });
+  const room = (await call("POST", "/api/admin/rooms", { name: "Study" })).json.id;
+  expect((await call("PUT", `/api/admin/rooms/${room}/devices`, { add: ["light.kitchen", "light.desk"] })).status).toBe(200);
+  const inRoom = async () => ((await call("GET", "/api/admin/devices?room=" + room)).json.devices as any[]).map((d) => d.id).sort();
+  expect(await inRoom()).toEqual(["light.desk", "light.kitchen"]);
+  await call("PUT", `/api/admin/rooms/${room}/devices`, { remove: ["light.kitchen"] });
+  expect(await inRoom()).toEqual(["light.desk"]);
+  expect((await call("PUT", `/api/admin/rooms/${room}/devices`, { add: ["light.nope"] })).status).toBe(400);
+  expect((await call("PUT", `/api/admin/rooms/${room}/devices`, { add: ["light.hall"] }, m.cookie)).status).toBe(403);
+  const gid = (await call("POST", "/api/admin/groups", { name: "Lamps", entityIds: ["light.desk"] })).json.id;
+  expect((await call("PUT", `/api/admin/groups/${gid}`, { name: "All lamps", entityIds: ["light.desk", "light.hall"] })).status).toBe(200);
+  expect((await call("GET", "/api/admin/groups")).json.groups).toEqual([{ id: gid, name: "All lamps", entityIds: ["light.desk", "light.hall"] }]);
+  expect((await call("PUT", `/api/admin/groups/${gid}`, { entityIds: [] })).status).toBe(400);
+  expect((await call("PUT", `/api/admin/groups/${gid}`, { name: "x" }, m.cookie)).status).toBe(403);
 });

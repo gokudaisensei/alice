@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Checkbox } from '#lib/components/ui/checkbox';
+	import { haptics } from '#lib/haptics.js';
 	import { onMount } from 'svelte';
 	import { api, explain, sensitive } from '#lib/api.js';
 	import { session } from '#lib/session.svelte.js';
@@ -71,7 +73,7 @@
 						<DropdownMenu.Root>
 							<DropdownMenu.Trigger class="inline-flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Actions for {u.displayName}"><Ellipsis class="size-4" /></DropdownMenu.Trigger>
 							<DropdownMenu.Content align="end" class="w-56">
-								<DropdownMenu.Item onSelect={() => (location.href = `/admin/users/${u.id}`)}>Choose their devices</DropdownMenu.Item>
+								<DropdownMenu.Item onSelect={() => (location.href = `/admin/users/${u.id}`)}>Choose what they can use</DropdownMenu.Item>
 								<DropdownMenu.Item onSelect={() => recovery(u)}>Give a new passkey link</DropdownMenu.Item>
 								<DropdownMenu.Separator />
 								<DropdownMenu.Label>Change role</DropdownMenu.Label>
@@ -94,7 +96,7 @@
 			<div class="space-y-1.5"><Label for="inv-name">Name</Label><Input id="inv-name" bind:value={name} maxlength={60} placeholder="e.g. Sam" required /></div>
 			<fieldset class="space-y-2"><legend class="mb-1 text-sm font-medium">Role</legend>
 				{#each roles as r}
-					<label class="flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors has-[:checked]:border-primary has-[:checked]:bg-primary/5"><input type="radio" class="mt-1 accent-[var(--primary)]" name="role" value={r} bind:group={role} /><span><span class="block text-sm font-medium">{ROLE[r]}</span><span class="text-sm text-muted-foreground">{ABOUT[r]}</span></span></label>
+					<button type="button" role="radio" aria-checked={role === r} onclick={() => { haptics.tap(); role = r; }} class="flex w-full items-start gap-3 rounded-xl border p-3 text-left transition-colors active:bg-muted {role === r ? 'border-transparent bg-primary/10' : ''}"><Checkbox checked={role === r} class="mt-0.5" /><span><span class="block text-sm font-medium">{ROLE[r]}</span><span class="text-sm text-muted-foreground">{ABOUT[r]}</span></span></button>
 				{/each}
 			</fieldset>
 			{#if error}<p role="alert" class="text-sm text-signal">{error}</p>{/if}

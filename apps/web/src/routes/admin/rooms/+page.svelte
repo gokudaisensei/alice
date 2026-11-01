@@ -1,84 +1,91 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { api, explain, reauth } from '#lib/api.js';
+	import { goto } from '$app/navigation';
+	import { api, explain } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
-	import { Button } from '#lib/components/ui/button';
-	import { Input } from '#lib/components/ui/input';
-	import { Badge } from '#lib/components/ui/badge';
+	import { haptics } from '#lib/haptics.js';
 	import Page from '#lib/components/app/Page.svelte';
 	import Section from '#lib/components/app/Section.svelte';
 	import Group from '#lib/components/app/Group.svelte';
 	import Row from '#lib/components/app/Row.svelte';
+	import Empty from '#lib/components/app/Empty.svelte';
+	import DevicePicker from '#lib/components/app/DevicePicker.svelte';
+	import * as Drawer from '#lib/components/ui/drawer';
+	import { Button } from '#lib/components/ui/button';
+	import { Input } from '#lib/components/ui/input';
+	import { DoorOpen, Plus, Trash2, Layers } from '@lucide/svelte';
 
-	type AdminDevice = { id: string; name: string; haName: string; category: string; ordinary: boolean; roomId: string | null; hidden: boolean };
-	let devices = $state<AdminDevice[]>([]);
-	let newRoom = $state('');
-	let groupName = $state('');
-	let groupPick = $state<string[]>([]);
-	let error = $state('');
+	type G = { id: string; name: string; entityIds: string[] };
+	let groups = $state<G[]>([]), error = $state('');
+	let roomOpen = $state(false), roomName = $state(''), creating = $state(false);
+	let groupOpen = $state(false), groupName = $state(''), editing = $state<G | null>(null);
+	const SUGGEST = ['Living room', 'Kitchen', 'Bedroom', 'Bathroom', 'Office', 'Hallway', 'Dining room', 'Garage', 'Garden'];
+	const suggestions = $derived(SUGGEST.filter((s) => !home.rooms.some((r) => r.name.toLowerCase() === s.toLowerCase())).slice(0, 6));
+	const unplaced = $derived(home.devices.filter((d) => !d.roomId && !['sensor', 'energy'].includes(d.category)).length);
 
-	async function refresh() {
-		const r = await api('GET', '/api/admin/devices');
-		if (r.ok) devices = r.data.devices; else error = explain(r.data?.error);
-		await home.load();
-	}
-	onMount(refresh);
+	async function loadGroups() { const r = await api('GET', '/api/admin/groups'); if (r.ok) groups = r.data.groups; else error = explain(r.data?.error); }
+	onMount(loadGroups);
 
-	async function act(p: Promise<{ ok: boolean; data: any }>) {
-		const r = await p;
-		if (!r.ok) home.say('error', explain(r.data?.error)); else await refresh();
-		return r.ok;
+	async function createRoom() {
+		creating = true; error = '';
+		const r = await api('POST', '/api/admin/rooms', { name: roomName.trim() });
+		creating = false;
+		if (!r.ok) { error = r.data?.message ?? explain(r.data?.error); return; }
+		haptics.success(); roomOpen = false; roomName = ''; await home.load();
+		goto(`/admin/rooms/${r.data.id}?add=1`); // straight on to filling it
 	}
-	const addRoom = async () => { if (newRoom.trim() && (await act(api('POST', '/api/admin/rooms', { name: newRoom.trim() })))) newRoom = ''; };
-	const place = (d: AdminDevice, roomId: string) => act(api('PUT', `/api/admin/devices/${encodeURIComponent(d.id)}`, { roomId: roomId || null }));
-	const rename = (d: AdminDevice, e: Event) => { const v = (e.currentTarget as HTMLInputElement).value.trim(); if (v && v !== d.name) act(api('PUT', `/api/admin/devices/${encodeURIComponent(d.id)}`, { name: v })); };
-	const hide = (d: AdminDevice) => act(api('PUT', `/api/admin/devices/${encodeURIComponent(d.id)}`, { hidden: !d.hidden }));
-	async function delRoom(id: string, name: string) { if (confirm(`Remove “${name}”? Its devices stay, but won’t be in a room.`)) act(api('DELETE', `/api/admin/rooms/${id}`)); }
-	async function makeGroup() {
-		if (!groupName.trim() || !groupPick.length) return;
-		if (await act(api('POST', '/api/admin/groups', { name: groupName.trim(), entityIds: groupPick }))) { groupName = ''; groupPick = []; }
+	function newGroup() { editing = null; groupName = ''; groupOpen = true; }
+	function editGroup(g: G) { editing = g; groupName = g.name; groupOpen = true; }
+	async function saveGroup(ids: string[], name: string) {
+		const r = editing ? await api('PUT', `/api/admin/groups/${editing.id}`, { name, entityIds: ids }) : await api('POST', '/api/admin/groups', { name, entityIds: ids });
+		if (!r.ok) return r.data?.message ?? explain(r.data?.error);
+		haptics.success(); await Promise.all([loadGroups(), home.load()]);
 	}
+	async function delGroup(g: G) { if (!confirm(`Delete the group “${g.name}”? The devices stay.`)) return; const r = await api('DELETE', `/api/admin/groups/${g.id}`); if (!r.ok) error = explain(r.data?.error); await Promise.all([loadGroups(), home.load()]); }
 </script>
 
-<Page title="Rooms & devices" subtitle="Organise your home: rooms, device names, and groups you control together." width="lg">
+<Page title="Rooms & devices" subtitle="Organise your home. Open a room to add or rename its devices." width="md">
+	{#snippet actions()}<Button onclick={() => (roomOpen = true)}><Plus />New room</Button>{/snippet}
 	{#if error}<p role="alert" class="text-sm text-signal">{error}</p>{/if}
 
 	<Section title="Rooms">
-		<form class="flex gap-2" onsubmit={(e) => { e.preventDefault(); addRoom(); }}>
-			<Input placeholder="New room name" bind:value={newRoom} maxlength={60} aria-label="New room name" /><Button type="submit" disabled={!newRoom.trim()}>Add room</Button>
-		</form>
 		{#if home.orderedRooms.length}
 			<Group>{#each home.orderedRooms as r (r.id)}
-				<Row title={r.name} description="{home.inRoom(r.id).length} device{home.inRoom(r.id).length === 1 ? '' : 's'}">{#snippet trailing()}<Button size="sm" variant="ghost" onclick={() => delRoom(r.id, r.name)}>Remove</Button>{/snippet}</Row>
+				<Row href="/admin/rooms/{r.id}" title={r.name} description="{home.inRoom(r.id).length} device{home.inRoom(r.id).length === 1 ? '' : 's'}">{#snippet icon()}<DoorOpen class="size-[18px]" />{/snippet}</Row>
 			{/each}</Group>
+			{#if unplaced}<p class="text-sm text-muted-foreground">{unplaced} device{unplaced === 1 ? '' : 's'} {unplaced === 1 ? "isn't" : "aren't"} in a room yet. Open a room and tap Add to place {unplaced === 1 ? 'it' : 'them'}.</p>{/if}
+		{:else}
+			<Empty title="No rooms yet" description="Rooms make devices easy to find. Start with the one you use most."><Button onclick={() => (roomOpen = true)}><Plus />New room</Button></Empty>
 		{/if}
 	</Section>
 
-	<Section title="Devices" hint="Name them and put them in rooms. Hidden devices disappear for everyone.">
-		<Group>
-			{#each devices as d (d.id)}
-				<div class="space-y-2.5 px-4 py-3.5 {d.hidden ? 'opacity-60' : ''}">
-					<div class="flex flex-wrap items-center gap-2">
-						<Input class="min-w-40 flex-1" value={d.name} maxlength={60} aria-label="Name for {d.haName}" onchange={(e) => rename(d, e)} />
-						<select class="field" value={d.roomId ?? ''} aria-label="Room for {d.name}" onchange={(e) => place(d, e.currentTarget.value)}>
-							<option value="">No room</option>
-							{#each home.orderedRooms as r}<option value={r.id}>{r.name}</option>{/each}
-						</select>
-						{#if d.ordinary}<Button size="sm" variant="secondary" onclick={() => hide(d)}>{d.hidden ? 'Show' : 'Hide'}</Button>{/if}
-					</div>
-					{#if !d.ordinary}<Badge variant="outline">Not available in the household app</Badge>{/if}
-					{#if d.ordinary && !d.hidden}
-						<label class="flex items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" class="size-4 accent-[var(--primary)]" bind:group={groupPick} value={d.id} />Include in new group</label>
-					{/if}
-				</div>
-			{/each}
-		</Group>
-	</Section>
-
-	<Section title="New group" hint="Tick devices above, name the group, then create it. Groups are controlled together from Home.">
-		<div class="flex gap-2">
-			<Input placeholder="Group name, e.g. Downstairs lights" bind:value={groupName} maxlength={60} aria-label="Group name" />
-			<Button onclick={makeGroup} disabled={!groupName.trim() || !groupPick.length}>Create ({groupPick.length})</Button>
-		</div>
+	<Section title="Groups" hint="Control several devices together from Home.">
+		{#snippet actions()}<Button size="sm" variant="secondary" onclick={newGroup}><Plus />New group</Button>{/snippet}
+		{#if groups.length}
+			<Group>{#each groups as g (g.id)}
+				<Row onclick={() => editGroup(g)} title={g.name} description="{g.entityIds.length} device{g.entityIds.length === 1 ? '' : 's'}">
+					{#snippet icon()}<Layers class="size-[18px]" />{/snippet}
+					{#snippet trailing()}<Button size="icon-sm" variant="ghost" aria-label="Delete {g.name}" onclick={(e) => { e.stopPropagation(); delGroup(g); }}><Trash2 /></Button>{/snippet}
+				</Row>
+			{/each}</Group>
+		{:else}<p class="text-sm text-muted-foreground">No groups yet. A group like “Downstairs lights” gives you one tap for the lot.</p>{/if}
 	</Section>
 </Page>
+
+<Drawer.Root bind:open={roomOpen}>
+	<Drawer.Content class="rounded-t-3xl">
+		<form class="space-y-4 px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2" onsubmit={(e) => { e.preventDefault(); if (roomName.trim()) createRoom(); }}>
+			<Drawer.Header class="px-0 pb-0"><Drawer.Title class="text-left text-xl font-semibold tracking-[-0.02em]">New room</Drawer.Title><Drawer.Description class="text-left">Name it, then choose what's in it.</Drawer.Description></Drawer.Header>
+			<Input bind:value={roomName} maxlength={60} placeholder="Room name" aria-label="Room name" class="h-12 text-lg" autofocus />
+			{#if suggestions.length}
+				<div class="-mx-5 flex gap-2 overflow-x-auto no-scrollbar px-5" role="group" aria-label="Suggestions">
+					{#each suggestions as s}<button type="button" onclick={() => { haptics.tap(); roomName = s; }} class="h-10 shrink-0 rounded-full border px-4 text-sm font-medium transition-[background-color,transform] duration-200 active:scale-[0.97] {roomName === s ? 'border-transparent bg-primary/12 text-primary' : 'bg-card'}">{s}</button>{/each}
+				</div>
+			{/if}
+			{#if error}<p role="alert" class="text-sm text-signal">{error}</p>{/if}
+			<Button type="submit" size="lg" class="w-full" disabled={creating || !roomName.trim()}>{creating ? 'Creating…' : 'Create and add devices'}</Button>
+		</form>
+	</Drawer.Content>
+</Drawer.Root>
+
+<DevicePicker bind:open={groupOpen} bind:name={groupName} title={editing ? 'Edit group' : 'New group'} nameLabel="Group name, e.g. Downstairs lights" selected={editing?.entityIds ?? []} confirm={(n) => (editing ? `Save (${n} selected)` : `Create group (${n} selected)`)} onconfirm={saveGroup} />

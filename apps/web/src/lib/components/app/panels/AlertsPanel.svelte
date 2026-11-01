@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Swipeable from '#lib/components/app/Swipeable.svelte';
 	import { onMount } from 'svelte';
 	import { api } from '#lib/api.js';
 	import { notifications, type Note } from '#lib/notifications.svelte.js';
@@ -23,7 +24,7 @@
 		{#if list.length}
 		<Group>
 			{#each list as n (n.id)}
-				<div class="flex gap-3 px-4 py-3.5 {n.read ? 'opacity-70' : ''}">
+				<Swipeable actions={n.read ? [] : [{ label: 'Read', run: () => markOne(n) }]}><div class="flex gap-3 px-4 py-3.5 {n.read ? 'opacity-70' : ''}">
 					<span class="mt-2 size-2 shrink-0 rounded-full {n.read ? 'bg-transparent' : 'bg-primary'}" aria-label={n.read ? undefined : 'Unread'}></span>
 					<div class="min-w-0 flex-1">
 						<div class="flex items-baseline justify-between gap-3"><h2 class="text-[0.9375rem] font-semibold tracking-[-0.01em]">{n.title}</h2><span class="shrink-0 text-xs text-muted-foreground">{when(n.createdAt)}</span></div>
@@ -33,7 +34,7 @@
 							{#if !n.read}<Button size="sm" variant="ghost" onclick={() => markOne(n)}>Mark read</Button>{/if}
 						</div>
 					</div>
-				</div>
+				</div></Swipeable>
 			{/each}
 		</Group>
 	{:else if loaded}

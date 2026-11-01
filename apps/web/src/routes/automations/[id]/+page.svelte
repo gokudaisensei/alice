@@ -13,6 +13,7 @@
 	import { Trash2 } from '@lucide/svelte';
 	import StepsEditor from '#lib/components/app/StepsEditor.svelte';
 	import Collapse from '#lib/components/app/Collapse.svelte';
+	import Picker from '#lib/components/app/Picker.svelte';
 	import { ChevronDown } from '@lucide/svelte';
 
 	const id = $derived(page.params.id ?? 'new');
@@ -29,7 +30,7 @@
 	const unitOf = (eid: string) => home.byId(eid)?.reading?.unit ?? '';
 	const num = (v: string) => (v === '' ? undefined : Number(v));
 	const FOR = [[0, 'right away'], [60, 'for 1 minute'], [300, 'for 5 minutes'], [900, 'for 15 minutes'], [1800, 'for 30 minutes'], [3600, 'for 1 hour']] as const;
-	const sel = 'field';
+	const OFFSETS = [{ value: -60, label: '1 hour before' }, { value: -30, label: '30 minutes before' }, { value: 0, label: 'exactly' }, { value: 30, label: '30 minutes after' }, { value: 60, label: '1 hour after' }];
 
 	onMount(async () => {
 		if (!home.loaded) await home.load();
@@ -107,23 +108,22 @@
 		{#each triggers as t, i}
 			<div class="rounded-2xl border bg-card {bad('trigger', i) ? 'border-signal ring-2 ring-signal/20' : ''}"><div class="flex flex-wrap items-center gap-2 p-3">
 				{#if t.type === 'device_state'}
-					<select class="{sel} min-w-36 flex-1" aria-label="Device for trigger {i + 1}" value={t.entityId} onchange={(e) => { t.entityId = e.currentTarget.value; t.to = statesFor(home.byId(t.entityId)!)[0]; }}>{#each withState as d}<option value={d.id}>{d.name}</option>{/each}</select>
+					<Picker class="min-w-36 flex-1" label="Device for trigger {i + 1}" value={t.entityId} options={withState.map((d) => ({ value: d.id, label: d.name }))} onchange={(v) => { t.entityId = v; t.to = statesFor(home.byId(v)!)[0]; }} />
 					<span class="text-sm">turns</span>
-					<select class="{sel} capitalize" aria-label="State for trigger {i + 1}" bind:value={t.to}>{#each statesFor(home.byId(t.entityId) ?? withState[0]) as s}<option value={s}>{s}</option>{/each}</select>
-					<select class={sel} aria-label="How long for trigger {i + 1}" value={t.forSeconds ?? 0} onchange={(e) => { const v = Number(e.currentTarget.value); if (v) t.forSeconds = v; else delete t.forSeconds; }}>{#each FOR as [v, l]}<option value={v}>{l}</option>{/each}</select>
+					<Picker capitalize label="State for trigger {i + 1}" bind:value={t.to} options={statesFor(home.byId(t.entityId) ?? withState[0]).map((x) => ({ value: x, label: x }))} />
+					<Picker label="How long for trigger {i + 1}" value={t.forSeconds ?? 0} options={FOR.map(([v, l]) => ({ value: v, label: l }))} onchange={(v) => { if (Number(v)) t.forSeconds = Number(v); else delete t.forSeconds; }} />
 				{:else if t.type === 'sensor'}
-					<select class="{sel} min-w-36 flex-1" aria-label="Sensor for trigger {i + 1}" bind:value={t.entityId}>{#each sensors as d}<option value={d.id}>{d.name}</option>{/each}</select>
+					<Picker class="min-w-36 flex-1" label="Sensor for trigger {i + 1}" bind:value={t.entityId} options={sensors.map((d) => ({ value: d.id, label: d.name }))} />
 					<span class="flex items-center gap-1 text-sm">goes above <Input type="number" class="w-20" value={t.above ?? ''} oninput={(e) => (t.above = num(e.currentTarget.value))} aria-label="Above for trigger {i + 1}" /></span>
 					<span class="flex items-center gap-1 text-sm">or below <Input type="number" class="w-20" value={t.below ?? ''} oninput={(e) => (t.below = num(e.currentTarget.value))} aria-label="Below for trigger {i + 1}" /> {unitOf(t.entityId)}</span>
 				{:else if t.type === 'time'}
 					<span class="text-sm">It is</span><Input type="time" class="w-32" bind:value={t.at} aria-label="Time for trigger {i + 1}" />
 				{:else if t.type === 'sun'}
-					<select class={sel} aria-label="Sun event for trigger {i + 1}" bind:value={t.event}><option value="sunset">Sunset</option><option value="sunrise">Sunrise</option></select>
-					<select class={sel} aria-label="Offset for trigger {i + 1}" value={t.offsetMinutes ?? 0} onchange={(e) => { const v = Number(e.currentTarget.value); if (v) t.offsetMinutes = v; else delete t.offsetMinutes; }}>
-						<option value={-60}>1 hour before</option><option value={-30}>30 minutes before</option><option value={0}>exactly</option><option value={30}>30 minutes after</option><option value={60}>1 hour after</option></select>
+					<Picker label="Sun event for trigger {i + 1}" bind:value={t.event} options={[{ value: 'sunset', label: 'Sunset' }, { value: 'sunrise', label: 'Sunrise' }]} />
+					<Picker label="Offset for trigger {i + 1}" value={t.offsetMinutes ?? 0} options={OFFSETS} onchange={(v) => { if (Number(v)) t.offsetMinutes = Number(v); else delete t.offsetMinutes; }} />
 				{:else}
 					<span class="text-sm">The household mode changes to</span>
-					<select class="{sel} capitalize" aria-label="Mode for trigger {i + 1}" bind:value={t.mode}>{#each home.mode?.modes ?? [] as m}<option value={m}>{m}</option>{/each}</select>
+					<Picker capitalize label="Mode for trigger {i + 1}" bind:value={t.mode} options={(home.mode?.modes ?? []).map((m) => ({ value: m, label: m }))} />
 				{/if}
 				<Button size="icon-sm" variant="ghost" class="ml-auto" aria-label="Remove trigger {i + 1}" onclick={() => triggers.splice(i, 1)}><Trash2 /></Button>
 			</div></div>
@@ -148,18 +148,18 @@
 		{#each conditions as c, i}
 			<div class="rounded-2xl border bg-card {bad('condition', i) ? 'border-signal ring-2 ring-signal/20' : ''}"><div class="flex flex-wrap items-center gap-2 p-3">
 				{#if c.type === 'device_state'}
-					<select class="{sel} min-w-36 flex-1" aria-label="Device for condition {i + 1}" value={c.entityId} onchange={(e) => { c.entityId = e.currentTarget.value; c.is = statesFor(home.byId(c.entityId)!)[0]; }}>{#each withState as d}<option value={d.id}>{d.name}</option>{/each}</select>
+					<Picker class="min-w-36 flex-1" label="Device for condition {i + 1}" value={c.entityId} options={withState.map((d) => ({ value: d.id, label: d.name }))} onchange={(v) => { c.entityId = v; c.is = statesFor(home.byId(v)!)[0]; }} />
 					<span class="text-sm">is</span>
-					<select class="{sel} capitalize" aria-label="State for condition {i + 1}" bind:value={c.is}>{#each statesFor(home.byId(c.entityId) ?? withState[0]) as s}<option value={s}>{s}</option>{/each}</select>
+					<Picker capitalize label="State for condition {i + 1}" bind:value={c.is} options={statesFor(home.byId(c.entityId) ?? withState[0]).map((x) => ({ value: x, label: x }))} />
 				{:else if c.type === 'sensor'}
-					<select class="{sel} min-w-36 flex-1" aria-label="Sensor for condition {i + 1}" bind:value={c.entityId}>{#each sensors as d}<option value={d.id}>{d.name}</option>{/each}</select>
+					<Picker class="min-w-36 flex-1" label="Sensor for condition {i + 1}" bind:value={c.entityId} options={sensors.map((d) => ({ value: d.id, label: d.name }))} />
 					<span class="flex items-center gap-1 text-sm">is above <Input type="number" class="w-20" value={c.above ?? ''} oninput={(e) => (c.above = num(e.currentTarget.value))} aria-label="Above for condition {i + 1}" /></span>
 					<span class="flex items-center gap-1 text-sm">and below <Input type="number" class="w-20" value={c.below ?? ''} oninput={(e) => (c.below = num(e.currentTarget.value))} aria-label="Below for condition {i + 1}" /> {unitOf(c.entityId)}</span>
 				{:else if c.type === 'time'}
 					<span class="text-sm">The time is between</span><Input type="time" class="w-32" bind:value={c.after} aria-label="From time for condition {i + 1}" /><span class="text-sm">and</span><Input type="time" class="w-32" bind:value={c.before} aria-label="Until time for condition {i + 1}" />
 				{:else if c.type === 'mode'}
 					<span class="text-sm">The household mode is</span>
-					<select class="{sel} capitalize" aria-label="Mode for condition {i + 1}" bind:value={c.mode}>{#each home.mode?.modes ?? [] as m}<option value={m}>{m}</option>{/each}</select>
+					<Picker capitalize label="Mode for condition {i + 1}" bind:value={c.mode} options={(home.mode?.modes ?? []).map((m) => ({ value: m, label: m }))} />
 				{:else}
 					<span class="text-sm">Only on</span>
 					<span class="flex flex-wrap gap-1" role="group" aria-label="Days for condition {i + 1}">{#each DAYS as [d, l]}<Button size="sm" variant={dayOn(c, d) ? 'secondary' : 'outline'} aria-pressed={dayOn(c, d)} onclick={() => flip(c, d)}>{l}</Button>{/each}</span>

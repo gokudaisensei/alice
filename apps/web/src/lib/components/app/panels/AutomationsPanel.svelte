@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Swipeable from '#lib/components/app/Swipeable.svelte';
 	import { onMount } from 'svelte';
 	import { api, explain } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
@@ -50,7 +51,7 @@
 	{#if list.length}
 		<div class="space-y-3">
 			{#each list as a (a.id)}
-				<article class="rounded-tile border bg-card p-4 {a.enabled === false ? 'opacity-80' : ''}">
+				<Swipeable class="rounded-tile border" actions={a.enabled === null ? [] : [{ label: a.enabled ? 'Turn off' : 'Turn on', tone: a.enabled ? 'default' : 'on', run: () => toggle(a, !a.enabled) }]}><article class="bg-card p-4 {a.enabled === false ? 'opacity-80' : ''}">
 					<div class="flex items-start justify-between gap-3">
 						<div class="min-w-0">
 							<h2 class="heading truncate">{a.name}</h2>
@@ -64,7 +65,7 @@
 						<p class="text-sm text-muted-foreground">{#if a.lastTriggered && when(a.lastTriggered)}Last ran {when(a.lastTriggered)}{:else}Hasn't run yet{/if}</p>
 						<div class="flex gap-1"><Button size="sm" variant="ghost" href="/automations/{a.id}"><Pencil />Edit</Button><Button size="sm" variant="ghost" disabled={!!busy[a.id] || home.haHealth !== 'ok'} onclick={() => duplicate(a)}><Copy />Duplicate</Button></div>
 					</div>
-				</article>
+				</article></Swipeable>
 			{/each}
 		</div>
 	{:else if loaded}

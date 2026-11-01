@@ -69,7 +69,9 @@ export function describe(e: HaEntity): Descriptor {
     case "binary_sensor": {
       const energy = domain === "sensor" && ENERGY_CLASSES.includes(a.device_class);
       const unit = a.unit_of_measurement ?? null;
-      return { ...base, category: energy ? "energy" : "sensor", reading: { value: e.state, unit, kind: "measurement" } };
+      // Plain readings only. Timestamps ("last backup"), dates and enum text states are the hub's own housekeeping, not things in a home.
+      const housekeeping = domain === "sensor" && (["timestamp", "date", "enum", "duration"].includes(a.device_class) || (!unit && !a.device_class && !Number.isFinite(Number(e.state)) && e.state !== "unavailable" && e.state !== "unknown"));
+      return { ...base, category: energy ? "energy" : "sensor", ordinary: !housekeeping, reading: { value: e.state, unit, kind: "measurement" } };
     }
     default:
       // covers, blinds, curtains (excluded from v1) and anything else

@@ -56,6 +56,12 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | Search | "Turn off the kitchen lights" is understood by fixed rules (`lib/intent.ts`, unit tested): on/off, dim to N%, lock, run a scene or routine. It never unlocks, and says nothing rather than guess between near matches. Verified once against the real hub | ✅ |
 | Personal | The "often used" row counts this person's own taps (3 or more); time-of-day suggestions match scene and routine *names* (night, morning, evening). Both only suggest | ✅ |
 | History | The device drawer's 24-hour strip comes from HA's history API. Verified against the real hub; the time before HA's first record is left blank | ✅ |
+| Touch | Everything touch-related (icon-to-switch, press-hold-slide dimming, swipe rows, hold-to-reorder favorites, swipe between rooms, hold a status chip for bulk actions, haptics) is **checked in a desktop browser with pointer events only**, not on a real phone | ⛔ |
+| Haptics | Android uses the vibration API. iPhone Safari has no such API, so a tick is produced by toggling a hidden switch control (works on recent iOS). Unverified on a device; there is a Settings switch to turn it off | ⛔ |
+| Push buttons | The "Lock" button on an open-door notification works where the browser supports notification actions (Android Chrome and desktop); iPhone Safari does not show action buttons, so the tap opens the app instead. The button's request path is tested; the phone side is not | 🟡 |
+| App shortcuts | Long-press-the-icon shortcuts (`?do=lock-all` and friends) come from the web app manifest: Android Chrome supports them, iPhone does not. Icons are generated PNGs | 🟡 |
+| Scene progress | Quick-action pills show a spinner, then a tick. They cannot say "5 of 6 done", because the hub only reports that a scene was sent or a routine started | ➖ |
+| Admin | Device "hide from everyone" is no longer in the interface (the server still supports it); the room screen has rename and remove | ⛔ |
 | Layout | Checked on a 375 px phone (light and dark) and a 1280 px desktop for Home, Routines, Activity, You and the automation builder; not every page in every combination | 🟡 |
 
 ## Re-running the real-world checks

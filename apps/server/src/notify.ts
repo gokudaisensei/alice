@@ -68,12 +68,12 @@ export function createNotifier(db: Database, svc: DeviceService, push: PushSende
     return sent;
   }
 
-  type N = { householdId: string; kind: (typeof KINDS)[number] | "maintenance"; audience?: "admins"; title: string; body: string; entityId?: string; dedupeKey: string; dedupeMs?: number };
+  type N = { householdId: string; kind: (typeof KINDS)[number] | "maintenance"; audience?: "admins"; actions?: { action: string; title: string }[]; title: string; body: string; entityId?: string; dedupeKey: string; dedupeMs?: number };
   /** Who hears about it: people who may use the device, or admins and members for household-wide news. */
   function recipients(n: N) {
     const users = db.query("SELECT id, role FROM users WHERE household_id = ? AND status = 'active'").all(n.householdId) as { id: string; role: "admin" | "member" | "guest" }[];
     if (n.audience === "admins") return users.filter((u) => u.role === "admin");
-    return users.filter((u) => (n.entityId ? svc.accessor(u as any)(n.entityId) : u.role !== "guest"));
+    return users.filter((u) => !(n.kind === "insight" && u.role === "guest")).filter((u) => (n.entityId ? svc.accessor(u as any)(n.entityId) : u.role !== "guest"));
   }
   async function emit(n: N) {
     const t = now(), out = { recipients: 0, pushed: 0 };
@@ -95,7 +95,7 @@ export function createNotifier(db: Database, svc: DeviceService, push: PushSende
       db.query("INSERT INTO notifications (id, household_id, user_id, kind, title, body, entity_id, dedupe_key, created_at) VALUES (?,?,?,?,?,?,?,?,?)")
         .run(randomUUID(), n.householdId, u.id, n.kind, n.title, n.body, n.entityId ?? null, n.dedupeKey, t);
       out.recipients++;
-      if (!inQuiet(p, t)) out.pushed += await pushTo(u.id, { title: n.title, body: n.body, url: "/notifications" });
+      if (!inQuiet(p, t)) out.pushed += await pushTo(u.id, { title: n.title, body: n.body, url: "/activity", ...(n.entityId ? { entityId: n.entityId } : {}), ...(n.actions ? { actions: n.actions } : {}) });
     }
     return out;
   }
@@ -133,7 +133,7 @@ export function notifyRoutes(db: Database, secure: boolean, nf: Notifier) {
     .get("/api/me/notifications", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const subs = (db.query("SELECT COUNT(*) n FROM push_subscriptions WHERE user_id = ?").get(g.user.id) as any).n;
-      return { ...nf.prefsOf(g.user.id), kinds: KINDS, pushDevices: subs, pushAvailable: !!nf.push };
+      return { ...nf.prefsOf(g.user.id), kinds: g.user.role === "guest" ? KINDS.filter((k) => k !== "insight") : KINDS, pushDevices: subs, pushAvailable: !!nf.push };
     })
     .put("/api/me/notifications", ({ request, body, set }: any) => {
       const g = authorize(db, request, secure, ["prefs.edit"]); if (!("user" in g)) return deny(set, g.status, g.body.error);

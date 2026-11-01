@@ -4,4 +4,4 @@
 	let { children, class: cls = '' }: { children: Snippet; class?: string } = $props();
 </script>
 
-<div class="divide-y divide-border overflow-hidden rounded-2xl border bg-card {cls}">{@render children()}</div>
+<div class="stagger divide-y divide-border overflow-hidden rounded-2xl border bg-card {cls}">{@render children()}</div>

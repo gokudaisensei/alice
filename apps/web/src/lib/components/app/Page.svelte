@@ -8,7 +8,7 @@
 		title: string; subtitle?: string; back?: { href: string; label: string }; width?: 'sm' | 'md' | 'lg' | 'xl';
 		actions?: Snippet; children: Snippet;
 	} = $props();
-	const max = { sm: 'max-w-xl', md: 'max-w-2xl', lg: 'max-w-4xl', xl: 'max-w-6xl' };
+	const max = { sm: 'max-w-xl', md: 'max-w-3xl', lg: 'max-w-4xl', xl: 'max-w-6xl' };
 	let h1: HTMLElement | undefined = $state();
 
 	// The large title collapses into the slim bar on phones once it scrolls out of view.
@@ -21,7 +21,8 @@
 	$effect(() => { chrome.title = title; });
 </script>
 
-<main class="mx-auto w-full {max[width]} px-5 pb-10 pt-4 md:px-10 md:pb-16 md:pt-10">
+<main class="mx-auto w-full max-w-6xl px-5 pb-10 pt-4 md:px-10 md:pb-16 md:pt-10">
+	<div class="{max[width]}">
 	{#if back}<a href={back.href} class="-ml-1 mb-2 inline-flex items-center gap-0.5 text-sm text-muted-foreground transition-colors hover:text-foreground"><ChevronLeft class="size-4" />{back.label}</a>{/if}
 	<header class="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-3 md:mb-7">
 		<div class="min-w-0 flex-1">
@@ -33,5 +34,6 @@
 			<button type="button" class="flex size-9 items-center justify-center rounded-full bg-secondary text-muted-foreground md:hidden" aria-label="Search" onclick={() => (chrome.search = true)}><Search class="size-4" /></button>
 		</div>
 	</header>
-	<div class="space-y-7 md:space-y-9">{@render children()}</div>
+	<div class="stagger space-y-7 md:space-y-9">{@render children()}</div>
+	</div>
 </main>

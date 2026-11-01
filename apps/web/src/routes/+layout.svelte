@@ -8,6 +8,9 @@
 	import { api } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
 	import { chrome } from '#lib/chrome.svelte.js';
+	import { fly } from 'svelte/transition';
+	import { cubicOut } from 'svelte/easing';
+	import { dur } from '#lib/motion.js';
 	import { notifications } from '#lib/notifications.svelte.js';
 	import { tabs, manageNav, type NavItem } from '#lib/nav.js';
 	import Notice from '#lib/components/app/Notice.svelte';
@@ -51,7 +54,7 @@
 </script>
 
 <svelte:window onkeydown={onKey} />
-<svelte:head><link rel="icon" href={favicon} /><title>Home</title><meta name="theme-color" content="#f5f6f7" media="(prefers-color-scheme: light)" /><meta name="theme-color" content="#0b1013" media="(prefers-color-scheme: dark)" /></svelte:head>
+<svelte:head><link rel="icon" href={favicon} /><title>Home</title><meta name="theme-color" content="#f4f5f9" media="(prefers-color-scheme: light)" /><meta name="theme-color" content="#080b16" media="(prefers-color-scheme: dark)" /></svelte:head>
 
 {#snippet mark()}
 	<span class="flex size-8 items-center justify-center rounded-[10px] bg-primary text-primary-foreground" aria-hidden="true">
@@ -101,7 +104,7 @@
 
 		<div class="min-w-0">
 			<!-- Desktop: a search field. Phone: nothing at the top until the large title scrolls away, then a slim title bar. -->
-			<header class="sticky top-0 z-30 hidden h-14 items-center gap-3 border-b bg-background/80 px-10 backdrop-blur-xl md:flex">
+			<header class="sticky top-0 z-30 hidden h-14 border-b bg-background/80 backdrop-blur-xl md:block"><div class="mx-auto flex h-full w-full max-w-6xl items-center gap-3 px-10">
 				<button type="button" onclick={() => (chrome.search = true)} class="flex h-9 w-full max-w-sm items-center gap-2 rounded-xl border bg-card px-3 text-sm text-muted-foreground transition-colors hover:border-input">
 					<Search class="size-4" /><span class="flex-1 text-left">Search or jump to…</span><kbd class="rounded-md border bg-muted px-1.5 text-[11px] font-medium">⌘K</kbd>
 				</button>
@@ -110,18 +113,18 @@
 						<svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>{#if notifications.unread}<span class="absolute right-1.5 top-1.5 size-2 rounded-full bg-signal ring-2 ring-background"></span>{/if}
 					</Button>
 				</div>
-			</header>
+			</div></header>
 			<div class="pointer-events-none fixed inset-x-0 top-0 z-30 flex h-11 items-center justify-center border-b bg-background/85 backdrop-blur-xl transition-opacity duration-200 md:hidden {chrome.compact ? 'opacity-100' : 'opacity-0'}" aria-hidden={!chrome.compact}>
 				<span class="text-[0.9375rem] font-semibold tracking-[-0.01em]">{chrome.title}</span>
 			</div>
 			<HubBanner /><SupportBanner /><UpdateBanner />
-			<div class="pb-[4.5rem] md:pb-0">{@render children()}</div>
+			<div class="pb-[4.5rem] md:pb-0">{#key path}<div in:fly={{ y: 10, duration: dur(240), easing: cubicOut }}>{@render children()}</div>{/key}</div>
 		</div>
 
 		<nav class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t bg-background/90 px-1 pb-[max(0.125rem,env(safe-area-inset-bottom))] pt-0.5 backdrop-blur-xl md:hidden" aria-label="Main">
 			{#each nav as t (t.href)}
-				<a href={t.href} aria-current={here(t) ? 'page' : undefined} class="relative flex flex-col items-center gap-px rounded-lg py-1 text-[10px] font-medium {here(t) ? 'text-primary' : 'text-muted-foreground'}">
-					{#if t.href === '/you'}<span class="flex size-[21px] items-center justify-center rounded-full text-[11px] font-semibold {here(t) ? 'bg-primary text-primary-foreground' : 'bg-secondary'}">{initial}</span>{:else}<t.icon class="size-[21px]" />{/if}{t.label}
+				<a href={t.href} aria-current={here(t) ? 'page' : undefined} class="relative flex flex-col items-center gap-px rounded-lg py-1 text-[10px] font-medium transition-colors duration-200 before:absolute before:left-1/2 before:top-0 before:h-0.5 before:-translate-x-1/2 before:rounded-full before:bg-primary before:transition-all before:duration-300 {here(t) ? 'text-primary before:w-7 before:opacity-100' : 'text-muted-foreground before:w-0 before:opacity-0'}">
+					{#if t.href === '/you'}<span class="flex size-[21px] items-center justify-center rounded-full text-[11px] font-semibold {here(t) ? 'bg-primary text-primary-foreground' : 'bg-secondary'}">{initial}</span>{:else}<t.icon class="size-[21px] transition-transform duration-300 {here(t) ? '-translate-y-px scale-110' : ''}" />{/if}{t.label}
 					{#if t.badge}<span class="absolute right-[calc(50%-18px)] top-0.5 size-2 rounded-full bg-signal ring-2 ring-background"></span>{/if}
 				</a>
 			{/each}

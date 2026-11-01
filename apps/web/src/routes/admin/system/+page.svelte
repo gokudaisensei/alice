@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Checkbox } from '#lib/components/ui/checkbox';
+	import Picker from '#lib/components/app/Picker.svelte';
 	import { onMount } from 'svelte';
 	import { api, explain, sensitive } from '#lib/api.js';
 	import { Button } from '#lib/components/ui/button';
@@ -67,7 +69,7 @@
 				<Button disabled={busy} onclick={makeKey}>Create backup key</Button>
 			{/if}
 			{#if newKey}
-				<div class="space-y-2 rounded-lg border border-primary p-3" role="alert"><p class="text-sm font-medium">This is the only time the key is shown.</p>
+				<div class="space-y-2 rounded-lg border border-transparent bg-primary/10 p-3" role="alert"><p class="text-sm font-medium">This is the only time the key is shown.</p>
 					<p class="break-all font-mono text-xs">{newKey}</p><Button onclick={saveKey}>Download the key file</Button> <Button variant="ghost" onclick={() => (newKey = '')}>I've saved it</Button></div>
 			{/if}
 			{#if bk?.recipientSet}
@@ -106,10 +108,15 @@
 				<p class="text-sm">Allowed until <strong>{when(sup.active.expiresAt)}</strong> for: {sup.active.scopes.map((s: string) => (s === 'diagnostics' ? 'health checks' : 'a read-only look at your setup')).join(' and ')}. {sup.active.connected ? `${sup.active.operatorName} is connected.` : 'Nobody has connected yet.'}</p>
 				<Button variant="destructive" onclick={revoke}>End support access now</Button>
 			{:else}
-				<fieldset class="space-y-1"><legend class="text-sm font-medium">They may</legend>
-					<label class="flex items-center gap-2 text-sm"><input type="checkbox" class="size-4" checked={scopes.includes('diagnostics')} onchange={() => toggle('diagnostics')} />See health checks (no personal data)</label>
-					<label class="flex items-center gap-2 text-sm"><input type="checkbox" class="size-4" checked={scopes.includes('read_config')} onchange={() => toggle('read_config')} />Look at how your home is set up (rooms, device and automation names; no people, no history)</label></fieldset>
-				<label class="flex items-center gap-2 text-sm">For <select class="h-9 rounded-md border bg-background px-2" bind:value={hours}>{#each [1, 4, 24, 72] as h}<option value={h}>{h} hour{h === 1 ? '' : 's'}</option>{/each}</select></label>
+				<div class="space-y-2">
+					<p class="text-sm font-medium">They may</p>
+					<div class="overflow-hidden rounded-xl border">
+						{#each [['diagnostics', 'See health checks', 'No personal data'], ['read_config', 'Look at how your home is set up', 'Room, device and automation names. No people, no history.']] as [k, t, d]}
+							<button type="button" role="checkbox" aria-checked={scopes.includes(k)} onclick={() => toggle(k)} class="flex min-h-14 w-full items-center gap-3 border-b px-3.5 py-2.5 text-left last:border-b-0 active:bg-muted"><Checkbox checked={scopes.includes(k)} /><span><span class="block text-sm font-medium">{t}</span><span class="text-sm text-muted-foreground">{d}</span></span></button>
+						{/each}
+					</div>
+				</div>
+				<div class="flex items-center gap-3 text-sm">For <Picker class="w-36" label="How long" bind:value={hours} options={[1, 4, 24, 72].map((h) => ({ value: h, label: `${h} hour${h === 1 ? '' : 's'}` }))} /></div>
 				<Button disabled={busy || !scopes.length} onclick={grant}>Allow support access</Button>
 			{/if}
 		</div></Section>

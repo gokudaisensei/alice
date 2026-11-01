@@ -129,7 +129,7 @@ export function insightRoutes(db: Database, secure: boolean, ins: InsightService
   return new Elysia({ name: "insights" })
     .get("/api/insights", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      return { insights: ins.forUser(g.user) };
+      return { insights: g.user.role === "guest" ? [] : ins.forUser(g.user) };
     })
     .post("/api/insights/dismiss", ({ request, body, set }: any) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
@@ -139,6 +139,7 @@ export function insightRoutes(db: Database, secure: boolean, ins: InsightService
     })
     .get("/api/energy", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
+      if (g.user.role === "guest") return deny(set, 403, "forbidden");
       return ins.energy(g.user);
     });
 }

@@ -6,6 +6,7 @@
 	import { Input } from '#lib/components/ui/input';
 	import Page from '#lib/components/app/Page.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
+	import { Button } from '#lib/components/ui/button';
 	import { Search } from '@lucide/svelte';
 
 	import { page } from '$app/state';
@@ -27,7 +28,9 @@
 	});
 
 	const cats = $derived([...new Set(home.devices.map((d) => d.category))]);
-	const list = $derived<Device[]>(home.devices.filter((d) => (hits ? hits.includes(d.id) : true) && (filter === 'all' || d.category === filter)));
+	let shown = $state(36);
+	$effect(() => { q; filter; shown = 36; });
+	const all = $derived<Device[]>(home.devices.filter((d) => (hits ? hits.includes(d.id) : true) && (filter === 'all' || d.category === filter)));
 </script>
 
 <Page title="Devices" subtitle="Everything you can control, in one place." width="xl">
@@ -39,8 +42,9 @@
 			{/each}
 		</div>
 	</div>
-	{#if list.length}
-		<div class="grid grid-flow-dense grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3">{#each list as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div>
+	{#if all.length}
+		<div class="tile-grid">{#each all.slice(0, shown) as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div>
+		{#if all.length > shown}<div class="flex justify-center"><Button variant="secondary" onclick={() => (shown += 36)}>Show {Math.min(36, all.length - shown)} more <span class="text-muted-foreground">({all.length - shown} left)</span></Button></div>{/if}
 	{:else if home.loaded}
 		<Empty title={q ? 'No devices match' : 'No devices yet'} description={q ? 'Try a different name, room or type.' : 'Nothing has been shared with you yet. Ask the person who manages your home.'} />
 	{/if}

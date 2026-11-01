@@ -14,6 +14,17 @@
 	const pages = $derived(allPages(session.can, home.devices.some((d) => d.category === 'energy')));
 	// Plain rules, no AI: understands "turn off the kitchen lights" if it matches something specific in this home.
 	const intent = $derived(parseIntent(query, { devices: home.devices.map((d) => ({ id: d.id, name: d.name, category: d.category, roomId: d.roomId })), rooms: home.rooms, scenes: home.scenes, routines: home.routines }));
+	// Things worth trying, drawn from this home. Choosing one fills the box; nothing runs until you press Enter on the result.
+	const tries = $derived.by(() => {
+		const t: string[] = [];
+		const on = home.devices.filter((d) => d.category === 'light' && d.state === 'on' && d.available);
+		const off = home.devices.find((d) => d.category === 'light' && d.state === 'off' && d.available);
+		if (on.length > 1) t.push('Turn off all lights');
+		if (home.devices.some((d) => d.category === 'lock')) t.push('Lock all doors');
+		if (off) t.push(`Turn on ${off.name}`);
+		if (home.scenes[0]) t.push(`Activate ${home.scenes[0].name}`);
+		return t.slice(0, 4);
+	});
 	const acts = $derived(home.devices.filter((d) => query.trim() || d.controls.length > 0).slice(0, query.trim() ? 200 : 40).map((d) => {
 		const power = d.available && d.controls.some((c) => c.type === 'power');
 		if (power) return { d, label: d.state === 'on' ? 'Turn off' : 'Turn on', run: () => home.command(d.id, d.state === 'on' ? 'turn_off' : 'turn_on') };
@@ -34,6 +45,11 @@
 	<Command.Input placeholder="Search, or type “turn off the kitchen lights”…" bind:value={query} />
 	<Command.List class="max-h-[22rem]">
 		<Command.Empty>Nothing matches that.</Command.Empty>
+		{#if !query.trim() && tries.length}
+			<Command.Group heading="Try">
+				{#each tries as t (t)}<Command.Item value="try {t}" onSelect={() => (query = t)}><CornerDownLeft class="size-4 opacity-50" /><span class="flex-1 truncate">“{t}”</span></Command.Item>{/each}
+			</Command.Group>
+		{/if}
 		{#if intent}
 			<Command.Group heading="Do this">
 				<Command.Item value="{query} do this" onSelect={() => run(doIntent)}>
@@ -58,7 +74,7 @@
 		{/if}
 		{#if home.rooms.length}
 			<Command.Group heading="Rooms">
-				{#each home.rooms as r (r.id)}<Command.Item value="{r.name} room" onSelect={() => run(() => goto(`/rooms/${r.id}`))}><span class="flex-1 truncate">{r.name}</span><span class="text-xs text-muted-foreground">Open</span></Command.Item>{/each}
+				{#each home.rooms as r (r.id)}<Command.Item value="{r.name} room" onSelect={() => run(() => goto(`/rooms?room=${r.id}`))}><span class="flex-1 truncate">{r.name}</span><span class="text-xs text-muted-foreground">Open</span></Command.Item>{/each}
 			</Command.Group>
 		{/if}
 		<Command.Group heading="Go to">

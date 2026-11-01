@@ -5,11 +5,14 @@
 	import { session } from '#lib/session.svelte.js';
 	import { Button } from '#lib/components/ui/button';
 	import Page from '#lib/components/app/Page.svelte';
+	import Segmented from '#lib/components/app/Segmented.svelte';
 	import Section from '#lib/components/app/Section.svelte';
 	import Group from '#lib/components/app/Group.svelte';
 	import Row from '#lib/components/app/Row.svelte';
 	import { Switch } from '#lib/components/ui/switch';
-	import { ArrowDown, ArrowUp, LogOut } from '@lucide/svelte';
+	import { ArrowDown, ArrowUp } from '@lucide/svelte';
+	import { haptics, hapticsAvailable, hapticsEnabled, setHaptics } from '#lib/haptics.js';
+	let hapticsOn = $state(hapticsEnabled());
 
 	const p = $derived(home.prefs);
 	const templates = [
@@ -26,17 +29,19 @@
 <Page title="Appearance and home screen" subtitle="Only you see these choices." back={{ href: '/you', label: 'You' }} width="md">
 	{#if p}
 		<Section title="Appearance">
-			<div class="grid grid-cols-3 gap-1 rounded-2xl bg-secondary p-1" role="group" aria-label="Appearance">
-				{#each [['system', 'Match device'], ['light', 'Light'], ['dark', 'Dark']] as [a, label]}
-					<button type="button" aria-pressed={p.appearance === a} onclick={() => home.savePrefs({ appearance: a as any })} class="h-10 rounded-xl text-sm font-medium transition-all {p.appearance === a ? 'bg-card shadow-[0_1px_3px_rgba(0,0,0,0.12)]' : 'text-muted-foreground hover:text-foreground'}">{label}</button>
-				{/each}
-			</div>
+			<Segmented label="Appearance" value={p.appearance} options={[{ id: 'system', label: 'Match device' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }]} onselect={(a) => home.savePrefs({ appearance: a as any })} />
 		</Section>
+
+		{#if hapticsAvailable()}
+			<Section title="Touch">
+				<Group><Row title="Haptic feedback" description="A small tap you can feel when you switch, lock or dim something">{#snippet trailing()}<Switch checked={hapticsOn} aria-label="Haptic feedback" onCheckedChange={(v) => { hapticsOn = v; setHaptics(v); if (v) haptics.success(); }} />{/snippet}</Row></Group>
+			</Section>
+		{/if}
 
 		<Section title="Home screen">
 			<div class="grid gap-3 sm:grid-cols-2" role="group" aria-label="Home screen layout">
 				{#each templates as t}
-					<button type="button" class="rounded-tile border bg-card p-4 text-left transition-colors {p.template === t.id ? 'border-primary ring-2 ring-primary/30' : 'hover:bg-muted/60'}" aria-pressed={p.template === t.id} onclick={() => home.savePrefs({ template: t.id })}>
+					<button type="button" class="rounded-tile border p-4 text-left transition-colors duration-200 {p.template === t.id ? 'border-transparent bg-primary/12' : 'bg-card hover:bg-muted/60'}" aria-pressed={p.template === t.id} onclick={() => home.savePrefs({ template: t.id })}>
 						<span class="block font-semibold tracking-[-0.015em]">{t.name}</span><span class="mt-0.5 block text-sm text-muted-foreground">{t.blurb}</span>
 					</button>
 				{/each}

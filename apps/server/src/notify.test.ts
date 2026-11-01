@@ -242,7 +242,7 @@ test("the energy page shows only meters you can see, and says how it measures", 
   expect(m).toMatchObject({ kind: "power", peak24h: 49, low24h: 40, unit: "W" });
   expect(e.note).toContain("15 minutes");
   expect(e.sampledSince).not.toBeNull();
-  expect((await j("GET", "/api/energy", guest.cookie)).json.meters).toEqual([]); // guests see no devices by default
+  expect((await j("GET", "/api/energy", guest.cookie)).status).toBe(403); // guests never see energy use
   expect((await t.call("GET", "/api/energy")).status).toBe(401);
 });
 
@@ -255,4 +255,14 @@ test("the daily sweep tells only the people who can see the device", async () =>
   expect(await ins.sweep(nf)).toBe(0); // not again within three days
   expect(((await j("GET", "/api/notifications", guest.cookie)).json.notifications as any[])).toEqual([]);
   void admin; void member;
+});
+
+test("an unlocked-door push carries a Lock button the phone can use without opening the app", async () => {
+  const { t, admin, j, nf } = await home();
+  await j("POST", "/api/push/subscribe", admin, { endpoint: EP, keys: KEYS });
+  const stop = startRules(t.db, t.ha, nf, FAST);
+  t.ha.set("lock.front", "unlocked"); await wait(120);
+  stop();
+  const p = t.push.sent.at(-1)!.payload;
+  expect(p).toMatchObject({ title: "front is unlocked", entityId: "lock.front", actions: [{ action: "lock", title: "Lock" }] });
 });

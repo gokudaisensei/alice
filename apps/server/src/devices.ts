@@ -36,7 +36,11 @@ export function createDeviceService(db: Database, ha: HaApi) {
   /** Role default, overridable per user. Guests start with nothing. */
   const accessor = (u: SessionUser) => {
     const rows = new Map((db.query("SELECT entity_id, allowed FROM device_access WHERE user_id = ?").all(u.id) as any[]).map((r) => [r.entity_id, !!r.allowed]));
-    return (id: string) => rows.get(id) ?? u.role !== "guest";
+    return (id: string) => {
+      // Guests never see energy use, whatever they were granted: it says when the house is empty and what is in it.
+      if (u.role === "guest") { const e = ha.entities.get(id); if (e && describe(e).category === "energy") return false; }
+      return rows.get(id) ?? u.role !== "guest";
+    };
   };
 
   function viewOf(e: HaEntity, m: any): DeviceView | null {
@@ -198,13 +202,13 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
             const dev = svc.deviceFor(user, e.entityId);
             if (dev) send("device", dev.view);
           });
-          const ping = setInterval(() => { try { ctrl.enqueue(enc.encode(":\n\n")); } catch {} }, 25_000);
+          const ping = setInterval(() => { try { ctrl.enqueue(enc.encode(":\n\n")); } catch {} }, 15_000);
           cleanup = () => { if (closed) return; closed = true; off(); clearInterval(ping); openStreams.set(uid, Math.max(0, (openStreams.get(uid) ?? 1) - 1)); };
           request.signal.addEventListener("abort", cleanup);
           send("hello", { haHealth: ha.health(), stale: ha.isStale() });
         },
         cancel() { cleanup(); },
       });
-      return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no" } });
+      return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache, no-transform", "x-accel-buffering": "no" } });
     });
 }

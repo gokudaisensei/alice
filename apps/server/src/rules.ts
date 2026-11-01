@@ -36,7 +36,7 @@ export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays
     if (d.domain === "lock") {
       if (e.state === "unlocked") arm(`lock:${id}`, delays.lockMs, () => ha.entities.get(id)?.state === "unlocked", () => {
         const h = household(); if (!h) return;
-        void nf.emit({ householdId: h, kind: "lock_open", entityId: id, dedupeKey: `lock:${id}`, title: `${nameOf(id)} is unlocked`, body: `It has been unlocked for ${mins(delays.lockMs)}.` });
+        void nf.emit({ householdId: h, kind: "lock_open", entityId: id, actions: [{ action: "lock", title: "Lock" }], dedupeKey: `lock:${id}`, title: `${nameOf(id)} is unlocked`, body: `It has been unlocked for ${mins(delays.lockMs)}.` });
       });
       else disarm(`lock:${id}`);
     }

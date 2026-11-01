@@ -3,6 +3,7 @@
 	import { actionsFor, type Step } from '#lib/steps.js';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
+	import Picker from '#lib/components/app/Picker.svelte';
 	import { ArrowDown, ArrowUp, Trash2 } from '@lucide/svelte';
 
 	let { steps = $bindable(), failed = null }: { steps: Step[]; failed?: number | null } = $props();
@@ -39,24 +40,20 @@
 			</div>
 			{#if s.type === 'device'}
 				<div class="flex flex-wrap gap-2">
-					<select class="field min-w-40 flex-1" aria-label="Device for step {i + 1}" value={s.entityId} onchange={(e) => onDevice(s, e.currentTarget.value)}>
-						{#each controllable as d}<option value={d.id}>{d.name}</option>{/each}
-					</select>
-					<select class="field" aria-label="Action for step {i + 1}" value={s.action} onchange={(e) => onAction(s, e.currentTarget.value)}>
-						{#each optsOf(s.entityId) as a}<option value={a.action}>{a.label}</option>{/each}
-					</select>
+					<Picker class="min-w-40 flex-1" label="Device for step {i + 1}" value={s.entityId} options={controllable.map((d) => ({ value: d.id, label: d.name }))} onchange={(v) => onDevice(s, v)} />
+					<Picker class="min-w-36" label="Action for step {i + 1}" value={s.action} options={optsOf(s.entityId).map((a) => ({ value: a.action, label: a.label }))} onchange={(v) => onAction(s, v)} />
 					{#each [optsOf(s.entityId).find((a) => a.action === s.action)?.input] as inp}
 						{#if inp?.kind === 'number'}
 							<span class="flex items-center gap-1"><Input type="number" class="w-24" min={inp.min} max={inp.max} step={inp.step} bind:value={s.value as number} aria-label="Value for step {i + 1}" /><span class="text-sm text-muted-foreground">{inp.unit}</span></span>
 						{:else if inp?.kind === 'select'}
-							<select class="field capitalize" aria-label="Value for step {i + 1}" bind:value={s.value}>{#each inp.options as o}<option value={o}>{o}</option>{/each}</select>
+							<Picker capitalize label="Value for step {i + 1}" bind:value={s.value as string} options={inp.options.map((o: string) => ({ value: o, label: o }))} />
 						{/if}
 					{/each}
 				</div>
 			{:else if s.type === 'scene'}
-				<select class="field w-full" aria-label="Scene for step {i + 1}" bind:value={s.entityId}>{#each home.scenes as sc}<option value={sc.id}>{sc.name}</option>{/each}</select>
+				<Picker class="w-full" label="Scene for step {i + 1}" bind:value={s.entityId} options={home.scenes.map((sc) => ({ value: sc.id, label: sc.name }))} />
 			{:else if s.type === 'mode'}
-				<select class="field capitalize" aria-label="Mode for step {i + 1}" bind:value={s.mode}>{#each home.mode?.modes ?? [] as m}<option value={m}>{m}</option>{/each}</select>
+				<Picker capitalize label="Mode for step {i + 1}" bind:value={s.mode} options={(home.mode?.modes ?? []).map((m) => ({ value: m, label: m }))} />
 			{:else}
 				<span class="flex items-center gap-2 text-sm">Wait <Input type="number" class="w-24" min={1} max={600} bind:value={s.seconds} aria-label="Seconds to wait in step {i + 1}" /> seconds</span>
 			{/if}

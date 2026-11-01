@@ -1,4 +1,5 @@
 import { api, explain, reauth } from './api.js';
+import { haptics } from './haptics.js';
 
 export type Control =
 	| { type: 'power' } | { type: 'brightness' } | { type: 'color_temp'; minK: number; maxK: number } | { type: 'color' }
@@ -35,6 +36,8 @@ class Home {
 	rooms = $state<Room[]>([]);
 	groups = $state<Group[]>([]);
 	prefs = $state<Prefs | null>(null);
+	/** when the hub last answered, so an outage can say how stale the screen is */
+	lastOkAt = $state<number | null>(null);
 	mode = $state<ModeInfo | null>(null);
 	scenes = $state<Scene[]>([]);
 	routines = $state<Routine[]>([]);
@@ -44,7 +47,6 @@ class Home {
 	loaded = $state(false);
 	busy = $state<Record<string, boolean>>({});
 	notice = $state<Notice | null>(null);
-	private es: EventSource | null = null;
 	private timer: ReturnType<typeof setTimeout> | undefined;
 
 	byId = (id: string) => this.devices.find((d) => d.id === id);
@@ -68,41 +70,78 @@ class Home {
 		if (m.ok) this.mode = m.data;
 		if (sc.ok) { this.scenes = sc.data.scenes; this.canManageScenes = sc.data.canManage; }
 		if (ro.ok) { this.routines = ro.data.routines; this.suggested = ro.data.suggested; }
-		if (d.ok) { this.devices = d.data.devices; this.haHealth = d.data.haHealth; }
+		if (d.ok) { this.devices = d.data.devices; this.haHealth = d.data.haHealth; if (d.data.haHealth === 'ok') this.lastOkAt = Date.now(); }
 		if (r.ok) this.rooms = r.data.rooms;
 		if (g.ok) this.groups = g.data.groups;
 		if (p.ok) this.prefs = p.data;
 		this.loaded = true;
 	}
 
+	/** Stay in step with the household. Long-polling rather than a stream: it works through any proxy or tunnel. */
 	connect() {
-		if (this.es) return;
-		const es = new EventSource('/api/stream');
-		this.es = es;
-		es.addEventListener('device', (e) => {
-			const dev: Device = JSON.parse((e as MessageEvent).data);
-			const i = this.devices.findIndex((x) => x.id === dev.id);
-			if (i >= 0) this.devices[i] = dev; else this.devices.push(dev);
-		});
-		es.addEventListener('mode', async () => { const m = await api('GET', '/api/mode'); if (m.ok) this.mode = m.data; });
-		es.addEventListener('ha', async () => { await this.load(); }); // hub state changed: refresh availability of everything
-		es.onerror = () => { this.haHealth = 'unreachable'; }; // EventSource reconnects by itself
-		es.onopen = () => { if (this.loaded) this.load(); };
+		if (this.polling) return;
+		this.polling = true; this.rev = -1;
+		const wake = () => { if (document.visibilityState === 'visible') { if (this.loaded) void this.load(); this.rev = -1; this.abort?.abort(); } };
+		document.addEventListener('visibilitychange', wake); this.unhook = () => document.removeEventListener('visibilitychange', wake);
+		void this.poll();
 	}
-	disconnect() { this.es?.close(); this.es = null; }
+	disconnect() { this.polling = false; this.abort?.abort(); this.unhook?.(); this.unhook = null; }
 
-	/** Send a command and report exactly what happened. Never claims success the hub didn't confirm. */
+	private polling = false; private rev = -1; private abort: AbortController | null = null; private unhook: (() => void) | null = null; private fails = 0; private reloadTimer: ReturnType<typeof setTimeout> | undefined;
+	private reloadSoon() { clearTimeout(this.reloadTimer); this.reloadTimer = setTimeout(() => void this.load(), 250); }
+	private async poll() {
+		while (this.polling) {
+			const ctl = (this.abort = new AbortController());
+			try {
+				const res = await fetch(`/api/sync?rev=${this.rev}`, { headers: { 'x-requested-with': 'alice' }, signal: ctl.signal });
+				if (!res.ok) throw new Error(String(res.status));
+				const d = await res.json();
+				if (this.fails > 0) { this.fails = 0; if (this.loaded) this.reloadSoon(); }
+				const first = this.rev < 0; this.rev = d.rev;
+				if (d.resync) { if (!first) this.reloadSoon(); continue; }
+				for (const dev of d.devices as Device[]) { const i = this.devices.findIndex((x) => x.id === dev.id); if (i >= 0) this.devices[i] = dev; else this.devices.push(dev); }
+				if (d.mode) { const m = await api('GET', '/api/mode'); if (m.ok) this.mode = m.data; }
+				if (d.ha || d.data) this.reloadSoon();
+			} catch {
+				if (!this.polling) return;
+				if (ctl.signal.aborted) continue;
+				if (++this.fails >= 2) this.haHealth = 'unreachable';
+				await new Promise((r) => setTimeout(r, Math.min(15000, 1000 * this.fails)));
+			}
+		}
+	}
+
+	/** What we expect a device to look like after a command, so the screen can answer at once. The hub's real answer replaces it. */
+	private expected(d: Device, action: string, value?: unknown): Device | null {
+		const a = { ...d.attrs };
+		switch (action) {
+			case 'turn_on': return { ...d, state: 'on' };
+			case 'turn_off': return { ...d, state: 'off' };
+			case 'lock': return { ...d, state: 'locked' };
+			case 'set_brightness': return typeof value === 'number' ? { ...d, state: 'on', attrs: { ...a, brightnessPct: value } } : null;
+			case 'set_speed': return typeof value === 'number' ? { ...d, attrs: { ...a, speedPct: value } } : null;
+			case 'set_temperature': return typeof value === 'number' ? { ...d, attrs: { ...a, target: value } } : null;
+			default: return null; // unlocking waits for the passkey check, so nothing is shown early
+		}
+	}
+
+	/** Send a command and report exactly what happened. Shows the expected result immediately, undoes it if the hub says no, and never claims success the hub didn't confirm. */
 	async command(id: string, action: string, value?: unknown): Promise<boolean> {
+		const i0 = this.devices.findIndex((x) => x.id === id), before = i0 >= 0 ? this.devices[i0] : null;
+		const guess = before ? this.expected(before, action, value) : null;
+		if (guess && i0 >= 0) this.devices[i0] = guess;
+		const undo = () => { const i = this.devices.findIndex((x) => x.id === id); if (before && i >= 0) this.devices[i] = before; };
 		this.busy[id] = true;
 		try {
 			let r = await api('POST', `/api/devices/${encodeURIComponent(id)}/command`, { action, value });
 			if (r.status === 401 && r.data?.error === 'reauth_required') {
-				if (!(await reauth())) { this.say('error', 'Confirmation was cancelled, so the action was not sent.'); return false; }
+				if (!(await reauth())) { undo(); haptics.warn(); this.say('error', 'Confirmation was cancelled, so the action was not sent.'); return false; }
 				r = await api('POST', `/api/devices/${encodeURIComponent(id)}/command`, { action, value });
 			}
-			if (!r.ok) { this.say('error', r.data?.message ?? explain(r.data?.error)); await this.load(); return false; }
+			if (!r.ok) { undo(); haptics.warn(); this.say('error', r.data?.message ?? explain(r.data?.error)); await this.load(); return false; }
 			const i = this.devices.findIndex((x) => x.id === id);
 			if (i >= 0 && r.data.device) this.devices[i] = r.data.device;
+			if (action === 'lock' || action === 'unlock') haptics.success();
 			if (!r.data.confirmed) this.say('info', 'Sent. Waiting for the device to respond…');
 			return true;
 		} finally { this.busy[id] = false; }
@@ -130,8 +169,8 @@ class Home {
 		this.busy[s.id] = true;
 		try {
 			const r = await api('POST', `/api/scenes/${encodeURIComponent(s.id)}/activate`);
-			if (!r.ok) this.say('error', r.data?.message ?? explain(r.data?.error));
-			else this.say(r.data.confirmed ? 'ok' : 'info', r.data.confirmed ? `Activated “${s.name}”.` : `Sent “${s.name}”. Waiting for the hub to confirm…`);
+			if (!r.ok) { haptics.warn(); this.say('error', r.data?.message ?? explain(r.data?.error)); }
+			else { haptics.success(); this.say(r.data.confirmed ? 'ok' : 'info', r.data.confirmed ? `Activated “${s.name}”.` : `Sent “${s.name}”. Waiting for the hub to confirm…`); }
 		} finally { this.busy[s.id] = false; }
 	}
 

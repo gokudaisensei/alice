@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Checkbox } from '#lib/components/ui/checkbox';
+	import { haptics } from '#lib/haptics.js';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, explain } from '#lib/api.js';
@@ -45,10 +47,10 @@
 	<Section title="Devices">
 		<Group>
 			{#each choices as d (d.id)}
-				<label class="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/60 {d.available ? '' : 'opacity-50'}">
+				<button type="button" role="checkbox" aria-checked={picked.includes(d.id)} disabled={!d.available} onclick={() => { haptics.tap(); picked = picked.includes(d.id) ? picked.filter((x) => x !== d.id) : [...picked, d.id]; }} class="flex min-h-14 w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-muted disabled:opacity-50">
+					<Checkbox checked={picked.includes(d.id)} />
 					<span class="min-w-0 flex-1"><span class="block truncate text-[0.9375rem] font-medium">{d.name}</span><span class="text-sm text-muted-foreground">{d.available ? (d.state === 'on' ? 'On now' : 'Off now') : 'Offline'}</span></span>
-					<input type="checkbox" class="size-5 accent-[var(--primary)]" bind:group={picked} value={d.id} disabled={!d.available} />
-				</label>
+				</button>
 			{:else}<p class="p-4 text-sm text-muted-foreground">No lights, switches or fans are available.</p>{/each}
 		</Group>
 	</Section>
