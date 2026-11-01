@@ -10,6 +10,7 @@ import type { HaApi } from "./ha";
 import { createDeviceService, deviceRoutes } from "./devices";
 import { manageRoutes } from "./manage";
 import { createStatic } from "./static";
+import { createPowerLimits, powerRoutes, type PowerLimits } from "./power";
 import { createSync, syncRoutes } from "./sync";
 import { prefsRoutes } from "./prefs";
 import { modeRoutes } from "./modes";
@@ -29,7 +30,7 @@ export type AppDeps = {
   db: Database; ha: HaApi; webauthn: WebAuthnService;
   origin: string; cookieSecure: boolean; webDir?: string;
   push?: PushSender; now?: () => number;
-  backups?: Backups; dbPath?: string; version?: string; updates?: Updates;
+  backups?: Backups; dbPath?: string; version?: string; updates?: Updates; powerLimits?: PowerLimits;
 };
 
 /** Strict CSP. SvelteKit's static build has one inline start-up script; allow exactly that script by hash, nothing else inline. */
@@ -46,6 +47,7 @@ export function buildCsp(webDir?: string): string {
 export function createApp(deps: AppDeps) {
   const devices = createDeviceService(deps.db, deps.ha);
   const sync = createSync(deps.ha);
+  const powerLimits = deps.powerLimits ?? createPowerLimits(deps.db, deps.now);
   const csp = buildCsp(deps.webDir);
   const staticFiles = deps.webDir ? createStatic(deps.webDir) : null;
   const scenes = createSceneService(deps.db, deps.ha, devices), routines = createRoutineService(deps.db, deps.ha, devices);
@@ -102,6 +104,7 @@ export function createApp(deps: AppDeps) {
     .use(insightRoutes(deps.db, deps.cookieSecure, insights, deps.now))
     .use(manageRoutes(deps.db, deps.ha, deps.cookieSecure))
     .use(syncRoutes(deps.db, deps.cookieSecure, sync, devices))
+    .use(powerRoutes(deps.db, deps.ha, deps.cookieSecure, powerLimits, devices))
     .use(prefsRoutes(deps.db, deps.cookieSecure, devices))
     // For the container health check and the updater: is THIS app up, and which version. Deliberately independent of Home Assistant.
     .get("/healthz", ({ set }) => {

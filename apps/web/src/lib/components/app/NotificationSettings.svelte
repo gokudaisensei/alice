@@ -9,7 +9,7 @@
 	import Row from '#lib/components/app/Row.svelte';
 	import { Switch } from '#lib/components/ui/switch';
 
-	const LABEL: Record<string, string> = { device_offline: 'A device stays offline', lock_open: 'A door stays unlocked', hub: 'The home hub is unreachable', insight: 'Suggestions about energy and devices left on' };
+	const LABEL: Record<string, string> = { device_offline: 'A device stays offline', lock_open: 'A door stays unlocked', hub: 'The home hub is unreachable', insight: 'Suggestions about energy and devices left on', power: 'A plug stays above its power limit' };
 	let p = $state<NotePrefs | null>(null), here = $state(false), msg = $state(''), busy = $state(false);
 	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 

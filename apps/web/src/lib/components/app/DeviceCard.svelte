@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { home, type Device } from '#lib/home.svelte.js';
 	import { session } from '#lib/session.svelte.js';
+	import PowerLimit from '#lib/components/app/PowerLimit.svelte';
 	import { Switch } from '#lib/components/ui/switch';
 	import { Slider } from '#lib/components/ui/slider';
 	import { Button } from '#lib/components/ui/button';
@@ -194,6 +195,7 @@
 	<div class="space-y-5 pt-2">
 		{#if device.available}<div class="space-y-3.5">{@render controls()}</div>{:else}<p class="text-sm text-muted-foreground">{device.reason === 'device_offline' ? 'This device is offline. Check its power and Wi-Fi.' : 'The home hub can’t be reached, so it can’t be controlled right now.'}</p>{/if}
 		{#if detail}<DeviceHistory id={device.id} />{/if}
+		{#if device.category === 'energy' && ['W', 'kW'].includes(device.reading?.unit ?? '') && session.can('automation.manage')}<PowerLimit {device} />{/if}
 		<div class="flex flex-wrap gap-2 border-t pt-4">
 			<Button variant="secondary" aria-pressed={home.isFavorite(device.id)} onclick={() => { haptics.tap(); home.toggleFavorite(device.id); }}><Star class={home.isFavorite(device.id) ? 'fill-current' : ''} />{home.isFavorite(device.id) ? 'Favorite' : 'Add to favorites'}</Button>
 			{#if session.can('automation.manage')}<Button variant="secondary" href="/automations/new?device={encodeURIComponent(device.id)}"><Workflow />Automate</Button>{/if}

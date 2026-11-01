@@ -2,16 +2,19 @@ import type { Database } from "bun:sqlite";
 import { describe } from "./capabilities";
 import type { HaApi } from "./ha";
 import type { Notifier } from "./notify";
+import { createPowerLimits, switchFor, wattsOf, type PowerLimits } from "./power";
 
-export type Delays = { offlineMs: number; lockMs: number; hubMs: number };
-export const DEFAULT_DELAYS: Delays = { offlineMs: 5 * 60_000, lockMs: 10 * 60_000, hubMs: 2 * 60_000 };
+export type Delays = { offlineMs: number; lockMs: number; hubMs: number; powerMs?: number };
+export const DEFAULT_DELAYS: Delays = { offlineMs: 5 * 60_000, lockMs: 10 * 60_000, hubMs: 2 * 60_000, powerMs: 5 * 60_000 };
 const mins = (ms: number) => { const m = Math.round(ms / 60_000); return m >= 1 ? `${m} minute${m === 1 ? "" : "s"}` : "a short while"; };
 
 /**
  * Plain, deterministic rules over Home Assistant's own state. A problem has to last before anyone hears about it,
  * so a flaky bulb doesn't buzz a phone. Nothing here ever acts on a device.
  */
-export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays = DEFAULT_DELAYS) {
+export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays = DEFAULT_DELAYS, limits: PowerLimits = createPowerLimits(db)) {
+  const powerMs = delays.powerMs ?? DEFAULT_DELAYS.powerMs!;
+  const fmtW = (w: number) => (w >= 1000 ? `${Math.round(w / 100) / 10} kW` : `${Math.round(w)} W`);
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   let hubAlerted = false;
   const household = () => (db.query("SELECT id FROM households LIMIT 1").get() as any)?.id as string | undefined;
@@ -33,6 +36,15 @@ export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays
       });
       else disarm(`offline:${id}`);
     }
+    // A limit you set by hand: only a reading that stays above it, for a few minutes, is worth a buzz.
+    const limit = limits.get(id), w = wattsOf(e);
+    if (limit !== undefined && w !== null && w > limit) arm(`power:${id}`, powerMs, () => { const now = wattsOf(ha.entities.get(id)); return now !== null && now > (limits.get(id) ?? Infinity); }, () => {
+      const h = household(); if (!h) return;
+      const sw = switchFor(ha, id), cur = wattsOf(ha.entities.get(id)) ?? w;
+      void nf.emit({ householdId: h, kind: "power", entityId: id, ...(sw ? { actions: [{ action: "turn_off", title: "Switch off" }], switchId: sw } : {}), dedupeKey: `power:${id}`,
+        title: `${nameOf(id).replace(/ power$/i, "")} is using ${fmtW(cur)}`, body: `It has been above your ${fmtW(limit)} limit for ${mins(powerMs)}.${sw ? " You can switch it off from here." : ""}` });
+    });
+    else disarm(`power:${id}`);
     if (d.domain === "lock") {
       if (e.state === "unlocked") arm(`lock:${id}`, delays.lockMs, () => ha.entities.get(id)?.state === "unlocked", () => {
         const h = household(); if (!h) return;
@@ -43,6 +55,7 @@ export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays
   }
   const scan = () => { for (const id of ha.entities.keys()) check(id); };
 
+  const offLimits = limits.onChange((id) => { disarm(`power:${id}`); check(id); }); // a changed or removed limit starts the clock again
   const off = ha.subscribe((e) => {
     if (e.type === "entity") return check(e.entityId);
     if (ha.isStale()) {
@@ -62,5 +75,5 @@ export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays
     }
   });
   if (!ha.isStale()) scan();
-  return () => { off(); for (const t of timers.values()) clearTimeout(t); timers.clear(); };
+  return () => { off(); offLimits(); for (const t of timers.values()) clearTimeout(t); timers.clear(); };
 }

@@ -9,6 +9,7 @@ import { createDeviceService } from "./devices";
 import { createNotifier, realPush } from "./notify";
 import { createInsights, createSampler } from "./insights";
 import { startRules } from "./rules";
+import { createPowerLimits } from "./power";
 import { createBackups, parseDests } from "./backup";
 import { dirname } from "node:path";
 import { createUpdates } from "./updates";
@@ -29,7 +30,8 @@ if (code) console.log(`First-time setup: open the app and use setup code ${code}
 
 const push = realPush(db, config.vapidSubject, config.egressProxy || undefined);
 const devices = createDeviceService(db, ha), notifier = createNotifier(db, devices, push);
-startRules(db, ha, notifier);
+const powerLimits = createPowerLimits(db);
+startRules(db, ha, notifier, undefined, powerLimits);
 createSampler(db, ha).start();
 // Once a day: tell people about new insights (at most once per finding every three days) and apply retention.
 const insights = createInsights(db, ha, devices);
@@ -53,7 +55,7 @@ setInterval(() => updates.ingest(notifier).catch(() => {}), 60_000); // turns th
 updates.ingest(notifier).catch(() => {});
 
 createApp({
-  updates, push, backups, dbPath: config.dbPath, version: config.version, db, ha, origin: config.origin, cookieSecure: config.cookieSecure, webDir: config.webDir,
+  updates, push, backups, dbPath: config.dbPath, version: config.version, db, ha, origin: config.origin, cookieSecure: config.cookieSecure, webDir: config.webDir, powerLimits,
   webauthn: realWebAuthn({ rpID: config.rpID, rpName: "Smart Home Companion", origin: config.origin }),
 }).listen(config.port);
 console.log(`server listening on :${config.port}`);
