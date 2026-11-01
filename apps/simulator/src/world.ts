@@ -249,6 +249,7 @@ export class World {
 			this.roomLights(name, true, ha, out, pick, this.level(h, p.act));
 		}
 		if (name === "Garden" && h > 18) out.call("light", "turn_on", "light.porch_light", { brightness: 200 });
+		if (name === "Garden" && ha("lock.back_door_lock")?.state === "locked") { out.call("lock", "unlock", "lock.back_door_lock"); this.flags.backBySim = 1; }
 	}
 	private arrive(p: Resident, out: Out) {
 		this.events.push(`${p.name} arrives home`);
@@ -301,6 +302,7 @@ export class World {
 		const away = (name: string, mins: number, fn: () => void) => { if (!this.people.some((p) => this.roomAt(p.x, p.z) === name)) { const k = `idle-${name}`; if (this.flags[k] === undefined) this.flags[k] = this.t; else if (this.t - this.flags[k] > mins * 60e3) { fn(); this.flags[k] = Infinity; } } else delete this.flags[`idle-${name}`]; };
 		away("Home Office", 25, () => { set("switch.workstation_plug", false); set("switch.monitor_plug", false); });
 		away("Living Room", 12, () => { set("switch.tv_plug", false); set("light.tv_backlight", false, "light"); });
+		away("Garden", 2, () => { if (this.flags.backBySim) { delete this.flags.backBySim; out.call("lock", "lock", "lock.back_door_lock"); } });
 		away("Bathroom", 6, () => { if (st("fan.bathroom_exhaust_fan") === "on") out.call("fan", "turn_off", "fan.bathroom_exhaust_fan"); set("switch.towel_warmer", false); });
 		if (h < 6.5 || h > 8) set("switch.towel_warmer", false);
 		// the family's own bedtime habits

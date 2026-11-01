@@ -30,8 +30,8 @@ export type Placed = Dev & { x: number; y: number; z: number };
 
 // Fixed spots for things that live in a particular place; everything else is spread by kind along the room.
 const FIXED: Record<string, [number, number, number]> = {
-	"lock.front_door_lock": [0.15, 1.2, HALL_Z - 0.6], "binary_sensor.front_door_contact": [0.05, 1.0, HALL_Z], "binary_sensor.doorbell_button": [0.15, 1.35, HALL_Z + 0.6],
-	"lock.back_door_lock": [10, 1.2, 11.9], "lock.garage_side_door_lock": [16.5, 1.2, 11.9], "binary_sensor.garage_door_contact": [16.4, 1.0, 11.95],
+	"lock.front_door_lock": [0.16, 1.15, HALL_Z + 0.62], "binary_sensor.front_door_contact": [0.05, 2.15, HALL_Z], "binary_sensor.doorbell_button": [0.15, 1.35, HALL_Z + 0.6],
+	"lock.back_door_lock": [10.62, 1.15, 11.9], "lock.garage_side_door_lock": [16.82, 1.15, 11.9], "binary_sensor.garage_door_contact": [16.2, 2.15, 11.95],
 	"binary_sensor.kitchen_window": [11.3, 1.2, 11.95], "binary_sensor.bedroom_window": [2.5, 1.3, 0.05], "binary_sensor.kids_room_window": [10.5, 1.3, 0.05],
 	"binary_sensor.bathroom_leak_sensor": [7.4, 0.05, 4.2], "binary_sensor.kitchen_smoke_detector": [10.25, 2.3, 9.2], "binary_sensor.fridge_door": [8.4, 1.0, 7.0],
 	"switch.tv_plug": [3.5, 0.9, 11.5], "switch.ev_charger": [16.7, 1.2, 8.5], "switch.fridge_freezer_plug": [8.2, 0.3, 7.2], "switch.water_heater": [6.0, 0.3, 0.4],

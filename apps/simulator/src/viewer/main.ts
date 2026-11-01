@@ -48,7 +48,7 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(140, 140), std(0x7fb26a));
 const floors = new Map<string, THREE.Mesh>();
 const GAPS: Record<string, { edge: "n" | "s" | "w" | "e"; at: number; w?: number }[]> = {
 	"Master Bedroom": [{ edge: "s", at: 2.5 }], Bathroom: [{ edge: "s", at: 7 }], "Kids Room": [{ edge: "s", at: 10.5 }], "Home Office": [{ edge: "s", at: 15 }],
-	Hallway: [{ edge: "w", at: 5.75 }], "Living Room": [{ edge: "n", at: 4 }], Kitchen: [{ edge: "n", at: 10.25 }, { edge: "s", at: 10 }], Garage: [{ edge: "n", at: 14.75 }, { edge: "s", at: 16.4 }, { edge: "s", at: 14, w: 1.25 }],
+	Hallway: [{ edge: "w", at: 5.75 }], "Living Room": [{ edge: "n", at: 4 }], Kitchen: [{ edge: "n", at: 10.25 }, { edge: "s", at: 10 }], Garage: [{ edge: "n", at: 14.75 }, { edge: "s", at: 16.2 }, { edge: "s", at: 14, w: 1.25 }],
 };
 const WALL = 0.07, EXT = 2.4, INT = 1.15;
 const wallMat = (ext: boolean) => new THREE.MeshStandardMaterial({ color: 0xf2f4fa, roughness: 0.9, transparent: true, opacity: ext ? 0.22 : 0.6, depthWrite: ext ? false : true });
@@ -101,13 +101,18 @@ const spray = new THREE.Mesh(new THREE.ConeGeometry(1.6, 1.4, 16, 1, true), new 
 const puddle = new THREE.Mesh(new THREE.CircleGeometry(0.1, 24), new THREE.MeshBasicMaterial({ color: 0x4aa3ff, transparent: true, opacity: 0.75 })); puddle.rotation.x = -Math.PI / 2; puddle.position.set(7.4, 0.14, 4.2); puddle.visible = false; scene.add(puddle);
 
 // ------------------------------------------------------------------ doors that open and close
-const doors: Record<string, { pivot: THREE.Group; open: number }> = {};
-function door(key: string, x: number, z: number, along: "x" | "z", color = 0x8d6e50) {
-	const pivot = new THREE.Group(); pivot.position.set(x, 0.12, z); scene.add(pivot);
-	if (along === "z") box(0.07, 2.0, 0.95, color, 0, 0, 0.475, pivot); else box(0.95, 2.0, 0.07, color, 0.475, 0, 0, pivot);
-	doors[key] = { pivot, open: 0 };
+// every door has a leaf that swings; it opens when its contact sensor says so, or when someone walks through it
+type DoorRig = { pivot: THREE.Group; open: number; contact?: number; lock: string; cx: number; cz: number; sign: number };
+const doors: Record<string, DoorRig> = {};
+function door(key: string, lock: string, hingeX: number, hingeZ: number, along: "x" | "z", width: number, cx: number, cz: number, color = 0x8d6e50, sign = 1) {
+	const pivot = new THREE.Group(); pivot.position.set(hingeX, 0.12, hingeZ); scene.add(pivot);
+	if (along === "z") { box(0.07, 2.0, width, color, 0, 0, width / 2, pivot); box(0.04, 0.05, 0.35, 0xcfd3e0, 0.06, 1.0, width - 0.2, pivot); }
+	else { box(width, 2.0, 0.07, color, width / 2, 0, 0, pivot); box(0.35, 0.05, 0.04, 0xcfd3e0, width - 0.2, 1.0, 0.06, pivot); }
+	doors[key] = { pivot, open: 0, lock, cx, cz, sign };
 }
-door("binary_sensor.front_door_contact", 0.04, 5.75 - 0.5, "z"); door("binary_sensor.garage_door_contact", 15.85, 11.97, "x", 0x6a707f);
+door("binary_sensor.front_door_contact", "lock.front_door_lock", 0.04, 5.25, "z", 1.0, 0, 5.75, 0x8d6e50, -1);
+door("door.back", "lock.back_door_lock", 9.5, 11.97, "x", 1.0, 10, 12, 0x7a5c44, 1);
+door("binary_sensor.garage_door_contact", "lock.garage_side_door_lock", 15.7, 11.97, "x", 0.95, 16.2, 12, 0x6a707f, 1);
 // windows slide sideways by how far open they are; the same pane answers to a sensor or to a cover
 type Win = { mesh: THREE.Mesh; base: THREE.Vector3; axis: "x" | "z"; open: number; ids: string[] };
 const wins: Win[] = [];
@@ -166,7 +171,14 @@ for (const d of DEVS) {
 	}
 	else if (d.kind === "switch") { mat = new THREE.MeshStandardMaterial({ color: 0x9aa3bd, emissive: 0x2cff9a, emissiveIntensity: 0 }); obj = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), mat); }
 	else if (d.kind === "fan") { const g = new THREE.Group(); mat = new THREE.MeshStandardMaterial({ color: 0xd8def0, emissive: 0x7fd0ff, emissiveIntensity: 0, transparent: true }); for (let k = 0; k < 4; k++) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.02, 0.16), mat); b.rotation.y = (k * Math.PI) / 2; b.position.set(Math.cos((k * Math.PI) / 2) * 0.42, 0, -Math.sin((k * Math.PI) / 2) * 0.42); g.add(b); } obj = g; spin = g; }
-	else if (d.kind === "lock") { mat = new THREE.MeshStandardMaterial({ color: 0x50d890, emissive: 0x50d890, emissiveIntensity: 0.6 }); obj = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.26, 0.1), mat); }
+	else if (d.kind === "lock") {
+		const g = new THREE.Group(); mat = new THREE.MeshStandardMaterial({ color: 0x50d890, emissive: 0x50d890, emissiveIntensity: 0.7 });
+		const alongZ = d.entity === "lock.front_door_lock";
+		const plate = new THREE.Mesh(new THREE.BoxGeometry(alongZ ? 0.08 : 0.2, 0.32, alongZ ? 0.2 : 0.08), std(0x2a2f45)); g.add(plate);
+		const bolt = new THREE.Mesh(new THREE.BoxGeometry(alongZ ? 0.06 : 0.22, 0.06, alongZ ? 0.22 : 0.06), std(0xdfe3ea, { metalness: 0.7, roughness: 0.3 })); bolt.name = "bolt"; bolt.position.y = 0.04; g.add(bolt);
+		const led = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), mat); led.position.set(alongZ ? 0.05 : 0, -0.1, alongZ ? 0 : 0.05); g.add(led);
+		g.userData.alongZ = alongZ; obj = g;
+	}
 	else if (d.kind === "bsensor") { mat = new THREE.MeshStandardMaterial({ color: 0x6b7596, emissive: 0xff4f6d, emissiveIntensity: 0 }); obj = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 10), mat); }
 	if (!obj) continue;
 	obj.position.set(d.x, d.y, d.z); obj.userData.entity = d.entity; scene.add(obj);
@@ -274,10 +286,10 @@ function apply(s: Snap) {
 			if (d.entity === "switch.garden_path_lights") lightSum.set("Garden", (lightSum.get("Garden") ?? 0) + (on ? 0.6 : 0));
 		}
 		else if (d.kind === "fan" && hd.mat) { const pct = on ? (st.pct ?? 100) : 0; hd.mat.emissiveIntensity = on ? 0.4 : 0; hd.mat.opacity = pct > 80 ? 0.55 : 0.95; hd.speed = (pct / 100) * 16; }
-		else if (d.kind === "lock" && hd.mat) { hd.mat.color.setHex(on ? 0xff7b8f : 0x50d890); hd.mat.emissive.setHex(on ? 0xff7b8f : 0x50d890); }
+		else if (d.kind === "lock" && hd.mat) { hd.mat.color.setHex(on ? 0xff7b8f : 0x50d890); hd.mat.emissive.setHex(on ? 0xff7b8f : 0x50d890); hd.speed = on ? 1 : 0; /* 1 = bolt drawn back (unlocked) */ }
 		else if (d.kind === "bsensor" && hd.mat) {
 			hd.mat.emissiveIntensity = on ? 1.6 : 0;
-			if (doors[id]) doors[id].open = on ? 1 : 0;
+			if (doors[id]) doors[id].contact = on ? 1 : 0;
 			if (id === "binary_sensor.bathroom_leak_sensor") puddle.visible = on;
 		}
 		if (d.entity === "light.porch_light") lightSum.set("Garden", (lightSum.get("Garden") ?? 0) + (st.s === "on" ? 0.8 * Math.max(0.3, (st.b ?? 200) / 255) : 0));
@@ -309,6 +321,7 @@ function apply(s: Snap) {
 		o.target.set(p.x, p.pose === "lie" ? lieY : 0.12, p.z); o.g.visible = p.room !== "Away"; o.label.style.display = p.room === "Away" ? "none" : ""; o.walking = p.walking; o.pose = p.pose;
 		if (p.pose === "sit") o.facing = p.room === "Kitchen" ? 0 : Math.PI;
 	}
+	for (const d of Object.values(doors)) { const near = s.people.some((p) => p.room !== "Away" && Math.hypot(p.x - d.cx, p.z - d.cz) < 1.15) || s.people.some((p) => p.room === "Away" && d.cx === 0 && p.walking); d.open = Math.max(d.contact ?? 0, near ? 1 : 0); }
 	roomLabels.forEach((el, n) => { const R = s.rooms[n]; el.innerHTML = R ? `<b>${n}</b><span>${R.T.toFixed(1)}° · ${R.hum}%</span><span style="opacity:.7">${R.co2} ppm</span>` : `<b>${n}</b>`; });
 	hud(s);
 }
@@ -339,10 +352,11 @@ function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = i
 addEventListener("resize", resize); resize();
 const clock = new THREE.Clock();
 const ease = (cur: number, to: number, dt: number, rate = 5) => cur + (to - cur) * Math.min(1, dt * rate);
-function frame() {
-	const dt = clock.getDelta(), t = clock.elapsedTime;
+let lastDraw = 0;
+function update(dt: number, t: number) {
 	controls.update();
-	for (const [id, d] of Object.entries(doors)) d.pivot.rotation.y = ease(d.pivot.rotation.y, d.open ? (id.includes("garage") ? 1.4 : -1.35) : 0, dt, 3.5);
+	for (const d of Object.values(doors)) d.pivot.rotation.y = ease(d.pivot.rotation.y, d.open ? d.sign * 1.45 : 0, dt, 3.5);
+	for (const hd of handles.values()) if (hd.dev.kind === "lock") { const bolt = hd.obj.getObjectByName("bolt")!, back = hd.speed; const slide = (1 - back) * 0.14; if (hd.obj.userData.alongZ) bolt.position.z = ease(bolt.position.z, -slide, dt, 8); else bolt.position.x = ease(bolt.position.x, -slide, dt, 8); }
 	for (const w of wins) { const slide = ease(w.axis === "x" ? w.mesh.position.x - w.base.x : w.mesh.position.z - w.base.z, w.open * 0.7, dt, 3); if (w.axis === "x") w.mesh.position.x = w.base.x + slide; else w.mesh.position.z = w.base.z + slide; w.mesh.position.y = 1.4; }
 	garageDoor.position.y = ease(garageDoor.position.y, 0.12 + 1.05 + garageOpen * 1.9, dt, 2.5); garageDoor.scale.y = 1 - garageOpen * 0.0;
 	for (const hd of handles.values()) if (hd.spin) hd.spin.rotation.y += hd.speed * dt;
@@ -364,11 +378,14 @@ function frame() {
 	}
 	for (const [id, tag] of powerTags) { const hd = handles.get(id)!; placeLabel(tag, hd.dev.x, hd.dev.y + 0.5, hd.dev.z, showLabels); }
 	for (const r of ROOMS) placeLabel(roomLabels.get(r.name)!, (r.x0 + r.x1) / 2, 0.4, (r.z0 + r.z1) / 2 + (r.indoor ? 0 : -1), showLabels && r.name !== "Garden");
-	renderer.render(scene, camera); requestAnimationFrame(frame);
 }
+function frame() { lastDraw = performance.now(); update(clock.getDelta(), clock.elapsedTime); renderer.render(scene, camera); requestAnimationFrame(frame); }
+// a page that is not on screen gets no animation frames; keep the world moving anyway so it is right the moment it is seen
+setInterval(() => { if (performance.now() - lastDraw > 250) update(0.05, clock.elapsedTime + performance.now() / 1000); }, 50);
 function connect() {
 	const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
 	ws.onmessage = (m) => { snap = JSON.parse(m.data); apply(snap!); };
 	ws.onclose = () => setTimeout(connect, 1500);
 }
 connect(); frame();
+(window as unknown as { __sim: unknown }).__sim = { doors, handles }; // handy for checking animations from the console
