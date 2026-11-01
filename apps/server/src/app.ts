@@ -9,6 +9,7 @@ import { authRoutes } from "./auth";
 import type { HaApi } from "./ha";
 import { createDeviceService, deviceRoutes } from "./devices";
 import { manageRoutes } from "./manage";
+import { createStatic } from "./static";
 import { createSync, syncRoutes } from "./sync";
 import { prefsRoutes } from "./prefs";
 import { modeRoutes } from "./modes";
@@ -46,13 +47,15 @@ export function createApp(deps: AppDeps) {
   const devices = createDeviceService(deps.db, deps.ha);
   const sync = createSync(deps.ha);
   const csp = buildCsp(deps.webDir);
+  const staticFiles = deps.webDir ? createStatic(deps.webDir) : null;
   const scenes = createSceneService(deps.db, deps.ha, devices), routines = createRoutineService(deps.db, deps.ha, devices);
   const automations = createAutomationService(deps.db, deps.ha, devices, routines);
   const notifier = createNotifier(deps.db, devices, deps.push ?? null, deps.now), insights = createInsights(deps.db, deps.ha, devices, deps.now);
   const backups = deps.backups ?? createBackups(deps.db, parseDests(tmpdir(), ""), deps.now);
   const updates = deps.updates ?? createUpdates(deps.db, null, deps.version ?? "dev", deps.now);
   const health = createHealth(deps.db, deps.ha, backups, updates, { version: deps.version ?? "dev", startedAt: Date.now(), dbPath: deps.dbPath ?? ":memory:", now: deps.now });
-  return new Elysia()
+  let self: { handle(r: Request): Promise<Response> } | null = null;
+  const app = new Elysia()
     .onError(({ code, set }) => {
       // Never leak internals to clients.
       if (code === "NOT_FOUND") { set.status = 404; return { error: "not_found" }; }
@@ -110,12 +113,22 @@ export function createApp(deps: AppDeps) {
       try { deps.db.query("SELECT 1").get(); } catch { dbOk = false; }
       return { app: "ok", database: dbOk ? "ok" : "error", homeAssistant: deps.ha.health() };
     })
-    .get("/*", async ({ path, set }) => {
-      const dir = deps.webDir;
-      if (!dir || path.startsWith("/api/")) { set.status = 404; return { error: "not_found" }; }
-      const rel = normalize(decodeURIComponent(path)).replace(/^(\.\.[/\\])+/, "");
-      const file = Bun.file(join(dir, rel));
-      if (rel !== "/" && (await file.exists())) return file;
-      return Bun.file(join(dir, "index.html")); // SPA fallback
+    // Everything the first screen needs in one round trip, built from the app's own endpoints so permissions are exactly the same.
+    .get("/api/bootstrap", async ({ request, set }) => {
+      const cookie = request.headers.get("cookie") ?? "";
+      const get = async (path: string) => {
+        const r = await self!.handle(new Request(new URL(path, request.url), { headers: { cookie } }));
+        return r.ok ? await r.json() : null;
+      };
+      const [me, devices, rooms, groups, prefs, mode, scenes, routines] = await Promise.all(["/api/me", "/api/devices", "/api/rooms", "/api/groups", "/api/me/prefs", "/api/mode", "/api/scenes", "/api/routines"].map(get));
+      if (!me) { set.status = 401; return { error: "unauthenticated" }; }
+      set.headers["cache-control"] = "no-store";
+      return { me, devices, rooms, groups, prefs, mode, scenes, routines };
+    })
+    .get("/*", ({ path, set, request }) => {
+      if (!staticFiles || path.startsWith("/api/")) { set.status = 404; return { error: "not_found" }; }
+      return staticFiles(path, request) ?? (() => { set.status = 404; return { error: "not_found" }; })();
     });
+  self = app;
+  return app;
 }

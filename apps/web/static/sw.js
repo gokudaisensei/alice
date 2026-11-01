@@ -30,3 +30,30 @@ self.addEventListener('notificationclick', (event) => {
 		return self.clients.openWindow(url || '/');
 	}));
 });
+
+// Speed: the app opens from this device's copy and updates itself behind the scenes. Only the app's own files are kept here.
+// Nothing from /api/ is ever stored: your home's data stays on the server (and in this device's private app storage).
+const FILES = 'app-files-v1';
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil((async () => {
+	for (const k of await caches.keys()) if (k !== FILES) await caches.delete(k);
+	await self.clients.claim();
+})()));
+
+async function fromCacheThenUpdate(request, key) {
+	const cache = await caches.open(FILES);
+	const hit = await cache.match(key);
+	const fresh = fetch(request).then((r) => { if (r.ok) cache.put(key, r.clone()); return r; });
+	if (hit) { fresh.catch(() => {}); return hit; }
+	return fresh;
+}
+self.addEventListener('fetch', (event) => {
+	const req = event.request, url = new URL(req.url);
+	if (req.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/') || url.pathname === '/sw.js') return;
+	if (req.mode === 'navigate') { event.respondWith(fromCacheThenUpdate(req, '/')); return; } // every page is the same app shell
+	if (url.pathname.startsWith('/_app/immutable/')) { // hashed names never change, so a copy is always right
+		event.respondWith(caches.open(FILES).then(async (c) => (await c.match(req)) ?? fetch(req).then((r) => { if (r.ok) c.put(req, r.clone()); return r; })));
+		return;
+	}
+	if (/\.(png|svg|woff2|webmanifest)$/.test(url.pathname)) event.respondWith(fromCacheThenUpdate(req, req));
+});

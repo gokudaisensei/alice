@@ -1,5 +1,6 @@
 import { api, explain, reauth } from './api.js';
 import { haptics } from './haptics.js';
+import { session } from './session.svelte.js';
 
 export type Control =
 	| { type: 'power' } | { type: 'brightness' } | { type: 'color_temp'; minK: number; maxK: number } | { type: 'color' }
@@ -65,16 +66,33 @@ class Home {
 		this.timer = setTimeout(() => (this.notice = null), 6000);
 	}
 
-	async load() {
-		const [d, r, g, p, m, sc, ro] = await Promise.all([api('GET', '/api/devices'), api('GET', '/api/rooms'), api('GET', '/api/groups'), api('GET', '/api/me/prefs'), api('GET', '/api/mode'), api('GET', '/api/scenes'), api('GET', '/api/routines')]);
-		if (m.ok) this.mode = m.data;
-		if (sc.ok) { this.scenes = sc.data.scenes; this.canManageScenes = sc.data.canManage; }
-		if (ro.ok) { this.routines = ro.data.routines; this.suggested = ro.data.suggested; }
-		if (d.ok) { this.devices = d.data.devices; this.haHealth = d.data.haHealth; if (d.data.haHealth === 'ok') this.lastOkAt = Date.now(); }
-		if (r.ok) this.rooms = r.data.rooms;
-		if (g.ok) this.groups = g.data.groups;
-		if (p.ok) this.prefs = p.data;
+	private apply(b: any, from: 'cache' | 'network' = 'network') {
+		if (typeof performance !== 'undefined' && !performance.getEntriesByName('home-' + from).length) performance.mark('home-' + from); // timing: when the first real data painted
+		if (b.mode) this.mode = b.mode;
+		if (b.scenes) { this.scenes = b.scenes.scenes; this.canManageScenes = b.scenes.canManage; }
+		if (b.routines) { this.routines = b.routines.routines; this.suggested = b.routines.suggested; }
+		if (b.devices) { this.devices = b.devices.devices; this.haHealth = b.devices.haHealth; if (b.devices.haHealth === 'ok') this.lastOkAt = Date.now(); }
+		if (b.rooms) this.rooms = b.rooms.rooms;
+		if (b.groups) this.groups = b.groups.groups;
+		if (b.prefs) this.prefs = b.prefs;
 		this.loaded = true;
+	}
+
+	/** Paint last time's home straight away (kept only on this device), then let load() bring it up to date. */
+	restore() {
+		if (this.loaded) return;
+		try { const v = localStorage.getItem('home:v1'); const c = v ? JSON.parse(v) : null; if (c && c.uid === session.me?.id) this.apply(c.data, 'cache'); } catch { /* start from the network */ }
+	}
+
+	/** One request for everything the first screen needs. */
+	async load() {
+		const r = await api('GET', '/api/bootstrap');
+		if (r.status === 401) { await session.refresh(); return; }
+		if (!r.ok) return;
+		const { me, ...rest } = r.data;
+		session.remember(me);
+		this.apply(rest);
+		try { localStorage.setItem('home:v1', JSON.stringify({ uid: me.id, data: rest })); } catch { /* storage full or blocked: carry on */ }
 	}
 
 	/** Stay in step with the household. Long-polling rather than a stream: it works through any proxy or tunnel. */

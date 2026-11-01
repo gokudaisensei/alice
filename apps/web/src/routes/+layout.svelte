@@ -3,8 +3,8 @@
 	import favicon from '#lib/assets/favicon.svg';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { onMount } from 'svelte';
-	import { session } from '#lib/session.svelte.js';
+	import { onMount, untrack } from 'svelte';
+	import { session, forget } from '#lib/session.svelte.js';
 	import { api } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
 	import { chrome } from '#lib/chrome.svelte.js';
@@ -26,11 +26,17 @@
 	let { children }: LayoutProps = $props();
 	const publicPaths = ['/login', '/setup'];
 
+	// Show last time's home at once (kept only on this device), then confirm with the server.
+	session.restore(); if (session.me) home.restore();
 	onMount(async () => {
+		if (session.me || home.loaded) document.getElementById('boot')?.remove();
+		if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 		await session.refresh();
+		document.getElementById('boot')?.remove();
 		if (!session.me && !publicPaths.includes(page.url.pathname) && !page.url.pathname.startsWith('/ops')) goto('/login');
 	});
-	$effect(() => { if (session.me) { home.load(); home.connect(); notifications.start(); } else { home.disconnect(); notifications.stop(); } });
+	const signedIn = $derived(!!session.me); // not the object itself: refreshing it must not restart everything
+	$effect(() => { if (signedIn) { untrack(() => { home.load(); home.connect(); notifications.start(); }); } else { untrack(() => { home.disconnect(); notifications.stop(); }); } });
 
 	// Light/dark: the person's own choice, defaulting to the device setting.
 	$effect(() => {
@@ -48,7 +54,7 @@
 	const initial = $derived((session.me?.displayName ?? '?').trim().charAt(0).toUpperCase());
 	const roleLabel = $derived(session.me?.role === 'admin' ? 'Admin' : session.me?.role === 'member' ? 'Member' : 'Guest');
 
-	async function logout() { await api('POST', '/api/auth/logout'); session.me = null; goto('/login'); }
+	async function logout() { await api('POST', '/api/auth/logout'); forget(); session.me = null; goto('/login'); }
 	function onKey(e: KeyboardEvent) { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && session.me) { e.preventDefault(); chrome.search = !chrome.search; } }
 	const setAppearance = (a: 'system' | 'light' | 'dark') => home.savePrefs({ appearance: a });
 </script>

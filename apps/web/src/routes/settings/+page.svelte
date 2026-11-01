@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { api } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
-	import { session } from '#lib/session.svelte.js';
+	import { session, forget } from '#lib/session.svelte.js';
 	import { Button } from '#lib/components/ui/button';
 	import Page from '#lib/components/app/Page.svelte';
 	import Segmented from '#lib/components/app/Segmented.svelte';
@@ -23,7 +23,7 @@
 
 	function move<T>(arr: T[], i: number, d: number) { const a = [...arr], j = i + d; if (j < 0 || j >= a.length) return a; [a[i], a[j]] = [a[j], a[i]]; return a; }
 	const toggleSection = (id: string) => home.savePrefs({ sections: p!.sections.includes(id) ? p!.sections.filter((s) => s !== id) : [...p!.sections, id] });
-	async function logout() { await api('POST', '/api/auth/logout'); session.me = null; goto('/login'); }
+	async function logout() { await api('POST', '/api/auth/logout'); forget(); session.me = null; goto('/login'); }
 </script>
 
 <Page title="Appearance and home screen" subtitle="Only you see these choices." back={{ href: '/you', label: 'You' }} width="md">

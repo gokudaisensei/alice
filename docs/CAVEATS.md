@@ -79,6 +79,17 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | Desktop | Dark theme on desktop, Settings, the access page and the scene/routine editors not checked; Routines, People and Activity are narrow lists with empty space at wide widths | 🟡 |
 | Test data | The tunnel instance and HA container are seeded with a simulated home (89 devices, 9 rooms); seeded members Maya, Dev and Nani have no passkeys | ➖ |
 
+## Speed
+| Area | Caveat | Status |
+|---|---|---|
+| Server | App files are held in memory with Brotli and gzip copies; hashed files are cached for a year and the page revalidates by ETag (`static.ts`, tested). The main script went from 59 KB to 15 KB over the wire | ✅ |
+| Start-up | `GET /api/bootstrap` returns the first screen in one request instead of 8 (tested for permissions) | ✅ |
+| Start-up | The last screen is kept in this device's browser storage and painted at once (about 80 ms against about 365 ms from the network on localhost), then refreshed. Cleared on sign-out; ignored if it belongs to another person | ✅ measured on desktop localhost only; ⛔ not measured on a phone or over the tunnel |
+| Start-up | A service worker keeps the app's own files so it opens without waiting; `/api/` is never stored. The embedded browser here refused to register it, so it is **not exercised**; syntax checked only | ⛔ |
+| Start-up | A bug found while measuring: refreshing the sign-in object restarted loading in a loop (hundreds of requests). Fixed and confirmed at one request each | ✅ |
+| Fonts | The 132 KB headline font is unchanged (subsetting its axes risked changing the look) | ⛔ |
+| Taps | Device switches already show the result at once and undo on failure; scenes, routines and group buttons still wait for the hub | 🟡 |
+
 ## Re-running the real-world checks
 ```
 # Real Home Assistant (container already seeded; token in the scratchpad)

@@ -10,9 +10,20 @@
 		<meta name="mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-title" content="Home" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+		<style>
+			/* Shown the instant the page arrives, before any script runs; the app removes it once it has something real to show. */
+			#boot { position: fixed; inset: 0; z-index: 1; background: #f4f5f9; padding: 20px 16px; display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 8rem; gap: 10px; align-content: start; }
+			#boot i { display: block; border-radius: 1.25rem; background: #e4e8f3; animation: boot 1.2s ease-in-out infinite alternate; }
+			#boot i:first-child { grid-column: span 2; height: 4.5rem; border-radius: 1rem; }
+			@keyframes boot { from { opacity: .55; } to { opacity: 1; } }
+			@media (min-width: 768px) { #boot { padding: 80px 40px 40px 280px; grid-template-columns: repeat(4, 1fr); } }
+			@media (prefers-color-scheme: dark) { #boot { background: #080b16; } #boot i { background: #141b33; } }
+			@media (prefers-reduced-motion: reduce) { #boot i { animation: none; } }
+		</style>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
+		<div id="boot" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
 		<div style="display: contents">%sveltekit.body%</div>
 	</body>
 </html>
