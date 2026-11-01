@@ -78,6 +78,7 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | Desktop | Consistent left alignment, auto-fill tile grid, capped camera pictures, home side column from 1280 px, hover lift on tiles. Checked at 1024, 1440 and 1920 px (light) for Home, Rooms, Devices, Routines, Activity, People, You, System, Rooms & devices and the automation editor | ✅ |
 | Desktop | Dark theme on desktop, Settings, the access page and the scene/routine editors not checked; Routines, People and Activity are narrow lists with empty space at wide widths | 🟡 |
 | Energy page | Rebuilt for phones: the whole-home meters on top with a 24-hour range marker, one weekly chart with a meter picker (labelled bars, average line, best day), a ranked "Using power now" list (top 6, expandable), other readings folded away. Seeded page went from 3417 px to 1364 px tall. Viewed at phone and desktop width; the weekly chart only has the days the sampler has recorded; "whole-home" meters are picked by name (whole, house, grid, solar, total) | 🟡 not tried on a real phone |
+| Insights page | Grouped ("Always on", "Higher than usual", other) with one tappable line each; details and actions open on tap, one at a time. The five seeded insights now fit on one phone screen (was 1208 px of scrolling). Home's "Worth a look" cards are unchanged | 🟡 viewed at phone width only |
 | Test data | The tunnel instance and HA container are seeded with a simulated home (89 devices, 9 rooms); seeded members Maya, Dev and Nani have no passkeys | ➖ |
 
 ## Speed
