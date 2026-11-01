@@ -31,12 +31,14 @@
 	onMount(async () => {
 		if (session.me || home.loaded) document.getElementById('boot')?.remove();
 		if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-		await session.refresh();
+		// Signed-in pages ask for the home directly (it carries who you are); only public pages need the separate check.
+		if (publicPaths.includes(page.url.pathname) || page.url.pathname.startsWith('/ops')) await session.refresh(); else await home.load();
+		session.loaded = true;
 		document.getElementById('boot')?.remove();
 		if (!session.me && !publicPaths.includes(page.url.pathname) && !page.url.pathname.startsWith('/ops')) goto('/login');
 	});
 	const signedIn = $derived(!!session.me); // not the object itself: refreshing it must not restart everything
-	$effect(() => { if (signedIn) { untrack(() => { home.load(); home.connect(); notifications.start(); }); } else { untrack(() => { home.disconnect(); notifications.stop(); }); } });
+	$effect(() => { if (signedIn) { untrack(() => { home.load().then(() => { home.connect(); notifications.start(); }); }); } else { untrack(() => { home.disconnect(); notifications.stop(); }); } });
 
 	// Light/dark: the person's own choice, defaulting to the device setting.
 	$effect(() => {

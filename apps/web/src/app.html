@@ -20,6 +20,10 @@
 			@media (prefers-color-scheme: dark) { #boot { background: #080b16; } #boot i { background: #141b33; } }
 			@media (prefers-reduced-motion: reduce) { #boot i { animation: none; } }
 		</style>
+		<script>
+			// Ask for the home's data right now, while the app's own scripts are still downloading. The app picks up the answer when it starts.
+			if (!/^\/(login|setup|ops)/.test(location.pathname)) window.__boot = fetch('/api/bootstrap', { credentials: 'same-origin' }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); }).catch(function () { return null; });
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

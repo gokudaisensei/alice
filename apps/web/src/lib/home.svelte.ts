@@ -84,9 +84,15 @@ class Home {
 		try { const v = localStorage.getItem('home:v1'); const c = v ? JSON.parse(v) : null; if (c && c.uid === session.me?.id) this.apply(c.data, 'cache'); } catch { /* start from the network */ }
 	}
 
-	/** One request for everything the first screen needs. */
-	async load() {
-		const r = await api('GET', '/api/bootstrap');
+	private inflight: Promise<void> | null = null;
+	/** One request for everything the first screen needs. Asking twice at once shares the one request. */
+	load(): Promise<void> {
+		return (this.inflight ??= this.fetchAll().finally(() => (this.inflight = null)));
+	}
+	private async fetchAll() {
+		const w = window as unknown as { __boot?: Promise<{ ok: boolean; status: number; data: any } | null> };
+		const early = w.__boot; w.__boot = undefined; // started by the page itself before the scripts arrived; used once
+		const r = (early && (await early)) || (await api('GET', '/api/bootstrap'));
 		if (r.status === 401) { await session.refresh(); return; }
 		if (!r.ok) return;
 		const { me, ...rest } = r.data;
