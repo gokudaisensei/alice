@@ -1,5 +1,5 @@
 // The simulated household. Pure: no network, no clock of its own. The server gives it what Home Assistant currently says and gets back what to write.
-import { DEVICES, ROOMS, room, route, centre, type Dev } from "./layout";
+import { DEVICES, ROOMS, room, route, centre, spot, type Dev, type Pose } from "./layout";
 
 export type HaState = { state: string; attrs: Record<string, any> };
 export type HaView = (entity: string) => HaState | undefined;
@@ -45,7 +45,14 @@ const PARAMS: Record<string, Partial<RoomSim>> = {
 };
 /** How much of an appliance's power ends up as heat in the room: a water heater warms water, a charger warms a car. */
 const HEAT_SHARE: Record<string, number> = { "Water Heater Power": 0.06, "EV Charger Power": 0.03, "Dishwasher Power": 0.2, "Kettle Power": 0.35, "Coffee Machine Power": 0.4, "Front Lawn Sprinkler Power": 0, "Towel Warmer Power": 0.9 };
-const WINDOW: Record<string, string> = { Kitchen: "binary_sensor.kitchen_window", "Master Bedroom": "binary_sensor.bedroom_window", "Kids Room": "binary_sensor.kids_room_window" };
+const WINDOW: Record<string, string[]> = { Kitchen: ["binary_sensor.kitchen_window", "cover.kitchen_window"], "Master Bedroom": ["binary_sensor.bedroom_window"], "Kids Room": ["binary_sensor.kids_room_window"], "Living Room": ["cover.living_room_window"], Hallway: ["cover.hall_window"] };
+export const WINDOW_FAULTS = ["binary_sensor.bedroom_window", "binary_sensor.kids_room_window", "cover.kitchen_window", "cover.living_room_window", "cover.hall_window"];
+/** How far open a window or door is, 0 to 1, whether a sensor says so or a cover (blind, window, garage door) has been moved by someone. */
+export function openness(ha: HaView, entity: string): number {
+	const s = ha(entity); if (!s) return 0;
+	if (entity.startsWith("cover.")) return s.state === "closed" ? 0 : s.state === "open" ? clamp(Number(s.attrs.current_position ?? 100) / 100, 0, 1) : 0.5;
+	return s.state === "on" ? 1 : 0;
+}
 
 // ---------------------------------------------------------------------------------- people
 export type Act = "sleep" | "shower" | "breakfast" | "work" | "cook" | "dinner" | "tv" | "homework" | "garden" | "idle" | "away" | "nap" | "lunch";
@@ -71,7 +78,7 @@ export const FAULTS: Record<FaultKind, { label: string; minutes: number }> = {
 	door_ajar: { label: "Front door left ajar", minutes: 25 }, window_open: { label: "Window left open", minutes: 180 }, leak: { label: "Leak in the bathroom", minutes: 6 },
 	smoke: { label: "Burnt toast", minutes: 0.7 }, power_spike: { label: "A plug draws too much", minutes: 12 }, fridge_door: { label: "Fridge door left open", minutes: 8 }, garage_open: { label: "Garage door left open", minutes: 30 },
 };
-type ActiveFault = { id: number; kind: FaultKind; endsAt: number; detail: string };
+type ActiveFault = { id: number; kind: FaultKind; start: number; endsAt: number; detail: string };
 
 const helperOf = (name: string) => DEVICES.find((d) => d.name === name)?.sim?.helper as string | undefined;
 const byName = (n: string) => DEVICES.find((d) => d.name === n);
@@ -117,6 +124,12 @@ export class World {
 		let cur = steps[0];
 		for (const s of steps) if (s[0] <= h) cur = s;
 		return cur;
+	}
+	/** Standing, sitting or lying: only once they have actually reached their seat or bed. */
+	poseOf(p: Resident): Pose {
+		if (p.path.length || p.room === "Away") return "stand";
+		const sp = spot(p.goal, p.act, p.name);
+		return sp && Math.hypot(sp.x - p.x, sp.z - p.z) < 0.2 ? sp.pose : "stand";
 	}
 	/** Which room a point is in. */
 	roomAt(x: number, z: number): string {
@@ -181,11 +194,13 @@ export class World {
 				if (p.goal === "Away") { if (p.room !== "Away") { p.room = "Away"; this.depart(p, out); } }
 				else {
 					p.room = p.goal;
-					const r = room(p.goal);
-					if ((p.act as Act) !== "sleep" && (!p.wander || this.r() < dt / 45)) { // moves a little about the room now and then
-						p.wander = (p.act as Act) === "sleep" || (p.act as Act) === "work" ? centre(r) : { x: r.x0 + 0.9 + this.r() * (r.x1 - r.x0 - 1.8), z: r.z0 + 0.9 + this.r() * (r.z1 - r.z0 - 1.8) };
+					const r = room(p.goal), sp = spot(p.goal, p.act, p.name);
+					if (sp) p.wander = { x: sp.x, z: sp.z };
+					else if ((p.act as Act) !== "sleep" && (!p.wander || this.r() < dt / 45)) p.wander = { x: r.x0 + 0.9 + this.r() * (r.x1 - r.x0 - 1.8), z: r.z0 + 0.9 + this.r() * (r.z1 - r.z0 - 1.8) }; // moves a little about the room now and then
+					if (p.wander) {
+						const dx = p.wander.x - p.x, dz = p.wander.z - p.z, d = Math.hypot(dx, dz);
+						if (d > 0.04) { const s = Math.min(d, dt * (sp ? 1.1 : 0.5)); p.x += (dx / d) * s; p.z += (dz / d) * s; if (!sp) p.lastMove = this.t; else if (d > 0.3) p.lastMove = this.t; }
 					}
-					if (p.wander) { const dx = p.wander.x - p.x, dz = p.wander.z - p.z, d = Math.hypot(dx, dz); if (d > 0.05) { const s = Math.min(d, dt * 0.5); p.x += (dx / d) * s; p.z += (dz / d) * s; if ((p.act as Act) !== "sleep" && (p.act as Act) !== "work") p.lastMove = this.t; } }
 				}
 			}
 			const now = this.roomAt(p.x, p.z);
@@ -204,12 +219,14 @@ export class World {
 		}
 	}
 	private roomLightsOf(name: string): Dev[] { return DEVICES.filter((d) => d.room === name && d.kind === "light"); }
-	private roomLights(name: string, on: boolean, ha: HaView, out: Out, which?: (d: Dev) => boolean) {
+	/** How bright people keep a room at this time of day. */
+	private level(h: number, act?: Act) { if (act === "tv") return 30; if (h >= 22 || h < 6) return 25; if (h >= 20) return 55; if (h >= 18) return 80; return 100; }
+	private roomLights(name: string, on: boolean, ha: HaView, out: Out, which?: (d: Dev) => boolean, pct = 100) {
 		for (const d of this.roomLightsOf(name)) {
 			if (which && !which(d)) continue;
 			if (name === "Garden") continue;
 			const cur = ha(d.entity)?.state === "on";
-			if (cur !== on) out.call("light", on ? "turn_on" : "turn_off", d.entity);
+			if (cur !== on) out.call("light", on ? "turn_on" : "turn_off", d.entity, on ? { brightness: Math.round((pct / 100) * 255) } : undefined);
 		}
 	}
 	private dark(name: string, h: number) {
@@ -229,21 +246,22 @@ export class World {
 				if (name === "Hallway") return /hallway/i.test(d.name) || (night && /stair/i.test(d.name));
 				return true;
 			};
-			this.roomLights(name, true, ha, out, pick);
+			this.roomLights(name, true, ha, out, pick, this.level(h, p.act));
 		}
-		if (name === "Garden" && h > 18) out.call("light", "turn_on", "light.porch_light");
+		if (name === "Garden" && h > 18) out.call("light", "turn_on", "light.porch_light", { brightness: 200 });
 	}
 	private arrive(p: Resident, out: Out) {
 		this.events.push(`${p.name} arrives home`);
 		this.pulse("binary_sensor.front_door_contact", 12, out);
 		out.call("lock", "unlock", "lock.front_door_lock");
 		this.after(40, () => out.call("lock", "lock", "lock.front_door_lock"));
-		if (p.name === "Dev") this.after(25 * 60, () => out.call("switch", "turn_on", "switch.ev_charger"));
+		if (p.name === "Dev") { out.call("cover", "open_cover", "cover.garage_door"); this.after(40, () => out.call("cover", "close_cover", "cover.garage_door")); this.after(25 * 60, () => out.call("switch", "turn_on", "switch.ev_charger")); }
+		if (this.people.filter((q) => q.room !== "Away").length === 1) this.thermostat(21, 24, out);
 	}
 	private depart(p: Resident, out: Out) {
 		this.events.push(`${p.name} leaves`);
 		this.pulse("binary_sensor.front_door_contact", 12, out);
-		if (p.name === "Dev") out.call("switch", "turn_off", "switch.ev_charger");
+		if (p.name === "Dev") { out.call("switch", "turn_off", "switch.ev_charger"); out.call("cover", "open_cover", "cover.garage_door"); this.after(40, () => out.call("cover", "close_cover", "cover.garage_door")); }
 		if (!this.people.some((q) => q !== p && q.room !== "Away")) this.after(20, () => out.call("lock", "lock", "lock.front_door_lock"));
 	}
 	private pulse(entity: string, seconds: number, out: Out) {
@@ -275,8 +293,8 @@ export class World {
 				if (p.act === "breakfast" && p.room === "Kitchen" && key(`kettle-${p.name}`, Math.floor(hourOf(this.t) * 60))) { if (!weekend(this.t) || p.name !== "Kiran") { set("switch.kettle", true); if (p.name === "Maya" || p.name === "Dev") set("switch.coffee_machine", true); } }
 				if (p.act === "cook" && key(`cook-${p.name}`, Math.floor(hourOf(this.t) * 60)) && this.r() < 0.5) set("switch.kettle", true);
 				if (p.act === "work" && p.room === "Home Office") { set("switch.workstation_plug", true); set("switch.monitor_plug", true); }
-				if (p.act === "tv" && p.room === "Living Room") { set("switch.tv_plug", true); set("light.tv_backlight", true, "light"); }
-				if (p.act === "shower" && p.room === "Bathroom") { if (st("fan.bathroom_exhaust_fan") !== "on") out.call("fan", "turn_on", "fan.bathroom_exhaust_fan"); if (p.name !== "Kiran") set("switch.towel_warmer", true); this.tank = Math.max(25, this.tank - 0.02); }
+				if (p.act === "tv" && p.room === "Living Room") { if (st("switch.tv_plug") !== "on") { out.call("light", "turn_on", "light.floor_lamp", { brightness: 70 }); out.call("light", "turn_on", "light.tv_backlight", { brightness: 110 }); } set("switch.tv_plug", true); }
+				if (p.act === "shower" && p.room === "Bathroom") { if (st("fan.bathroom_exhaust_fan") !== "on" || Number(ha("fan.bathroom_exhaust_fan")?.attrs.percentage ?? 0) < 90) out.call("fan", "set_percentage", "fan.bathroom_exhaust_fan", { percentage: 100 }); if (p.name !== "Kiran") set("switch.towel_warmer", true); this.tank = Math.max(25, this.tank - 0.02); }
 			}
 		}
 		// things switched off again once nobody is around
@@ -288,9 +306,17 @@ export class World {
 		// the family's own bedtime habits
 		if (key("humidifier-on", 21 * 60)) set("switch.humidifier", true);
 		if (key("humidifier-off", 7 * 60)) set("switch.humidifier", false);
-		const hot = (this.rooms["Master Bedroom"]?.T ?? 21) > 24.2;
-		if (this.people.some((p) => p.room === "Master Bedroom" && p.act === "sleep") && hot) { if (st("fan.bedroom_ceiling_fan") !== "on") out.call("fan", "turn_on", "fan.bedroom_ceiling_fan"); }
-		else if (st("fan.bedroom_ceiling_fan") === "on" && !hot) out.call("fan", "turn_off", "fan.bedroom_ceiling_fan");
+		// ceiling fan: someone asleep in a warm room runs it at a speed that matches the heat
+		const T = this.rooms["Master Bedroom"]?.T ?? 21, sleeping = this.people.some((p) => p.room === "Master Bedroom" && p.act === "sleep");
+		const want = sleeping ? (T > 27 ? 100 : T > 25.5 ? 67 : T > 24.2 ? 33 : 0) : 0, now = st("fan.bedroom_ceiling_fan") === "on" ? Math.round(Number(ha("fan.bedroom_ceiling_fan")?.attrs.percentage ?? 0)) : 0;
+		if (want !== now && !(now > 0 && want > 0 && Math.abs(want - now) < 20)) { if (want === 0) out.call("fan", "turn_off", "fan.bedroom_ceiling_fan"); else out.call("fan", "set_percentage", "fan.bedroom_ceiling_fan", { percentage: want }); }
+		// the thermostat gets nudged like a person would: cooler overnight, a setback when the house is empty
+		if (key("night-setback", 22 * 60 + 45)) this.thermostat(19.5, 25, out);
+		if (key("morning-warm", 6 * 60 + 15)) this.thermostat(21, 24, out);
+		const empty = this.people.every((p) => p.room === "Away" && p.path.length === 0);
+		if (empty && this.flags.emptyAt === undefined) this.flags.emptyAt = this.t;
+		if (!empty) delete this.flags.emptyAt;
+		if (this.flags.emptyAt !== undefined && this.flags.emptyAt > 0 && this.t - this.flags.emptyAt > 20 * 60e3) { this.thermostat(17, 27, out); this.flags.emptyAt = -1; }
 		if (this.people.every((p) => ["sleep", "away"].includes(p.act) && p.path.length === 0) && h > 22.4 || (h < 5 && h > 0)) {
 			if (key("night-lock", 22 * 60 + 40)) { out.call("lock", "lock", "lock.front_door_lock"); out.call("lock", "lock", "lock.back_door_lock"); for (const rm of ["Living Room", "Kitchen", "Hallway", "Bathroom"]) this.roomLights(rm, false, ha, out); }
 		}
@@ -301,6 +327,7 @@ export class World {
 		// visitors
 		if (h > 9.5 && h < 19 && !weekend(this.t) && this.r() < 0.00004 * (this.speed > 100 ? 1 : 1)) this.visitor(out);
 	}
+	private thermostat(low: number, high: number, out: Out) { out.call("climate", "set_temperature", "climate.ecobee", { target_temp_low: low, target_temp_high: high }); }
 	private soil(ha: HaView) { const n = Number(ha("sensor.garden_soil_moisture")?.state); return Number.isFinite(n) ? n : undefined; }
 	private visitor(out: Out) {
 		this.events.push("Someone rings the doorbell");
@@ -351,9 +378,9 @@ export class World {
 			const ocup = this.people.filter((p) => this.roomAt(p.x, p.z) === n).length;
 			const lights = DEVICES.filter((x) => x.room === n && x.kind === "light" && ha(x.entity)?.state === "on").length;
 			const appl = DEVICES.filter((x) => x.room === n && x.sim?.gate).reduce((a, x) => a + (this.watts[x.name] ?? 0) * (HEAT_SHARE[x.name] ?? 0.85), 0);
-			let ua = R.ua + (WINDOW[n] && ha(WINDOW[n])?.state === "on" ? 90 : 0);
+			let ua = R.ua + (WINDOW[n] ? 90 * Math.max(...WINDOW[n].map((e) => openness(ha, e))) : 0);
 			if (n === "Hallway" && ha("binary_sensor.front_door_contact")?.state === "on") ua += 60;
-			if (n === "Garage" && ha("binary_sensor.garage_door_contact")?.state === "on") ua += 200;
+			if (n === "Garage") ua += 200 * Math.max(openness(ha, "cover.garage_door"), openness(ha, "binary_sensor.garage_door_contact"));
 			let q = ua * (out - R.T) + 25 * (mean - R.T) + R.sunGain * sun + ocup * 90 + lights * 9 + appl;
 			if (n === "Bathroom" && this.people.some((p) => p.act === "shower" && this.roomAt(p.x, p.z) === "Bathroom")) q += 600;
 			if (R.conditioned && this.hvac.mode !== "off" && this.hvac.mode !== "fan_only") {
@@ -364,7 +391,7 @@ export class World {
 			}
 			R.T += (q * d) / R.c;
 			// air: people breathe, windows and fans change it, humidity follows the weather with a lag and bumps for showers and cooking
-			const vent = (WINDOW[n] && ha(WINDOW[n])?.state === "on" ? 1 / 500 : 1 / 2600) + (n === "Bathroom" && ha("fan.bathroom_exhaust_fan")?.state === "on" ? 1 / 700 : 0);
+			const vent = (WINDOW[n] && Math.max(...WINDOW[n].map((e) => openness(ha, e))) > 0.1 ? 1 / 500 : 1 / 2600) + (n === "Bathroom" && ha("fan.bathroom_exhaust_fan")?.state === "on" ? 1 / 700 : 0);
 			const sleepers = this.people.filter((p) => p.act === "sleep" && this.roomAt(p.x, p.z) === n).length;
 			R.co2 = clamp(R.co2 + (ocup * 0.4 - sleepers * 0.14 - (R.co2 - 430) * vent) * d, 400, 3500);
 			const humTarget = (n === "Bathroom" ? 58 : 48) + (this.weather.humidity(h) - 68) * 0.2 + (n === "Bathroom" && this.people.some((p) => p.act === "shower" && this.roomAt(p.x, p.z) === n) ? 38 : 0) + (n === "Kitchen" && this.people.some((p) => p.act === "cook" && p.room === "Kitchen") ? 14 : 0) + (ha("switch.humidifier")?.state === "on" && n === "Kids Room" ? 10 : 0);
@@ -415,38 +442,51 @@ export class World {
 
 	// -------------------------------------------------------------------------- things going wrong
 	private faultTick(ha: HaView, out: Out) {
+		// someone undoing it from the app (locking the door, closing the cover, switching the plug off) ends it right away
+		for (const f of this.faults) if (this.t - f.start > 12e3 && this.undone(f, ha)) f.endsAt = this.t;
 		for (const f of this.faults.filter((x) => x.endsAt <= this.t)) this.endFault(f, out);
 		this.faults = this.faults.filter((x) => x.endsAt > this.t);
 		if (this.t > this.nextFault && this.nextFault > 0) {
 			const kinds = Object.keys(FAULTS) as FaultKind[], k = kinds[Math.floor(this.r() * kinds.length)];
 			this.startFault(k, out); this.nextFault = this.t + (8 + this.r() * 20) * 3600e3;
 		}
-		void ha;
+	}
+	private undone(f: ActiveFault, ha: HaView) {
+		if (f.kind === "door_ajar") return ha("lock.front_door_lock")?.state === "locked";
+		if (f.kind === "garage_open") return ha("cover.garage_door")?.state === "closed";
+		if (f.kind === "window_open") return f.detail.startsWith("cover.") && ha(f.detail)?.state === "closed";
+		if (f.kind === "power_spike") { const d = DEVICES.find((x) => x.name === f.detail); return !!d?.sim?.gate && ha(d.sim.gate as string)?.state === "off"; }
+		return false;
 	}
 	private startFault(kind: FaultKind, out: Out, detail = "") {
 		if (this.faults.some((f) => f.kind === kind)) return;
-		const f: ActiveFault = { id: this.faultId++, kind, endsAt: this.t + FAULTS[kind].minutes * 60e3, detail };
+		const f: ActiveFault = { id: this.faultId++, kind, start: this.t, endsAt: this.t + FAULTS[kind].minutes * 60e3, detail };
 		const set = (entity: string, on: boolean) => { const hp = boolHelper(entity); if (hp) { this.sent.set(hp, on); out.bool(hp, on); } };
+		const open = (entity: string, on: boolean) => (entity.startsWith("cover.") ? out.call("cover", on ? "open_cover" : "close_cover", entity) : set(entity, on));
 		if (kind === "door_ajar") { out.call("lock", "unlock", "lock.front_door_lock"); set("binary_sensor.front_door_contact", true); }
-		if (kind === "window_open") { const w = detail || ["binary_sensor.bedroom_window", "binary_sensor.kids_room_window", "binary_sensor.kitchen_window"][Math.floor(this.r() * 3)]; f.detail = w; set(w, true); }
+		if (kind === "window_open") { const w = detail || WINDOW_FAULTS[Math.floor(this.r() * WINDOW_FAULTS.length)]; f.detail = w; open(w, true); }
 		if (kind === "leak") set("binary_sensor.bathroom_leak_sensor", true);
 		if (kind === "smoke") set("binary_sensor.kitchen_smoke_detector", true);
 		if (kind === "power_spike") f.detail = detail || ["Workstation Plug Power", "Monitor Plug Power", "TV Plug Power", "Humidifier Power", "Dishwasher Power"].filter((n) => this.watts[n] > 0)[0] || "Fridge Freezer Plug Power";
 		if (kind === "fridge_door") set("binary_sensor.fridge_door", true);
-		if (kind === "garage_open") set("binary_sensor.garage_door_contact", true);
+		if (kind === "garage_open") out.call("cover", "open_cover", "cover.garage_door");
 		this.faults.push(f); this.events.push(FAULTS[kind].label);
 	}
 	private endFault(f: ActiveFault, out: Out) {
 		const set = (entity: string) => { const hp = boolHelper(entity); if (hp) { this.sent.set(hp, false); out.bool(hp, false); } };
 		if (f.kind === "door_ajar") { set("binary_sensor.front_door_contact"); out.call("lock", "lock", "lock.front_door_lock"); }
-		if (f.kind === "window_open") set(f.detail);
+		if (f.kind === "window_open") { if (f.detail.startsWith("cover.")) out.call("cover", "close_cover", f.detail); else set(f.detail); }
 		if (f.kind === "leak") set("binary_sensor.bathroom_leak_sensor");
 		if (f.kind === "smoke") set("binary_sensor.kitchen_smoke_detector");
 		if (f.kind === "fridge_door") set("binary_sensor.fridge_door");
-		if (f.kind === "garage_open") set("binary_sensor.garage_door_contact");
+		if (f.kind === "garage_open") out.call("cover", "close_cover", "cover.garage_door");
+		this.events.push(`${FAULTS[f.kind].label}: sorted`);
 	}
 
 	// -------------------------------------------------------------------------- adopt what is already there
+	/** Day one: shut the windows and the garage door, which Home Assistant's demo leaves half open. */
+	init(out: Out) { for (const c of ["cover.kitchen_window", "cover.living_room_window", "cover.hall_window", "cover.garage_door"]) out.call("cover", "close_cover", c); }
+
 	/** On the first look, start from what Home Assistant already shows so nothing jumps. */
 	adopt(ha: HaView) {
 		for (const [n, R] of Object.entries(this.rooms)) {

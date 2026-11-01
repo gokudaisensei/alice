@@ -79,3 +79,33 @@ test("energy counters only ever go up, and the whole-home figure includes what's
 	for (let i = 0; i < 200; i++) { w.step(30, ha.view, ha.out); const e = Number(ha.s.get("sensor.whole_home_energy")!.state); expect(e).toBeGreaterThanOrEqual(last); last = e; }
 	expect(last).toBeGreaterThan(0);
 });
+
+test("undoing a fault from the app ends it: lock the door, close the cover, switch the plug off", () => {
+	const ha = fakeHa(), w = new World(at(14), 4);
+	w.adopt(ha.view);
+	w.trigger("door_ajar", ha.out);
+	expect(ha.s.get("lock.front_door_lock")!.state).toBe("unlocked");
+	expect(ha.s.get("binary_sensor.front_door_contact")!.state).toBe("on");
+	for (let i = 0; i < 3; i++) w.step(5, ha.view, ha.out);
+	expect(w.faults.length).toBe(1); // still ajar: nobody has touched it
+	ha.s.set("lock.front_door_lock", { state: "locked", attrs: {} }); // the person locks it in the app
+	for (let i = 0; i < 3; i++) w.step(5, ha.view, ha.out);
+	expect(w.faults.length).toBe(0);
+	expect(ha.s.get("binary_sensor.front_door_contact")!.state).toBe("off"); // so the door swings shut in the 3D house
+	ha.s.set("cover.kitchen_window", { state: "open", attrs: { current_position: 100 } });
+	w.trigger("window_open", ha.out, "cover.kitchen_window");
+	ha.s.set("cover.kitchen_window", { state: "closed", attrs: {} });
+	for (let i = 0; i < 4; i++) w.step(5, ha.view, ha.out);
+	expect(w.faults.length).toBe(0);
+});
+
+test("people sit on the sofa to watch TV and lie in bed to sleep", () => {
+	const ha = fakeHa(), w = new World(at(21), 8); // a Wednesday evening
+	w.adopt(ha.view);
+	for (let i = 0; i < 60; i++) w.step(10, ha.view, ha.out);
+	const nani = w.people.find((p) => p.name === "Nani")!, dev = w.people.find((p) => p.name === "Dev")!;
+	expect(w.poseOf(nani)).toBe("sit");
+	for (let i = 0; i < 1200; i++) w.step(10, ha.view, ha.out);
+	expect(w.poseOf(dev)).toBe("lie");
+	expect(w.roomAt(dev.x, dev.z)).toBe("Master Bedroom");
+});

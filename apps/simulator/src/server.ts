@@ -18,6 +18,7 @@ await ha.refresh();
 const world = new World(Date.now(), Number(process.env.SEED ?? 7));
 world.speed = Number(process.env.SPEED ?? 1);
 world.adopt(ha.view);
+world.init(ha.out);
 
 // Service calls are collapsed per tick so a fast clock can't ask for the same thing a hundred times.
 let seen = new Set<string>();
@@ -31,8 +32,11 @@ const snapshot = () => ({
 	outdoor: world.weather.temp(hourOf(world.t)), wind: world.weather.wind, humidity: world.weather.humidity(hourOf(world.t)),
 	power: world.power, hvac: world.hvac,
 	rooms: Object.fromEntries(Object.entries(world.rooms).map(([n, r]) => [n, { T: Math.round(r.T * 10) / 10, hum: Math.round(r.hum), co2: Math.round(r.co2) }])),
-	people: world.people.map((p) => ({ name: p.name, x: Math.round(p.x * 100) / 100, z: Math.round(p.z * 100) / 100, room: world.roomAt(p.x, p.z), act: p.act, walking: p.path.length > 0 })),
-	devices: Object.fromEntries(placed.map((d) => { const s = ha.view(d.entity); return [d.entity, { s: s?.state ?? "unavailable", b: s?.attrs.brightness ?? null }]; })),
+	people: world.people.map((p) => ({ name: p.name, x: Math.round(p.x * 100) / 100, z: Math.round(p.z * 100) / 100, room: world.roomAt(p.x, p.z), act: p.act, walking: p.path.length > 0, pose: world.poseOf(p) })),
+	devices: Object.fromEntries(placed.map((d) => { const s = ha.view(d.entity); return [d.entity, { s: s?.state ?? "unavailable", b: s?.attrs.brightness ?? null, pct: s?.attrs.percentage ?? null }]; })),
+	covers: Object.fromEntries(["cover.kitchen_window", "cover.living_room_window", "cover.hall_window", "cover.garage_door", "cover.pergola_roof"].map((id) => { const s = ha.view(id); return [id, { s: s?.state ?? "closed", pos: s?.attrs.current_position ?? (s?.state === "open" ? 100 : 0), tilt: s?.attrs.current_tilt_position ?? null }]; })),
+	media: Object.fromEntries(["media_player.living_room", "media_player.bedroom", "media_player.kitchen"].map((id) => [id, ha.view(id)?.state ?? "off"])),
+	climate: (() => { const c = ha.view("climate.ecobee"); return c ? { mode: c.state, low: c.attrs.target_temp_low, high: c.attrs.target_temp_high, fan: c.attrs.fan_mode } : null; })(),
 	watts: world.watts, faults: world.faults.map((f) => ({ id: f.id, kind: f.kind, label: FAULTS[f.kind].label, left: Math.max(0, Math.round((f.endsAt - world.t) / 60000)) })),
 	events: world.events.slice(-12),
 	thermostat: ha.view("climate.ecobee")?.state ?? null,
@@ -68,7 +72,10 @@ const server = Bun.serve({
 			if (url.pathname === "/api/act") {
 				const d = placed.find((x) => x.entity === b.entity); if (!d) return Response.json({ error: "unknown" }, { status: 404 });
 				const dom = d.entity.split(".")[0], on = ha.view(d.entity)?.state;
+				const level = typeof b.level === "number" ? b.level : null;
 				if (dom === "lock") await ha.call("lock", on === "locked" ? "unlock" : "lock", d.entity);
+				else if (dom === "light" && level !== null) await ha.call("light", "turn_on", d.entity, { brightness: Math.round((Math.min(100, Math.max(1, level)) / 100) * 255) });
+				else if (dom === "fan" && level !== null) await (level <= 0 ? ha.call("fan", "turn_off", d.entity) : ha.call("fan", "set_percentage", d.entity, { percentage: Math.min(100, level) }));
 				else if (["light", "switch", "fan"].includes(dom)) await ha.call(dom, on === "on" ? "turn_off" : "turn_on", d.entity);
 				else return Response.json({ error: "not_controllable" }, { status: 400 });
 				return Response.json({ ok: true });

@@ -31,7 +31,7 @@ export type Placed = Dev & { x: number; y: number; z: number };
 // Fixed spots for things that live in a particular place; everything else is spread by kind along the room.
 const FIXED: Record<string, [number, number, number]> = {
 	"lock.front_door_lock": [0.15, 1.2, HALL_Z - 0.6], "binary_sensor.front_door_contact": [0.05, 1.0, HALL_Z], "binary_sensor.doorbell_button": [0.15, 1.35, HALL_Z + 0.6],
-	"lock.back_door_lock": [10, 1.2, 11.9], "lock.garage_side_door_lock": [16, 1.2, 11.9], "binary_sensor.garage_door_contact": [15.9, 1.0, 11.95],
+	"lock.back_door_lock": [10, 1.2, 11.9], "lock.garage_side_door_lock": [16.5, 1.2, 11.9], "binary_sensor.garage_door_contact": [16.4, 1.0, 11.95],
 	"binary_sensor.kitchen_window": [11.3, 1.2, 11.95], "binary_sensor.bedroom_window": [2.5, 1.3, 0.05], "binary_sensor.kids_room_window": [10.5, 1.3, 0.05],
 	"binary_sensor.bathroom_leak_sensor": [7.4, 0.05, 4.2], "binary_sensor.kitchen_smoke_detector": [10.25, 2.3, 9.2], "binary_sensor.fridge_door": [8.4, 1.0, 7.0],
 	"switch.tv_plug": [3.5, 0.9, 11.5], "switch.ev_charger": [16.7, 1.2, 8.5], "switch.fridge_freezer_plug": [8.2, 0.3, 7.2], "switch.water_heater": [6.0, 0.3, 0.4],
@@ -79,4 +79,24 @@ export function route(from: { x: number; z: number }, fromRoom: string, to: stri
 	else if (to !== "Hallway") { const r = room(to); pts.push({ x: r.door.x, z: HALL_Z }, { x: r.door.x, z: r.z0 < 5 ? 4.6 : r.z0 + 0.5 }, centre(r)); }
 	else pts.push({ x: 8.5, z: HALL_Z });
 	return pts;
+}
+
+// ------------------------------------------------------------------ where people sit, lie and stand
+export type Pose = "stand" | "sit" | "lie";
+export type Spot = { x: number; z: number; pose: Pose };
+const SOFA: Record<string, number> = { Maya: 2.2, Dev: 3.0, Kiran: 3.8 };
+const STOOL: Record<string, number> = { Maya: 9.6, Dev: 10.4, Kiran: 11.2, Nani: 10.0 };
+/** The exact place an activity happens, or null when the person simply moves about the room. */
+export function spot(roomName: string, act: string, name: string): Spot | null {
+	if (act === "sleep") {
+		if (roomName === "Master Bedroom") return { x: name === "Maya" ? 1.7 : 2.8, z: 1.8, pose: "lie" };
+		if (roomName === "Kids Room") return { x: 11.2, z: 1.5, pose: "lie" };
+		if (roomName === "Home Office") return { x: 15.6, z: 3.7, pose: "lie" };
+	}
+	if (roomName === "Living Room" && ["tv", "dinner", "nap"].includes(act)) return name === "Nani" ? { x: 1.1, z: 10.2, pose: act === "nap" ? "lie" : "sit" } : { x: SOFA[name] ?? 3, z: 11.2, pose: "sit" };
+	if (roomName === "Kitchen" && ["breakfast", "lunch"].includes(act)) return { x: STOOL[name] ?? 10, z: 8.75, pose: "sit" };
+	if (roomName === "Kitchen" && act === "cook") return { x: name === "Dev" ? 11.0 : 9.6, z: 7.55, pose: "stand" };
+	if (roomName === "Home Office" && act === "work") return { x: 15, z: 2.05, pose: "sit" };
+	if (roomName === "Kids Room" && act === "homework") return { x: 9.4, z: 1.3, pose: "sit" };
+	return null;
 }
