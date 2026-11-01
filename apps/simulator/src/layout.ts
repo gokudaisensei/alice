@@ -1,0 +1,82 @@
+// The house as one flat plan, in metres. x runs left to right, z runs top (back of the house) to bottom (front garden).
+// Both the world model (where people are, what a motion sensor can see) and the 3D viewer read this, so they never disagree.
+import devices from "./devices.json";
+
+export type Rect = { x0: number; x1: number; z0: number; z1: number };
+export type Room = Rect & { name: string; indoor: boolean; color: number; door: { x: number; z: number } };
+
+// A door point is where a resident crosses from the hallway (or garden) into the room.
+export const ROOMS: Room[] = [
+	{ name: "Master Bedroom", x0: 0, x1: 5.5, z0: 0, z1: 5, indoor: true, color: 0xcfd8ee, door: { x: 2.5, z: 5 } },
+	{ name: "Bathroom", x0: 5.5, x1: 8.5, z0: 0, z1: 5, indoor: true, color: 0xcbe6ee, door: { x: 7, z: 5 } },
+	{ name: "Kids Room", x0: 8.5, x1: 13, z0: 0, z1: 5, indoor: true, color: 0xf0dcc4, door: { x: 10.5, z: 5 } },
+	{ name: "Home Office", x0: 13, x1: 17, z0: 0, z1: 5, indoor: true, color: 0xd9d3ee, door: { x: 15, z: 5 } },
+	{ name: "Hallway", x0: 0, x1: 17, z0: 5, z1: 6.5, indoor: true, color: 0xe4e1d8, door: { x: 8.5, z: 5.75 } },
+	{ name: "Living Room", x0: 0, x1: 8, z0: 6.5, z1: 12, indoor: true, color: 0xe6d9c4, door: { x: 4, z: 6.5 } },
+	{ name: "Kitchen", x0: 8, x1: 12.5, z0: 6.5, z1: 12, indoor: true, color: 0xe3e8d2, door: { x: 10.25, z: 6.5 } },
+	{ name: "Garage", x0: 12.5, x1: 17, z0: 6.5, z1: 12, indoor: true, color: 0xcfcfd2, door: { x: 14.75, z: 6.5 } },
+	{ name: "Garden", x0: -3, x1: 20, z0: 12, z1: 18, indoor: false, color: 0xbfe0b0, door: { x: 10.25, z: 12 } },
+];
+export const room = (name: string) => ROOMS.find((r) => r.name === name)!;
+export const centre = (r: Rect) => ({ x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2 });
+export const HALL_Z = 5.75;
+export const FRONT_DOOR = { x: 0, z: HALL_Z }; // west end of the hallway
+export const OUTSIDE = { x: -3.5, z: HALL_Z }; // "away" residents leave and arrive here
+
+export type Dev = { entity: string; name: string; room: string; kind: string; sim?: Record<string, any> };
+export const DEVICES = devices as Dev[];
+
+export type Placed = Dev & { x: number; y: number; z: number };
+
+// Fixed spots for things that live in a particular place; everything else is spread by kind along the room.
+const FIXED: Record<string, [number, number, number]> = {
+	"lock.front_door_lock": [0.15, 1.2, HALL_Z - 0.6], "binary_sensor.front_door_contact": [0.05, 1.0, HALL_Z], "binary_sensor.doorbell_button": [0.15, 1.35, HALL_Z + 0.6],
+	"lock.back_door_lock": [10, 1.2, 11.9], "lock.garage_side_door_lock": [16, 1.2, 11.9], "binary_sensor.garage_door_contact": [15.9, 1.0, 11.95],
+	"binary_sensor.kitchen_window": [11.3, 1.2, 11.95], "binary_sensor.bedroom_window": [2.5, 1.3, 0.05], "binary_sensor.kids_room_window": [10.5, 1.3, 0.05],
+	"binary_sensor.bathroom_leak_sensor": [7.4, 0.05, 4.2], "binary_sensor.kitchen_smoke_detector": [10.25, 2.3, 9.2], "binary_sensor.fridge_door": [8.4, 1.0, 7.0],
+	"switch.tv_plug": [3.5, 0.9, 11.5], "switch.ev_charger": [16.7, 1.2, 8.5], "switch.fridge_freezer_plug": [8.2, 0.3, 7.2], "switch.water_heater": [6.0, 0.3, 0.4],
+	"switch.garden_path_lights": [6, 0.2, 14], "switch.front_lawn_sprinkler": [3, 0.2, 14.5], "light.porch_light": [1, 2.2, 11.9],
+};
+const HEIGHT: Record<string, number> = { light: 2.35, fan: 2.4, switch: 0.35, lock: 1.2, bsensor: 1.4, sensor: 1.5, energy: 0.3, meter: 0.3 };
+
+/** Every device in a place: pinned ones where they belong, the rest spaced along the room so they never overlap. */
+export function place(): Placed[] {
+	const out: Placed[] = [], slots = new Map<string, number>();
+	for (const d of DEVICES) {
+		const f = FIXED[d.entity];
+		if (f) { out.push({ ...d, x: f[0], y: f[1], z: f[2] }); continue; }
+		const found = ROOMS.find((x) => x.name === d.room);
+		if (!found) { const i = slots.get("meters") ?? 0; slots.set("meters", i + 1); out.push({ ...d, x: 13 + (i % 5) * 0.5, y: 1.6, z: 6.7 }); continue; } // whole-home meters sit on the garage's inner wall
+		const r = found, key = `${d.room}:${d.kind}`, i = slots.get(key) ?? 0;
+		slots.set(key, i + 1);
+		const w = r.x1 - r.x0, h = r.z1 - r.z0;
+		if (d.kind === "light" || d.kind === "fan") {
+			const row = Math.floor(i / 3), col = i % 3;
+			out.push({ ...d, x: r.x0 + w * (0.25 + 0.25 * col), y: HEIGHT[d.kind], z: r.z0 + h * (0.3 + 0.25 * row) });
+		} else if (d.kind === "switch") out.push({ ...d, x: r.x0 + 0.35 + i * 0.7, y: HEIGHT.switch, z: r.z1 - 0.35 });
+		else if (d.kind === "sensor") out.push({ ...d, x: r.x1 - 0.3 - (i % 5) * 0.28, y: 1.5, z: r.z0 + 0.3 + Math.floor(i / 5) * 0.3 });
+		else out.push({ ...d, x: r.x0 + w * 0.5 + i * 0.4, y: HEIGHT[d.kind] ?? 1.4, z: r.z0 + h * 0.5 });
+	}
+	return out;
+}
+
+/** The walk from anywhere to a room: out to the hallway, along it, in through the door. Rooms off the hallway share its centre line. */
+export function route(from: { x: number; z: number }, fromRoom: string, to: string): { x: number; z: number }[] {
+	if (fromRoom === to) return [];
+	const pts: { x: number; z: number }[] = [];
+	const toHall = (name: string) => {
+		const r = room(name);
+		if (name === "Hallway") return;
+		if (name === "Garden") return;
+		pts.push({ x: r.door.x, z: r.z0 < 5 ? 4.6 : r.z0 + 0.4 });
+		pts.push({ x: r.door.x, z: HALL_Z });
+	};
+	if (fromRoom === "Away") pts.push(OUTSIDE, { x: FRONT_DOOR.x - 0.2, z: HALL_Z }, { x: 1, z: HALL_Z });
+	else if (fromRoom === "Garden") pts.push({ x: room("Kitchen").door.x, z: 12.2 }, { x: room("Kitchen").door.x, z: 11.2 }, { x: room("Kitchen").door.x, z: 6.9 }, { x: room("Kitchen").door.x, z: HALL_Z });
+	else if (fromRoom !== "Hallway") toHall(fromRoom);
+	if (to === "Away") pts.push({ x: 1, z: HALL_Z }, { x: FRONT_DOOR.x - 0.2, z: HALL_Z }, OUTSIDE);
+	else if (to === "Garden") { const k = room("Kitchen").door.x; pts.push({ x: k, z: HALL_Z }, { x: k, z: 6.9 }, { x: k, z: 11.2 }, { x: k, z: 12.4 }, centre(room("Garden"))); }
+	else if (to !== "Hallway") { const r = room(to); pts.push({ x: r.door.x, z: HALL_Z }, { x: r.door.x, z: r.z0 < 5 ? 4.6 : r.z0 + 0.5 }, centre(r)); }
+	else pts.push({ x: 8.5, z: HALL_Z });
+	return pts;
+}

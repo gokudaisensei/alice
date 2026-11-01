@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Home simulator</title>
+<style>
+	:root { color-scheme: dark; --glass: rgba(13, 18, 38, .72); --line: rgba(255,255,255,.1); --ink: #eef0fa; --mut: #97a1c0; --pri: #7f9bff; --on: #ffc247; --bad: #ff7b8f; --ok: #5fd0a0; }
+	* { box-sizing: border-box; }
+	html, body { margin: 0; height: 100%; overflow: hidden; background: #080b16; color: var(--ink); font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+	canvas { display: block; }
+	.panel { position: absolute; background: var(--glass); backdrop-filter: blur(14px); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+	.panel h2 { margin: 0 0 8px; font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--mut); }
+	#clock { left: 14px; top: 14px; min-width: 210px; }
+	#clock .t { font-size: 30px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+	#clock .d { color: var(--mut); }
+	#clock .w { margin-top: 8px; display: grid; grid-template-columns: auto auto; gap: 2px 14px; color: var(--mut); }
+	#clock .w b { color: var(--ink); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+	#ctl { right: 14px; top: 14px; display: flex; gap: 6px; flex-wrap: wrap; max-width: 420px; justify-content: flex-end; }
+	button { font: inherit; color: var(--ink); background: rgba(255,255,255,.08); border: 0; border-radius: 9px; padding: 6px 10px; cursor: pointer; transition: background .15s; }
+	button:hover { background: rgba(255,255,255,.16); }
+	button.on { background: var(--pri); color: #071033; font-weight: 600; }
+	#people { left: 14px; bottom: 14px; width: 250px; }
+	#people div { display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 3px 0; }
+	#people i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; }
+	#people span { color: var(--mut); text-align: right; white-space: nowrap; }
+	#people .who { color: var(--ink); text-align: left; }
+	#power { right: 14px; bottom: 14px; width: 290px; }
+	.bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,.1); margin: 3px 0 8px; overflow: hidden; }
+	.bar > div { height: 100%; border-radius: 3px; transition: width .6s; }
+	.row { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+	.row b { font-weight: 600; }
+	#faults { right: 14px; top: 100px; width: 250px; }
+	#faults .list { display: flex; flex-direction: column; gap: 4px; }
+	#faults button { text-align: left; }
+	#active { margin-top: 8px; color: var(--bad); }
+	#events { left: 50%; transform: translateX(-50%); bottom: 14px; max-width: 34vw; padding: 8px 14px; color: var(--mut); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.label { position: absolute; pointer-events: none; transform: translate(-50%, -50%); text-align: center; font-size: 11px; text-shadow: 0 1px 3px #000; white-space: nowrap; }
+	.label b { display: block; font-size: 12px; }
+	.label span { color: #cdd6f6; }
+	.who { color: #fff; font-weight: 600; }
+	#tip { position: absolute; pointer-events: none; background: rgba(0,0,0,.8); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; display: none; z-index: 5; }
+	@media (max-width: 900px) { #faults, #events { display: none; } #people { width: 190px; } #power { width: 220px; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="labels"></div>
+<div id="clock" class="panel"><div class="t" id="time">--:--</div><div class="d" id="date"></div><div class="w" id="wx"></div></div>
+<div id="ctl" class="panel"></div>
+<div id="faults" class="panel"><h2>Make something happen</h2><div class="list" id="faultBtns"></div><div id="active"></div></div>
+<div id="people" class="panel"><h2>Who is where</h2><div id="peopleList"></div></div>
+<div id="power" class="panel"><h2>Power</h2><div id="powerRows"></div></div>
+<div id="events" class="panel"></div>
+<div id="tip"></div>
+<script src="/main.js" type="module"></script>
+</body>
+</html>

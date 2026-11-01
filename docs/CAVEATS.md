@@ -95,6 +95,16 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | Fonts | The 132 KB headline font is unchanged (subsetting its axes risked changing the look) | ⛔ |
 | Taps | Device switches already show the result at once and undo on failure; scenes, routines and group buttons still wait for the hub | 🟡 |
 
+## Home simulator (`apps/simulator`)
+| Area | Caveat | Status |
+|---|---|---|
+| Simulator | Replaces the old drifting-sensor script. Plays four residents (weekday and weekend routines, a different offset each day), weather and sun, room-by-room heat, CO2 and damp, per-appliance power profiles, honest energy counters and random faults, against the real Home Assistant. 3D house at http://localhost:3100 with a time dial (real time to 1200x), pause, clickable lights, plugs, fans and locks, and buttons to cause a fault | ✅ 6 model tests (a full weekday, heating, open window, energy only rising); run live against HA and viewed |
+| Simulator | Heating and cooling follow `climate.ecobee`; its own reported room temperature stays HA's demo value, so the thermostat tile in the app and the simulated rooms can disagree | 🟡 |
+| Simulator | "Device offline" is not simulated (template entities have no availability switch); rain, seasons and a second floor are not either | ➖ |
+| Simulator | At fast clocks Home Assistant's history is stamped with real time, so charts compress; keep fast runs short | ➖ |
+| Simulator | The residents' light and plug actions go through normal Home Assistant calls, so your app shows them as they happen; a person using the app is not overridden (the residents only act on arrivals, departures and schedules) | ✅ |
+| Simulator | Seen only in the embedded browser on desktop; the 3D scene on a phone and over the tunnel is untried | ⛔ |
+
 ## Re-running the real-world checks
 ```
 # Real Home Assistant (container already seeded; token in the scratchpad)

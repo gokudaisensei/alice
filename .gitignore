@@ -9,3 +9,4 @@ deploy/secrets/
 deploy/backups/
 deploy/updates/
 *.bak
+apps/simulator/public/main.js

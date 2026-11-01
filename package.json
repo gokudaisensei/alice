@@ -1,12 +1,16 @@
 {
   "name": "alice",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev:server": "cd apps/server && bun run dev",
     "dev:web": "cd apps/web && bun run dev",
     "dev:mock-ha": "cd apps/mock-ha && bun run dev",
     "test": "cd apps/server && bun test",
-    "build:web": "cd apps/web && bun run build"
+    "build:web": "cd apps/web && bun run build",
+    "dev:simulator": "cd apps/simulator && bun run start",
+    "test:simulator": "cd apps/simulator && bun test"
   }
 }

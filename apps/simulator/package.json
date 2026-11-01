@@ -1,0 +1,12 @@
+{
+	"name": "@alice/simulator",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"build": "bun build src/viewer/main.ts --outdir public --minify --target browser",
+		"start": "bun run build && bun src/server.ts",
+		"test": "bun test"
+	},
+	"dependencies": { "three": "^0.170.0" },
+	"devDependencies": { "@types/three": "^0.170.0", "@types/bun": "latest", "typescript": "^5" }
+}
