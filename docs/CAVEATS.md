@@ -18,7 +18,7 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 |---|---|---|
 | M1 | Passkeys exercised with a software authenticator only; real browser platform authenticator over real HTTPS not tried | ⛔ |
 | M1 | Rate-limit counters and login challenges live in memory and reset on restart | ➖ single instance |
-| M1/M7 | No git repository; nothing committed | ⛔ |
+| M1/M7 | Git repository | ✅ initialised; work is committed (not pushed anywhere) |
 | M2 | Capability detection verified on HA's demo devices (lights, fans, climate, locks, media, covers, cameras, energy sensors), not on real vendor hardware | 🟡 |
 | M2 | Camera stills through HA's proxy | ✅ (demo camera) |
 | M2 | arm64 image | ✅ builds with `buildx --platform linux/arm64` (99 MB) and starts and serves `/healthz` under QEMU emulation (165 MB resident while emulated). 🟡 **Not run on real Raspberry Pi hardware**: speed, thermals, SD/SSD behaviour and real-world memory are unmeasured |
@@ -32,7 +32,7 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | M4 | Routine builder re-checked after the shared-editor refactor | 🟡 type-checked and built; the automation builder uses the same editor and was run in a browser |
 | M5 | Web push to a real push service (FCM/Mozilla/Apple) never sent; subscription flow and the sender are tested against a fake | ⛔ |
 | M5 | Rule timers and sampler live in memory: a restart restarts the "has it lasted" clock | ➖ |
-| M5 | Unread count polls every 30 s and on focus, not live over the stream | ➖ |
+| M5 | Unread count polls every 30 s and on focus. Device state, mode and shared data now update live through the long-poll (see Live sync) | ➖ |
 | M5 | iOS push needs the app added to the Home Screen | ➖ |
 | M6 | Operator sign-in with a hardware key not tried (no key available); logic tested with the fake authenticator | ⛔ |
 | M6 | "Hardware key required" is an authenticator-attachment hint; without attestation it can't be proven | ➖ |
@@ -46,7 +46,7 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | M7 | Threat model, offline matrix, recovery runbooks, acceptance matrix | ✅ written (`THREAT-MODEL.md`, `OFFLINE.md`, `RUNBOOKS.md`, `ACCEPTANCE.md`); the runbooks have not been rehearsed by someone other than the author |
 | M7 | Every-route authorization/CSRF/garbage-input sweep | ✅ `sweep.test.ts` (fails if any new route is unguarded) |
 | M7 | Hub stop/start, wrong key, app restart | ✅ on a real HA (`real-ha.test.ts`, with `HA_REAL_DOCKER`) |
-| M7 | Resource profile | 🟡 measured on x86 in the real container (512 MB / 1 CPU limit): ~40 MB idle, 90 MB peak, 8.7k requests/s with 25 clients and 5 live streams, 0 errors. **Not measured on a Pi**; CPU figures won't transfer, memory should |
+| M7 | Resource profile | 🟡 measured on x86 in the real container (512 MB / 1 CPU limit): ~40 MB idle, 90 MB peak, 8.7k requests/s with 25 clients and 5 live streams (measured on the old stream design, before long-polling), 0 errors. **Not measured on a Pi**; CPU figures won't transfer, memory should |
 
 ## Interface redesign
 | Area | Caveat | Status |
@@ -63,6 +63,21 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | Scene progress | Quick-action pills show a spinner, then a tick. They cannot say "5 of 6 done", because the hub only reports that a scene was sent or a routine started | ➖ |
 | Admin | Device "hide from everyone" is no longer in the interface (the server still supports it); the room screen has rename and remove | ⛔ |
 | Layout | Checked on a 375 px phone (light and dark) and a 1280 px desktop for Home, Routines, Activity, You and the automation builder; not every page in every combination | 🟡 |
+
+## Live sync, access and theme (latest round)
+| Area | Caveat | Status |
+|---|---|---|
+| Live sync | Cloudflare quick tunnels (trycloudflare) deliver SSE headers but no body, so the app uses a long-poll (`GET /api/sync?rev=N`, held up to 25 s) instead. Verified through the tunnel at about 1 s. The old `/api/stream` endpoint is kept but the client no longer uses it | ✅ API level, ⛔ not tried on two real phones |
+| Live sync | Admin pages that fetch their own data (people, access, system) don't update live; they refresh when you open them | ➖ |
+| Live sync | The change log is in memory (last 1000 changes). After a restart or a long offline gap, clients do a full reload | ➖ |
+| Live sync | At most 6 concurrent sync requests per person (more get 429) | ➖ |
+| Guests | Guests never see energy meters (even if granted), the Energy and Insights pages and cards, or insight notifications; `/api/energy` returns 403 for them. Covered by `guest-energy.test.ts` | ✅ tested, ⛔ not viewed in a real guest session (seeded guest Nani can't sign in) |
+| Access page | Per-person page with category tabs, bulk switches and role-aware content (guest: rooms, devices, scenes, routines, abilities; member adds automations). Automations are read-only: a person sees one only if they can use every device and scene it touches | ✅ API tested, ⛔ not viewed in a browser |
+| Theme | Cobalt and amber palette, light and dark. Contrast checked by calculation (text 17:1, controls and "on" tiles 6 to 13:1); not checked with a colour-blindness simulator or on real screens | 🟡 |
+| Theme | Home-screen icon on a phone updates only after reinstalling the PWA or clearing its cache | ➖ |
+| Desktop | Consistent left alignment, auto-fill tile grid, capped camera pictures, home side column from 1280 px, hover lift on tiles. Checked at 1024, 1440 and 1920 px (light) for Home, Rooms, Devices, Routines, Activity, People, You, System, Rooms & devices and the automation editor | ✅ |
+| Desktop | Dark theme on desktop, Settings, the access page and the scene/routine editors not checked; Routines, People and Activity are narrow lists with empty space at wide widths | 🟡 |
+| Test data | The tunnel instance and HA container are seeded with a simulated home (89 devices, 9 rooms); seeded members Maya, Dev and Nani have no passkeys | ➖ |
 
 ## Re-running the real-world checks
 ```
