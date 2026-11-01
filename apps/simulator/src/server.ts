@@ -6,6 +6,10 @@ import { FAULTS, World, hourOf, sunAt, type FaultKind, type Out } from "./world"
 
 const HA_URL = process.env.HA_URL ?? "http://127.0.0.1:8123", HA_TOKEN = process.env.HA_TOKEN ?? "", PORT = Number(process.env.PORT ?? 3100);
 if (!HA_TOKEN) { console.error("Set HA_TOKEN to a Home Assistant long-lived access token."); process.exit(1); }
+// When SIM_KEY is set (it must be when the page is reachable from outside), nothing works without it: open /?key=... once and a cookie remembers you.
+const KEY = process.env.SIM_KEY ?? "";
+const cookieOk = (req: Request) => !KEY || (req.headers.get("cookie") ?? "").split(/;\s*/).includes(`simkey=${KEY}`);
+const sameOrigin = (req: Request) => { const o = req.headers.get("origin"); return !o || new URL(o).host === req.headers.get("host"); };
 const ha = createHa(HA_URL, HA_TOKEN);
 const placed = place();
 const publicDir = join(import.meta.dir, "..", "public");
@@ -54,6 +58,10 @@ const server = Bun.serve({
 	port: PORT,
 	async fetch(req, srv) {
 		const url = new URL(req.url);
+		if (KEY && url.searchParams.get("key") === KEY) return new Response(null, { status: 302, headers: { location: "/", "set-cookie": `simkey=${KEY}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${url.protocol === "https:" || req.headers.get("x-forwarded-proto") === "https" ? "; Secure" : ""}` } });
+		if (!cookieOk(req)) return new Response("This page needs its access link.", { status: 401 });
+		if (req.method === "POST" && !sameOrigin(req)) return new Response("wrong origin", { status: 403 });
+		if (url.pathname === "/ws" && !sameOrigin(req)) return new Response("wrong origin", { status: 403 });
 		if (url.pathname === "/ws") return srv.upgrade(req) ? undefined : new Response("upgrade needed", { status: 400 });
 		if (req.method === "POST") {
 			const b: any = await req.json().catch(() => ({}));

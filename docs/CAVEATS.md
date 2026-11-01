@@ -103,7 +103,7 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | Simulator | "Device offline" is not simulated (template entities have no availability switch); rain, seasons and a second floor are not either | ➖ |
 | Simulator | At fast clocks Home Assistant's history is stamped with real time, so charts compress; keep fast runs short | ➖ |
 | Simulator | The residents' light and plug actions go through normal Home Assistant calls, so your app shows them as they happen; a person using the app is not overridden (the residents only act on arrivals, departures and schedules) | ✅ |
-| Simulator | Seen only in the embedded browser on desktop; the 3D scene on a phone and over the tunnel is untried | ⛔ |
+| Simulator | Reachable from outside only with an access key (`SIM_KEY`, cookie after the first visit, same-origin check on actions). Opened through its own quick tunnel and loaded in the embedded browser; the 3D scene on a real phone is untried | 🟡 |
 
 ## Re-running the real-world checks
 ```

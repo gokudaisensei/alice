@@ -10,7 +10,7 @@ It replaces the old "drifting sensors" script. Home Assistant still holds the de
 HA_URL=http://127.0.0.1:8123 HA_TOKEN=<long-lived token> bun run dev:simulator   # from the repo root
 ```
 
-Open http://localhost:3100. Optional: `SPEED=60` to start fast, `SEED=7` to replay the same days.
+Open http://localhost:3100. To reach it from outside (a tunnel), set `SIM_KEY=<long random text>`: nothing works without it, and `/?key=<that text>` signs a browser in once. The page can switch locks and plugs in Home Assistant, so never expose it without a key. Optional: `SPEED=60` to start fast, `SEED=7` to replay the same days.
 
 ## What it simulates
 
