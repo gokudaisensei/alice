@@ -194,6 +194,13 @@ export type DeviceService = ReturnType<typeof createDeviceService>;
 
 export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: DeviceService, extraSearch: (u: SessionUser, q: string) => Record<string, unknown[]> = () => ({})) {
   const openStreams = new Map<string, number>();
+  /** Hourly averages from the hub's long-term statistics, for readings (temperature, power) it keeps them for. */
+  async function longHistory(id: string, hours: number): Promise<{ t: number; state: string }[] | null> {
+    const r = await ha.ws({ type: "recorder/statistics_during_period", start_time: new Date(Date.now() - hours * 3600_000).toISOString(), statistic_ids: [id], period: "hour", types: ["mean"] });
+    const rows = r.success && r.result && typeof r.result === "object" ? ((r.result as Record<string, { start?: number | string; mean?: number | null }[]>)[id] ?? []) : [];
+    const pts = rows.flatMap((x) => { const t = typeof x.start === "number" ? x.start : Date.parse(String(x.start ?? "")); return Number.isFinite(t) && typeof x.mean === "number" ? [{ t, state: String(Math.round(x.mean * 100) / 100) }] : []; });
+    return pts.length >= 2 ? pts : null;
+  }
 
   return new Elysia({ name: "devices" })
     .get("/api/devices", ({ request, set }) => {
@@ -271,15 +278,18 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
       return { devices: devices.map((d) => ({ id: d.id, name: d.name, category: d.category, roomId: d.roomId })), rooms: rooms.filter((r) => r.name.toLowerCase().includes(q)).slice(0, 10), ...extraSearch(g.user, q) };
     })
     // Today's story for one device: state changes over the last day, thinned out to a size a phone can draw.
-    .get("/api/devices/:id/history", async ({ request, params, set }) => {
+    .get("/api/devices/:id/history", async ({ request, params, query, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const dev = svc.deviceFor(g.user, params.id);
       if (!dev) return deny(set, 404, "not_found");
-      const pts = ha.history ? await ha.history(params.id, 24) : null;
+      const hours = Math.min(720, Math.max(1, Math.round(Number(query.hours ?? 24)) || 24));
+      // Beyond three days the hub keeps hourly statistics, not every change; a reading with none falls back to the raw history it still has.
+      let pts = hours > 72 ? await longHistory(params.id, hours) : null;
+      pts ??= ha.history ? await ha.history(params.id, hours) : null;
       if (!pts) return deny(set, 503, "ha_unavailable");
       const numeric = pts.length > 0 && pts.every((p) => Number.isFinite(Number(p.state)));
       const step = Math.max(1, Math.ceil(pts.length / 200));
-      return { kind: numeric ? "numeric" : "state", points: pts.filter((_, i) => i % step === 0 || i === pts.length - 1), now: Date.now() };
+      return { kind: numeric ? "numeric" : "state", points: pts.filter((_, i) => i % step === 0 || i === pts.length - 1), now: Date.now(), hours };
     })
     // Who last changed a device from this app. A change the app did not make (made in Home Assistant or at the device) has no name.
     .get("/api/devices/:id/last-change", ({ request, params, set }) => {

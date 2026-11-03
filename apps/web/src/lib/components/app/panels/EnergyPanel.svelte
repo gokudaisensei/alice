@@ -7,6 +7,7 @@
 	import { api } from '#lib/api.js';
 	import SkeletonList from '#lib/components/app/SkeletonList.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
+	import HaEnergy from '#lib/components/app/HaEnergy.svelte';
 
 	type Meter = { id: string; name: string; available: boolean; unit: string; now: number | null; kind: 'energy' | 'power' | 'other'; todayKwh?: number | null; days?: { date: string; kwh: number }[]; peak24h?: number | null; low24h?: number | null };
 	let meters = $state<Meter[]>([]), since = $state<number | null>(null), loaded = $state(false);
@@ -52,6 +53,7 @@
 </script>
 
 <div class="space-y-5">
+	<HaEnergy />
 	{#if !loaded}<SkeletonList kind="cards" count={2} />{/if}
 	{#if loaded && !meters.length}<Empty title="No energy meters" description="Energy meters appear here once they're shared with you." />{/if}
 

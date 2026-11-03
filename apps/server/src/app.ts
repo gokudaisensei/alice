@@ -10,6 +10,8 @@ import type { HaApi } from "./ha";
 import { createDeviceService, deviceRoutes } from "./devices";
 import { manageRoutes } from "./manage";
 import { haRoomRoutes } from "./haRooms";
+import { createHaEnergy, haEnergyRoutes } from "./haEnergy";
+import { logbookRoutes } from "./logbook";
 import { createStatic } from "./static";
 import { createPowerLimits, powerRoutes, type PowerLimits } from "./power";
 import { createSync, syncRoutes } from "./sync";
@@ -105,6 +107,8 @@ export function createApp(deps: AppDeps) {
     .use(opsRoutes({ db: deps.db, webauthn: deps.webauthn, secure: deps.cookieSecure, ha: deps.ha, health, routines, automations }))
     .use(notifyRoutes(deps.db, deps.cookieSecure, notifier))
     .use(insightRoutes(deps.db, deps.cookieSecure, insights, deps.now))
+    .use(haEnergyRoutes(deps.db, deps.cookieSecure, devices, createHaEnergy(deps.ha, deps.now)))
+    .use(logbookRoutes(deps.db, deps.ha, deps.cookieSecure, devices, deps.now))
     .use(manageRoutes(deps.db, deps.ha, deps.cookieSecure))
     .use(haRoomRoutes(deps.db, deps.ha, deps.cookieSecure))
     .use(syncRoutes(deps.db, deps.cookieSecure, sync, devices))
