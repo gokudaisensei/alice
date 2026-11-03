@@ -2,53 +2,59 @@
 	import { Checkbox } from '#lib/components/ui/checkbox';
 	import Picker from '#lib/components/app/Picker.svelte';
 	import { onMount } from 'svelte';
-	import { api, explain, sensitive } from '#lib/api.js';
+	import { api, explain, sensitive, type ApiResult } from '#lib/api.js';
+	import type { Health, Support, UpdateStatus } from '#lib/dto.js';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
 	import { Badge } from '#lib/components/ui/badge';
 	import Page from '#lib/components/app/Page.svelte';
 	import Section from '#lib/components/app/Section.svelte';
 
-	type Check = { id: string; label: string; status: 'ok' | 'warn' | 'fail'; detail: string; advice?: string };
 	type Backup = { id: string; createdAt: number; kind: string; size: number; level: 'failed' | 'integrity_checked' | 'restore_tested'; offDevice: boolean; copies: { name: string; local: boolean; state: string }[]; restoreTest: { at: number; ok: boolean; detail: string } | null };
-	let health = $state<{ overall: string; checks: Check[]; facts: any } | null>(null);
-	let bk = $state<{ recipientSet: boolean; recipient: string | null; destinations: { name: string; local: boolean; writable: boolean; freeBytes: number | null }[]; backups: Backup[] } | null>(null);
-	let sup = $state<{ active: any; canManage: boolean } | null>(null);
+	type Backups = { recipientSet: boolean; recipient: string | null; destinations: { name: string; local: boolean; writable: boolean; freeBytes: number | null }[]; backups: Backup[] };
+	let health = $state<Health | null>(null);
+	let bk = $state<Backups | null>(null);
+	let sup = $state<{ active: Support | null; canManage: boolean } | null>(null);
 	let msg = $state(''), busy = $state(false), newKey = $state(''), testing = $state<string | null>(null), identity = $state('');
-	let upd = $state<any>(null);
+	let upd = $state<UpdateStatus | null>(null);
 	let scopes = $state<string[]>(['diagnostics']), hours = $state(4);
 
 	async function load() {
-		const [h, b, s, u] = await Promise.all([api('GET', '/api/admin/health'), api('GET', '/api/admin/backups'), api('GET', '/api/support'), api('GET', '/api/admin/updates')]);
+		const [h, b, s, u] = await Promise.all([api<Health>('GET', '/api/admin/health'), api<Backups>('GET', '/api/admin/backups'), api<{ active: Support | null; canManage: boolean }>('GET', '/api/support'), api<UpdateStatus>('GET', '/api/admin/updates')]);
 		if (h.ok) health = h.data; if (b.ok) bk = b.data; if (s.ok) sup = s.data; if (u.ok) upd = u.data;
 		window.dispatchEvent(new Event('support-changed'));
 	}
 	onMount(load);
-	const fail = (r: { data: any }) => (msg = r.data?.message ?? explain(r.data?.error));
+	const fail = (r: Extract<ApiResult<unknown>, { ok: false }>) => (msg = r.data.message ?? explain(r.data.error));
 	const dot = { ok: 'bg-ok', warn: 'bg-on', fail: 'bg-signal' } as const;
 	const when = (ts: number) => new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 	const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
 	const LEVEL = { failed: 'Failed its check', integrity_checked: 'Checked · not test-restored', restore_tested: 'Restore tested' } as const;
 
-	async function makeKey() { busy = true; const r = await sensitive('POST', '/api/admin/backups/key'); busy = false; if (r.ok) { newKey = r.data.identity; msg = ''; await load(); } else fail(r); }
+	async function makeKey() { busy = true; const r = await sensitive<{ identity: string }>('POST', '/api/admin/backups/key'); busy = false; if (r.ok) { newKey = r.data.identity; msg = ''; await load(); } else fail(r); }
 	function saveKey() {
 		const url = URL.createObjectURL(new Blob([`# Smart Home backup key. Keep this OFF the home device.\n# Anyone with this file can read your backups; without it, nobody can.\n${newKey}\n`], { type: 'text/plain' }));
 		const a = Object.assign(document.createElement('a'), { href: url, download: 'home-backup-key.txt' }); a.click(); URL.revokeObjectURL(url);
 	}
 	async function backupNow() { busy = true; msg = ''; const r = await api('POST', '/api/admin/backups'); busy = false; if (!r.ok) fail(r); else msg = 'Backup made and checked.'; await load(); }
 	async function restoreTest(b: Backup) {
-		busy = true; const r = await sensitive('POST', `/api/admin/backups/${b.id}/restore-test`, { identity: identity.trim() }); busy = false;
+		busy = true; const r = await sensitive<{ detail: string }>('POST', `/api/admin/backups/${b.id}/restore-test`, { identity: identity.trim() }); busy = false;
 		if (!r.ok) fail(r); else { msg = r.data.detail; identity = ''; testing = null; } // the key is never kept
 		await load();
 	}
 	async function download(b: Backup) {
 		const r = await sensitive('GET', `/api/admin/backups/${b.id}/ready`);
-		if (!r.ok) return fail(r);
+		if (!r.ok) { fail(r); return; }
 		location.href = `/api/admin/backups/${b.id}/download`;
 	}
-	async function install() { if (!confirm(`Install version ${upd.available.version}? The app will be unavailable for a few minutes. Your devices and automations keep running.`)) return; busy = true; const r = await sensitive('POST', '/api/admin/updates/apply', { version: upd.available.version }); busy = false; if (!r.ok) fail(r); else msg = 'Update requested. The app will restart shortly; this page may go blank for a few minutes.'; await load(); }
+	async function install() { if (!upd?.configured || !upd.available) return; if (!confirm(`Install version ${upd.available.version}? The app will be unavailable for a few minutes. Your devices and automations keep running.`)) return; busy = true; const r = await sensitive('POST', '/api/admin/updates/apply', { version: upd.available.version }); busy = false; if (!r.ok) fail(r); else msg = 'Update requested. The app will restart shortly; this page may go blank for a few minutes.'; await load(); }
 	async function grant() { busy = true; const r = await sensitive('POST', '/api/admin/support', { scopes, hours }); busy = false; if (!r.ok) fail(r); await load(); }
-	async function revoke() { const r = await api('DELETE', `/api/admin/support/${sup!.active.id}`); if (!r.ok) fail(r); await load(); }
+	async function revoke() { if (!sup?.active) return; const r = await api('DELETE', `/api/admin/support/${sup.active.id}`); if (!r.ok) fail(r); await load(); }
+	/** What a support operator can be allowed to do, in the order they're offered. */
+	const SCOPES = [
+		{ key: 'diagnostics', title: 'See health checks', hint: 'No personal data' },
+		{ key: 'read_config', title: 'Look at how your home is set up', hint: 'Room, device and automation names. No people, no history.' }
+	] as const;
 	const toggle = (s: string) => (scopes = scopes.includes(s) ? scopes.filter((x) => x !== s) : [...scopes, s]);
 </script>
 
@@ -105,13 +111,13 @@
 
 	<Section title="Support access" hint="Our support team can only look at your home while you allow it. You can end it at any time."><div class="space-y-4 rounded-2xl border bg-card p-4">
 			{#if sup?.active}
-				<p class="text-sm">Allowed until <strong>{when(sup.active.expiresAt)}</strong> for: {sup.active.scopes.map((s: string) => (s === 'diagnostics' ? 'health checks' : 'a read-only look at your setup')).join(' and ')}. {sup.active.connected ? `${sup.active.operatorName} is connected.` : 'Nobody has connected yet.'}</p>
+				<p class="text-sm">Allowed until <strong>{when(sup.active.expiresAt)}</strong> for: {sup.active.scopes.map((s) => (s === 'diagnostics' ? 'health checks' : 'a read-only look at your setup')).join(' and ')}. {sup.active.connected ? `${sup.active.operatorName} is connected.` : 'Nobody has connected yet.'}</p>
 				<Button variant="destructive" onclick={revoke}>End support access now</Button>
 			{:else}
 				<div class="space-y-2">
 					<p class="text-sm font-medium">They may</p>
 					<div class="overflow-hidden rounded-xl border">
-						{#each [['diagnostics', 'See health checks', 'No personal data'], ['read_config', 'Look at how your home is set up', 'Room, device and automation names. No people, no history.']] as [k, t, d]}
+						{#each SCOPES as { key: k, title: t, hint: d }}
 							<button type="button" role="checkbox" aria-checked={scopes.includes(k)} onclick={() => toggle(k)} class="flex min-h-14 w-full items-center gap-3 border-b px-3.5 py-2.5 text-left last:border-b-0 active:bg-muted"><Checkbox checked={scopes.includes(k)} /><span><span class="block text-sm font-medium">{t}</span><span class="text-sm text-muted-foreground">{d}</span></span></button>
 						{/each}
 					</div>

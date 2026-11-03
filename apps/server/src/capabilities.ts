@@ -1,4 +1,5 @@
 import type { HaEntity } from "./ha";
+import { asObject, oneOf } from "./http";
 
 export type Category = "light" | "switch" | "fan" | "climate" | "sensor" | "lock" | "camera" | "media" | "energy";
 
@@ -21,20 +22,23 @@ export type Descriptor = {
   ordinary: boolean; controls: Control[]; reading: Reading;
 };
 
+/** The strings of a list-valued attribute; anything else reads as empty. */
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
 const COLOR_MODES = ["hs", "xy", "rgb", "rgbw", "rgbww"];
 const BRIGHT_MODES = [...COLOR_MODES, "brightness", "color_temp", "white"];
 const ENERGY_CLASSES = ["energy", "power", "current", "voltage"];
 
-const has = (features: unknown, bit: number) => typeof features === "number" && (features & bit) === bit;
+const hasFeature = (features: unknown, bit: number) => typeof features === "number" && (features & bit) === bit;
 
 /** Build a capability descriptor from what HA actually reports. Never assumes a category implies a control. */
 export function describe(e: HaEntity): Descriptor {
-  const [domain] = e.entity_id.split(".");
-  const a = e.attributes ?? {};
+  const [domain = ""] = e.entity_id.split(".");
+  const a = e.attributes;
   const base = { entityId: e.entity_id, domain, name: String(a.friendly_name ?? e.entity_id), ordinary: true, controls: [] as Control[], reading: null as Reading };
   switch (domain) {
     case "light": {
-      const modes: string[] = Array.isArray(a.supported_color_modes) ? a.supported_color_modes : [];
+      const modes = strings(a.supported_color_modes);
       const controls: Control[] = [{ type: "power" }];
       if (modes.some((m) => BRIGHT_MODES.includes(m))) controls.push({ type: "brightness" });
       if (modes.includes("color_temp")) controls.push({ type: "color_temp", minK: Number(a.min_color_temp_kelvin ?? 2000), maxK: Number(a.max_color_temp_kelvin ?? 6500) });
@@ -45,13 +49,13 @@ export function describe(e: HaEntity): Descriptor {
       return { ...base, category: "switch", controls: [{ type: "power" }] };
     case "fan": {
       const controls: Control[] = [{ type: "power" }];
-      if (has(a.supported_features, 1)) controls.push({ type: "fan_speed", step: Number(a.percentage_step ?? 1) });
+      if (hasFeature(a.supported_features, 1)) controls.push({ type: "fan_speed", step: Number(a.percentage_step ?? 1) });
       return { ...base, category: "fan", controls };
     }
     case "climate": {
       const controls: Control[] = [];
-      const modes: string[] = Array.isArray(a.hvac_modes) ? a.hvac_modes : [];
-      if (has(a.supported_features, 1) || modes.length)
+      const modes = strings(a.hvac_modes);
+      if (hasFeature(a.supported_features, 1) || modes.length)
         controls.push({ type: "thermostat", min: Number(a.min_temp ?? 7), max: Number(a.max_temp ?? 35), step: Number(a.target_temp_step ?? 0.5), modes, unit: "°C" });
       const cur = a.current_temperature;
       return { ...base, category: "climate", controls, reading: cur != null ? { value: String(cur), unit: "°C", kind: "measurement" } : null, ordinary: controls.length > 0 };
@@ -62,15 +66,15 @@ export function describe(e: HaEntity): Descriptor {
       return { ...base, category: "camera", controls: [{ type: "camera" }] };
     case "media_player": {
       const f = a.supported_features;
-      const playback = has(f, 1) || has(f, 16384), volume = has(f, 4), power = has(f, 128) && has(f, 256);
+      const playback = hasFeature(f, 1) || hasFeature(f, 16384), volume = hasFeature(f, 4), power = hasFeature(f, 128) && hasFeature(f, 256);
       return { ...base, category: "media", controls: [{ type: "media", playback, volume, power }], ordinary: playback || volume || power };
     }
     case "sensor":
     case "binary_sensor": {
-      const energy = domain === "sensor" && ENERGY_CLASSES.includes(a.device_class);
-      const unit = a.unit_of_measurement ?? null;
+      const energy = domain === "sensor" && ENERGY_CLASSES.includes(String(a.device_class));
+      const unit = a.unit_of_measurement == null ? null : String(a.unit_of_measurement);
       // Plain readings only. Timestamps ("last backup"), dates and enum text states are the hub's own housekeeping, not things in a home.
-      const housekeeping = domain === "sensor" && (["timestamp", "date", "enum", "duration"].includes(a.device_class) || (!unit && !a.device_class && !Number.isFinite(Number(e.state)) && e.state !== "unavailable" && e.state !== "unknown"));
+      const housekeeping = domain === "sensor" && (["timestamp", "date", "enum", "duration"].includes(String(a.device_class)) || (!unit && !a.device_class && !Number.isFinite(Number(e.state)) && e.state !== "unavailable" && e.state !== "unknown"));
       return { ...base, category: energy ? "energy" : "sensor", ordinary: !housekeeping, reading: { value: e.state, unit, kind: "measurement" } };
     }
     default:
@@ -79,29 +83,78 @@ export function describe(e: HaEntity): Descriptor {
   }
 }
 
-export type Command = { action: string; value?: any };
+/** Every command a device can be given. `toServiceCall` handles each one, and the compiler checks it does. */
+export const ACTIONS = [
+  "turn_on", "turn_off", "set_brightness", "set_color_temp", "set_color", "set_speed", "set_temperature", "set_hvac_mode",
+  "lock", "unlock", "media_play", "media_pause", "set_volume",
+] as const;
+export type Action = (typeof ACTIONS)[number];
+export const isAction = (value: unknown): value is Action => oneOf(ACTIONS, value);
+
+/** Commands arrive from clients, so `action` is any string until `toServiceCall` has checked it. */
+export type Command = { action: string; value?: unknown };
 export type ServiceCall = { domain: string; service: string; data: Record<string, unknown>; sensitive?: boolean };
+export type CommandError = { error: "unsupported" | "invalid_value" };
 
 const num = (v: unknown, lo: number, hi: number) => (typeof v === "number" && Number.isFinite(v) && v >= lo && v <= hi ? v : null);
 
+/** The device's control of type `T`, narrowed to that member of the union. */
+const control = <const T extends Control["type"]>(d: Descriptor, type: T) =>
+  d.controls.find((x): x is Extract<Control, { type: T }> => x.type === type);
+
+const UNSUPPORTED: CommandError = { error: "unsupported" };
+const INVALID: CommandError = { error: "invalid_value" };
+
 /** Validate a command against the device's real capabilities and translate it to an HA service call. */
-export function toServiceCall(d: Descriptor, c: Command): ServiceCall | { error: string } {
-  const has = (t: Control["type"]) => d.controls.find((x) => x.type === t) as any;
-  const domain = d.domain;
-  const bad = { error: "unsupported" };
+export function toServiceCall(d: Descriptor, c: Command): ServiceCall | CommandError {
+  if (!isAction(c.action)) return UNSUPPORTED;
+  const { domain } = d;
+  const call = (service: string, data: Record<string, unknown> = {}, sensitive?: true): ServiceCall => ({ domain, service, data, ...(sensitive && { sensitive }) });
   switch (c.action) {
     case "turn_on": case "turn_off":
-      return has("power") || (has("media")?.power) ? { domain, service: c.action, data: {} } : bad;
-    case "set_brightness": { const v = num(c.value, 1, 100); return has("brightness") && v !== null ? { domain, service: "turn_on", data: { brightness_pct: Math.round(v) } } : has("brightness") ? { error: "invalid_value" } : bad; }
-    case "set_color_temp": { const t = has("color_temp"); const v = t && num(c.value, t.minK, t.maxK); return t && v ? { domain, service: "turn_on", data: { color_temp_kelvin: Math.round(v) } } : t ? { error: "invalid_value" } : bad; }
-    case "set_color": { const h = num(c.value?.h, 0, 360), s = num(c.value?.s, 0, 100); return has("color") && h !== null && s !== null ? { domain, service: "turn_on", data: { hs_color: [h, s] } } : has("color") ? { error: "invalid_value" } : bad; }
-    case "set_speed": { const v = num(c.value, 0, 100); return has("fan_speed") && v !== null ? { domain, service: v === 0 ? "turn_off" : "turn_on", data: v === 0 ? {} : { percentage: Math.round(v) } } : has("fan_speed") ? { error: "invalid_value" } : bad; }
-    case "set_temperature": { const t = has("thermostat"); const v = t && num(c.value, t.min, t.max); return t && v !== null && v !== false ? { domain, service: "set_temperature", data: { temperature: v } } : t ? { error: "invalid_value" } : bad; }
-    case "set_hvac_mode": { const t = has("thermostat"); return t && t.modes.includes(c.value) ? { domain, service: "set_hvac_mode", data: { hvac_mode: c.value } } : t ? { error: "invalid_value" } : bad; }
-    case "lock": return has("lock") ? { domain, service: "lock", data: {} } : bad;
-    case "unlock": return has("lock") ? { domain, service: "unlock", data: {}, sensitive: true } : bad;
-    case "media_play": case "media_pause": { const m = has("media"); return m?.playback ? { domain, service: c.action, data: {} } : bad; }
-    case "set_volume": { const m = has("media"); const v = num(c.value, 0, 100); return m?.volume && v !== null ? { domain, service: "volume_set", data: { volume_level: v / 100 } } : m?.volume ? { error: "invalid_value" } : bad; }
-    default: return bad;
+      return control(d, "power") || control(d, "media")?.power ? call(c.action) : UNSUPPORTED;
+    case "set_brightness": {
+      if (!control(d, "brightness")) return UNSUPPORTED;
+      const v = num(c.value, 1, 100);
+      return v === null ? INVALID : call("turn_on", { brightness_pct: Math.round(v) });
+    }
+    case "set_color_temp": {
+      const t = control(d, "color_temp");
+      if (!t) return UNSUPPORTED;
+      const v = num(c.value, t.minK, t.maxK);
+      return v ? call("turn_on", { color_temp_kelvin: Math.round(v) }) : INVALID;
+    }
+    case "set_color": {
+      if (!control(d, "color")) return UNSUPPORTED;
+      const value = asObject(c.value), h = num(value.h, 0, 360), s = num(value.s, 0, 100);
+      return h !== null && s !== null ? call("turn_on", { hs_color: [h, s] }) : INVALID;
+    }
+    case "set_speed": {
+      if (!control(d, "fan_speed")) return UNSUPPORTED;
+      const v = num(c.value, 0, 100);
+      if (v === null) return INVALID;
+      return v === 0 ? call("turn_off") : call("turn_on", { percentage: Math.round(v) });
+    }
+    case "set_temperature": {
+      const t = control(d, "thermostat");
+      if (!t) return UNSUPPORTED;
+      const v = num(c.value, t.min, t.max);
+      return v === null ? INVALID : call("set_temperature", { temperature: v });
+    }
+    case "set_hvac_mode": {
+      const t = control(d, "thermostat");
+      if (!t) return UNSUPPORTED;
+      return typeof c.value === "string" && t.modes.includes(c.value) ? call("set_hvac_mode", { hvac_mode: c.value }) : INVALID;
+    }
+    case "lock": return control(d, "lock") ? call("lock") : UNSUPPORTED;
+    case "unlock": return control(d, "lock") ? call("unlock", {}, true) : UNSUPPORTED;
+    case "media_play": case "media_pause":
+      return control(d, "media")?.playback ? call(c.action) : UNSUPPORTED;
+    case "set_volume": {
+      const m = control(d, "media");
+      if (!m?.volume) return UNSUPPORTED;
+      const v = num(c.value, 0, 100);
+      return v === null ? INVALID : call("volume_set", { volume_level: v / 100 });
+    }
   }
 }

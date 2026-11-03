@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
+import { all } from "./sql";
 import { ensureModeHelper, MODE_ENTITY } from "./modes";
-import { setup } from "./testkit";
+import { setup, type Body } from "./testkit";
 
 async function home() {
   const t = setup();
@@ -9,23 +10,29 @@ async function home() {
   await t.reauth(admin.cookie!, "a1");
   const member = await t.addUser(admin.cookie!, "member", "m1");
   const guest = await t.addUser(admin.cookie!, "guest", "g1");
-  const j = (m: string, p: string, cookie: string, body?: any) => t.call(m, p, { cookie, body });
+  const j = (m: string, p: string, cookie: string, body?: unknown) => t.call(m, p, { cookie, body });
   return { t, admin: admin.cookie!, member, guest, j };
 }
-const body = (over: any = {}) => ({
+const body = (over: Record<string, unknown> = {}) => ({
   name: "Evening lights",
   triggers: [{ type: "sun", event: "sunset", offsetMinutes: -30 }],
   conditions: [{ type: "mode", mode: "home" }, { type: "days", days: ["fri", "sat"] }],
   actions: [{ type: "device", entityId: "light.kitchen", action: "turn_on" }, { type: "delay", seconds: 10 }, { type: "device", entityId: "light.desk", action: "turn_off" }],
   ...over,
 });
-const autos = (t: any) => [...t.ha.configs].filter(([k]: any) => k.startsWith("automation/"));
+const autos = (t: ReturnType<typeof setup>) => [...t.ha.configs].filter(([k]) => k.startsWith("automation/"));
+/** The first automation config the app published to HA, as `[key, config]`. */
+const firstAuto = (t: ReturnType<typeof setup>) => {
+  const first = autos(t)[0];
+  if (!first) throw new Error("no automation was published to HA");
+  return first;
+};
 
 test("creating writes an equivalent automation to Home Assistant and explains it in a sentence", async () => {
   const { t, admin, j } = await home();
   const r = await j("POST", "/api/automations", admin, body());
   expect(r.status).toBe(200);
-  const [[key, cfg]] = autos(t) as any;
+  const [key, cfg] = firstAuto(t);
   expect(cfg).toMatchObject({
     alias: "Evening lights", mode: "single",
     triggers: [{ trigger: "sun", event: "sunset", offset: "-00:30:00" }],
@@ -38,7 +45,7 @@ test("creating writes an equivalent automation to Home Assistant and explains it
   expect(list.automations[0]).toMatchObject({ name: "Evening lights", enabled: true, needsAttention: false, lastTriggered: null });
   expect(list.automations[0].summary).toBe("When 30 minutes before sunset, and only if the household mode is Home and it is Fri, Sat: Turn on kitchen, then wait 10 seconds, then turn off desk");
   expect(list.suggested.length).toBeGreaterThan(0); // suggestions are never created on their own
-  expect(list.automations.map((a: any) => a.name)).not.toContain(list.suggested[0].name);
+  expect(list.automations.map((a: Body) => a.name)).not.toContain(list.suggested[0].name);
 });
 
 test("every trigger and condition type compiles to the right Home Assistant form", async () => {
@@ -57,7 +64,7 @@ test("every trigger and condition type compiles to the right Home Assistant form
     ],
   }));
   expect(r.status).toBe(200);
-  const [[, cfg]] = autos(t) as any;
+  const [, cfg] = firstAuto(t);
   expect(cfg.triggers).toEqual([
     { trigger: "state", entity_id: "lock.front", to: "unlocked", for: { seconds: 300 } },
     { trigger: "numeric_state", entity_id: "sensor.plug_power", above: 5, for: { seconds: 60 } },
@@ -77,7 +84,7 @@ test("every trigger and condition type compiles to the right Home Assistant form
 
 test("invalid definitions are refused with where the problem is, and nothing is written", async () => {
   const { t, admin, j } = await home();
-  const bad = async (over: any) => (await j("POST", "/api/automations", admin, body(over)));
+  const bad = async (over: Body) => (await j("POST", "/api/automations", admin, body(over)));
   let r = await bad({ triggers: [] }); expect([r.status, r.json.where]).toEqual([400, "trigger"]);
   r = await bad({ triggers: [{ type: "time", at: "25:00" }] }); expect([r.status, r.json.where, r.json.index]).toEqual([400, "trigger", 0]);
   r = await bad({ triggers: [{ type: "time", at: "10:00" }, { type: "sensor", entityId: "sensor.plug_power" }] }); expect([r.json.where, r.json.index]).toEqual(["trigger", 1]);
@@ -96,7 +103,7 @@ test("invalid definitions are refused with where the problem is, and nothing is 
 test("every day of the week means no day restriction", async () => {
   const { t, admin, j } = await home();
   await j("POST", "/api/automations", admin, body({ conditions: [{ type: "days", days: ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] }] }));
-  expect((autos(t)[0] as any)[1].conditions).toEqual([]);
+  expect(firstAuto(t)[1].conditions).toEqual([]);
 });
 
 test("preview explains without writing anything", async () => {
@@ -119,7 +126,7 @@ test("only people who manage automations can use them, and only with devices the
   expect(ok.status).toBe(200);
   // the admin made one using the desk lamp; the member can neither see nor touch it
   const mine = await j("POST", "/api/automations", admin, body());
-  expect((await j("GET", "/api/automations", member.cookie)).json.automations.map((a: any) => a.id)).toEqual([ok.json.id]);
+  expect((await j("GET", "/api/automations", member.cookie)).json.automations.map((a: Body) => a.id)).toEqual([ok.json.id]);
   expect((await j("GET", `/api/automations/${mine.json.id}`, member.cookie)).status).toBe(404);
   expect((await j("POST", `/api/automations/${mine.json.id}/enabled`, member.cookie, { enabled: false })).status).toBe(404);
   expect((await j("DELETE", `/api/automations/${mine.json.id}`, member.cookie)).status).toBe(404);
@@ -151,14 +158,14 @@ test("editing updates Home Assistant and keeps a switched-off automation off", a
   await j("POST", `/api/automations/${id}/enabled`, admin, { enabled: false });
   const r = await j("PUT", `/api/automations/${id}`, admin, body({ name: "Dusk lights", triggers: [{ type: "time", at: "19:15" }] }));
   expect(r.status).toBe(200);
-  const [[, cfg]] = autos(t) as any;
+  const [, cfg] = firstAuto(t);
   expect(cfg.alias).toBe("Dusk lights");
   expect(cfg.triggers).toEqual([{ trigger: "time", at: "19:15:00" }]);
   expect(t.ha.entities.get(eid)!.state).toBe("off");
   const a = (await j("GET", `/api/automations/${id}`, admin)).json;
   expect([a.name, a.enabled]).toEqual(["Dusk lights", false]);
   expect((await j("PUT", `/api/automations/${id}`, admin, body({ triggers: [] }))).status).toBe(400);
-  expect((autos(t)[0] as any)[1].alias).toBe("Dusk lights"); // a rejected edit changes nothing
+  expect(firstAuto(t)[1].alias).toBe("Dusk lights"); // a rejected edit changes nothing
 });
 
 test("a copy is created switched off", async () => {
@@ -167,7 +174,7 @@ test("a copy is created switched off", async () => {
   const r = await j("POST", `/api/automations/${id}/duplicate`, admin);
   expect(r.status).toBe(200);
   const list = (await j("GET", "/api/automations", admin)).json.automations;
-  expect(list.map((a: any) => [a.name, a.enabled])).toEqual([["Evening lights", true], ["Evening lights (copy)", false]]);
+  expect(list.map((a: Body) => [a.name, a.enabled])).toEqual([["Evening lights", true], ["Evening lights (copy)", false]]);
   expect(autos(t)).toHaveLength(2);
 });
 
@@ -199,7 +206,7 @@ test("an automation whose device has gone is flagged, and the audit trail record
   const { id } = (await j("POST", "/api/automations", admin, body())).json;
   t.ha.entities.delete("light.desk");
   expect((await j("GET", `/api/automations/${id}`, admin)).json.needsAttention).toBe(true);
-  const acts = (t.db.query("SELECT action FROM security_audit WHERE action LIKE 'automation.%'").all() as any[]).map((r) => r.action);
+  const acts = all<{ action: string }>(t.db, "SELECT action FROM security_audit WHERE action LIKE 'automation.%'").map((r) => r.action);
   expect(acts).toEqual(["automation.create"]);
   // household admins never see who did it
   expect(t.db.query("SELECT COUNT(*) n FROM activity_events WHERE kind LIKE 'automation%'").get()).toEqual({ n: 0 });

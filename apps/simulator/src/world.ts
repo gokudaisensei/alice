@@ -1,12 +1,14 @@
 // The simulated household. Pure: no network, no clock of its own. The server gives it what Home Assistant currently says and gets back what to write.
-import { DEVICES, ROOMS, room, route, centre, spot, type Dev, type Pose } from "./layout";
+import { DEVICES, ROOMS, domainOf, room, route, centre, spot, type Dev, type Pose } from "./layout";
 
-export type HaState = { state: string; attrs: Record<string, any> };
+/** Whatever Home Assistant reports about an entity. */
+export type HaAttrs = Record<string, unknown>;
+export type HaState = { state: string; attrs: HaAttrs };
 export type HaView = (entity: string) => HaState | undefined;
 export interface Out {
 	number(helper: string, v: number): void;
 	bool(helper: string, on: boolean): void;
-	call(domain: string, service: string, entity: string, data?: Record<string, any>): void;
+	call(domain: string, service: string, entity: string, data?: HaAttrs): void;
 }
 
 export const clamp = (v: number, lo = -Infinity, hi = Infinity) => Math.min(hi, Math.max(lo, v));
@@ -24,7 +26,8 @@ export const sunAt = (h: number) => (h > 6.5 && h < 18.5 ? Math.sin((Math.PI * (
 // ---------------------------------------------------------------------------------- weather
 export class Weather {
 	cloud = 0.6; wind = 11; drift = 0; humDrift = 0;
-	constructor(private r: () => number) {}
+	private readonly r: () => number;
+	constructor(r: () => number) { this.r = r; }
 	step(dt: number) {
 		const k = Math.sqrt(dt / 60);
 		this.cloud = clamp(this.cloud + gauss(this.r) * 0.025 * k + (0.55 - this.cloud) * 0.002 * (dt / 60), 0.1, 1);
@@ -46,7 +49,10 @@ const PARAMS: Record<string, Partial<RoomSim>> = {
 /** How much of an appliance's power ends up as heat in the room: a water heater warms water, a charger warms a car. */
 const HEAT_SHARE: Record<string, number> = { "Water Heater Power": 0.06, "EV Charger Power": 0.03, "Dishwasher Power": 0.2, "Kettle Power": 0.35, "Coffee Machine Power": 0.4, "Front Lawn Sprinkler Power": 0, "Towel Warmer Power": 0.9 };
 const WINDOW: Record<string, string[]> = { Kitchen: ["binary_sensor.kitchen_window", "cover.kitchen_window"], "Master Bedroom": ["binary_sensor.bedroom_window"], "Kids Room": ["binary_sensor.kids_room_window"], "Living Room": ["cover.living_room_window"], Hallway: ["cover.hall_window"] };
-export const WINDOW_FAULTS = ["binary_sensor.bedroom_window", "binary_sensor.kids_room_window", "cover.kitchen_window", "cover.living_room_window", "cover.hall_window"];
+/** A list that is known to have a first element, so picking from it never comes up empty. */
+type NonEmpty<T> = [T, ...T[]];
+const choose = <T>(xs: Readonly<NonEmpty<T>>, r: () => number): T => xs[Math.floor(r() * xs.length)] ?? xs[0];
+export const WINDOW_FAULTS: NonEmpty<string> = ["binary_sensor.bedroom_window", "binary_sensor.kids_room_window", "cover.kitchen_window", "cover.living_room_window", "cover.hall_window"];
 /** How far open a window or door is, 0 to 1, whether a sensor says so or a cover (blind, window, garage door) has been moved by someone. */
 export function openness(ha: HaView, entity: string): number {
 	const s = ha(entity); if (!s) return 0;
@@ -59,13 +65,13 @@ export type Act = "sleep" | "shower" | "breakfast" | "work" | "cook" | "dinner" 
 type Step = [h: number, room: string, act: Act];
 export type Resident = { name: string; x: number; z: number; room: string; act: Act; path: { x: number; z: number }[]; wander: { x: number; z: number } | null; since: number; lastMove: number; goal: string; off: number };
 
-const WEEKDAY: Record<string, Step[]> = {
+const WEEKDAY: Record<string, NonEmpty<Step>> = {
 	Maya: [[0, "Master Bedroom", "sleep"], [6.75, "Bathroom", "shower"], [7.15, "Kitchen", "breakfast"], [8.25, "Home Office", "work"], [12.75, "Kitchen", "lunch"], [13.4, "Home Office", "work"], [17.4, "Living Room", "idle"], [18.5, "Kitchen", "cook"], [19.4, "Living Room", "dinner"], [20.1, "Living Room", "tv"], [22.2, "Bathroom", "shower"], [22.6, "Master Bedroom", "sleep"]],
 	Dev: [[0, "Master Bedroom", "sleep"], [6.5, "Bathroom", "shower"], [6.95, "Kitchen", "breakfast"], [7.6, "Hallway", "idle"], [7.85, "Away", "away"], [18.2, "Garage", "idle"], [18.55, "Living Room", "idle"], [19, "Kitchen", "cook"], [19.4, "Living Room", "dinner"], [20.1, "Living Room", "tv"], [22.3, "Master Bedroom", "sleep"]],
 	Kiran: [[0, "Kids Room", "sleep"], [7, "Bathroom", "shower"], [7.3, "Kitchen", "breakfast"], [7.75, "Away", "away"], [15.5, "Kids Room", "homework"], [17.4, "Living Room", "tv"], [19.4, "Living Room", "dinner"], [20.2, "Living Room", "idle"], [20.8, "Bathroom", "shower"], [21.05, "Kids Room", "sleep"]],
 	Nani: [[0, "Home Office", "sleep"], [5.9, "Bathroom", "shower"], [6.3, "Garden", "garden"], [7.4, "Kitchen", "breakfast"], [8.4, "Living Room", "tv"], [12.2, "Kitchen", "lunch"], [12.9, "Living Room", "nap"], [15, "Garden", "garden"], [16.4, "Living Room", "tv"], [19.4, "Living Room", "dinner"], [20.1, "Living Room", "tv"], [21.6, "Bathroom", "shower"], [21.95, "Home Office", "sleep"]],
 };
-const WEEKEND: Record<string, Step[]> = {
+const WEEKEND: Record<string, NonEmpty<Step>> = {
 	Maya: [[0, "Master Bedroom", "sleep"], [8.3, "Bathroom", "shower"], [8.7, "Kitchen", "breakfast"], [9.6, "Living Room", "idle"], [11, "Garden", "garden"], [12, "Kitchen", "cook"], [13, "Living Room", "dinner"], [15, "Away", "away"], [17.6, "Living Room", "idle"], [18.8, "Kitchen", "cook"], [19.5, "Living Room", "dinner"], [20.2, "Living Room", "tv"], [22.6, "Master Bedroom", "sleep"]],
 	Dev: [[0, "Master Bedroom", "sleep"], [8.6, "Kitchen", "breakfast"], [9.6, "Home Office", "work"], [11, "Away", "away"], [12.8, "Kitchen", "cook"], [13.2, "Living Room", "dinner"], [15, "Away", "away"], [17.6, "Garage", "idle"], [18.8, "Kitchen", "cook"], [19.5, "Living Room", "dinner"], [20.2, "Living Room", "tv"], [22.8, "Master Bedroom", "sleep"]],
 	Kiran: [[0, "Kids Room", "sleep"], [8.6, "Kitchen", "breakfast"], [9.3, "Living Room", "tv"], [11, "Garden", "garden"], [13.2, "Living Room", "dinner"], [14.2, "Kids Room", "homework"], [17, "Living Room", "tv"], [19.5, "Living Room", "dinner"], [20.5, "Bathroom", "shower"], [21.2, "Kids Room", "sleep"]],
@@ -73,16 +79,17 @@ const WEEKEND: Record<string, Step[]> = {
 };
 
 // ---------------------------------------------------------------------------------- faults
-export type FaultKind = "door_ajar" | "window_open" | "leak" | "smoke" | "power_spike" | "fridge_door" | "garage_open";
+export const FAULT_KINDS = ["door_ajar", "window_open", "leak", "smoke", "power_spike", "fridge_door", "garage_open"] as const;
+export type FaultKind = (typeof FAULT_KINDS)[number];
+export const isFaultKind = (v: unknown): v is FaultKind => typeof v === "string" && (FAULT_KINDS as readonly string[]).includes(v);
 export const FAULTS: Record<FaultKind, { label: string; minutes: number }> = {
 	door_ajar: { label: "Front door left ajar", minutes: 25 }, window_open: { label: "Window left open", minutes: 180 }, leak: { label: "Leak in the bathroom", minutes: 6 },
 	smoke: { label: "Burnt toast", minutes: 0.7 }, power_spike: { label: "A plug draws too much", minutes: 12 }, fridge_door: { label: "Fridge door left open", minutes: 8 }, garage_open: { label: "Garage door left open", minutes: 30 },
 };
 type ActiveFault = { id: number; kind: FaultKind; start: number; endsAt: number; detail: string };
 
-const helperOf = (name: string) => DEVICES.find((d) => d.name === name)?.sim?.helper as string | undefined;
 const byName = (n: string) => DEVICES.find((d) => d.name === n);
-const boolHelper = (entity: string) => DEVICES.find((d) => d.entity === entity)?.sim?.helper as string | undefined;
+const boolHelper = (entity: string) => DEVICES.find((d) => d.entity === entity)?.sim?.helper;
 
 export class World {
 	t: number; speed = 1; paused = false;
@@ -111,7 +118,14 @@ export class World {
 		this.placeAll();
 	}
 
-	private plan(name: string) { return (weekend(this.t) ? WEEKEND : WEEKDAY)[name]; }
+	/** Where a resident should be at each hour today. Everyone in the house has a plan; staying put is only a safety net. */
+	private plan(name: string): NonEmpty<Step> { return (weekend(this.t) ? WEEKEND : WEEKDAY)[name] ?? [[0, "Hallway", "idle"]]; }
+	/** The state of an indoor room. Asking for one that doesn't exist is a bug, not a missing reading. */
+	roomState(name: string): RoomSim {
+		const r = this.rooms[name];
+		if (!r) throw new Error(`No simulated room called ${name}`);
+		return r;
+	}
 	private placeAll() {
 		for (const p of this.people) {
 			const [, rm, act] = this.desired(p);
@@ -180,14 +194,14 @@ export class World {
 			const before = this.roomAt(p.x, p.z);
 			const [, rm, act] = this.desired(p);
 			if (rm !== p.goal && p.path.length === 0) {
-				p.path = route({ x: p.x, z: p.z }, p.room === "Away" ? "Away" : this.roomAt(p.x, p.z), rm);
+				p.path = route(p.room === "Away" ? "Away" : this.roomAt(p.x, p.z), rm);
 				p.goal = rm; p.act = act;
 				if (p.room === "Away" && rm !== "Away") this.arrive(p, out);
 				if (rm === "Away") this.after(30, () => {});
 			} else if (rm === p.goal) p.act = act;
 			let budget = dt * 1.3;
-			while (budget > 0 && p.path.length) {
-				const w = p.path[0], dx = w.x - p.x, dz = w.z - p.z, d = Math.hypot(dx, dz);
+			for (let w = p.path[0]; budget > 0 && w; w = p.path[0]) {
+				const dx = w.x - p.x, dz = w.z - p.z, d = Math.hypot(dx, dz);
 				if (d <= budget) { p.x = w.x; p.z = w.z; budget -= d; p.path.shift(); p.lastMove = this.t; } else { p.x += (dx / d) * budget; p.z += (dz / d) * budget; budget = 0; p.lastMove = this.t; }
 			}
 			if (!p.path.length) {
@@ -210,9 +224,10 @@ export class World {
 		for (const rm of ROOMS) {
 			if (!rm.indoor && rm.name !== "Garden") continue;
 			const here = this.people.some((p) => this.roomAt(p.x, p.z) === rm.name);
+			const since = this.emptySince[rm.name];
 			if (here) { delete this.emptySince[rm.name]; this.forgot[rm.name] ??= false; }
-			else if (this.emptySince[rm.name] === undefined) { this.emptySince[rm.name] = this.t; this.forgot[rm.name] = this.r() < 0.07; }
-			else if (this.t - this.emptySince[rm.name] > 180e3 && this.emptySince[rm.name] > 0) {
+			else if (since === undefined) { this.emptySince[rm.name] = this.t; this.forgot[rm.name] = this.r() < 0.07; }
+			else if (this.t - since > 180e3 && since > 0) {
 				if (!this.forgot[rm.name]) this.roomLights(rm.name, false, ha, out);
 				this.emptySince[rm.name] = -1; // handled for this absence
 			}
@@ -280,7 +295,7 @@ export class World {
 	// -------------------------------------------------------------------------- scheduled and habitual things
 	private routines(h: number, ha: HaView, out: Out) {
 		const st = (id: string) => ha(id)?.state;
-		const set = (entity: string, on: boolean, domain = entity.split(".")[0]) => { if ((st(entity) === "on") !== on) out.call(domain, on ? "turn_on" : "turn_off", entity); };
+		const set = (entity: string, on: boolean, domain = domainOf(entity)) => { if ((st(entity) === "on") !== on) out.call(domain, on ? "turn_on" : "turn_off", entity); };
 		const key = (k: string, minute: number) => { const slot = Math.floor(this.t / 60000); if (this.flags[k] === slot) return false; if (Math.floor(hourOf(this.t) * 60) === minute) { this.flags[k] = slot; return true; } return false; };
 		const dusk = 18.4, dawn = 6.6;
 		if (key("porch-on", Math.round(dusk * 60))) set("light.porch_light", true);
@@ -361,7 +376,7 @@ export class World {
 		if (!on("switch.coffee_machine")) delete this.flags.coffee;
 		if (!on("switch.kettle")) delete this.flags.kettle;
 		// faults that change draw
-		for (const f of this.faults) if (f.kind === "power_spike" && this.watts[f.detail] !== undefined) this.watts[f.detail] = this.watts[f.detail] * 3 + 80;
+		for (const f of this.faults) { const w = this.watts[f.detail]; if (f.kind === "power_spike" && w !== undefined) this.watts[f.detail] = w * 3 + 80; }
 		if (this.faults.some((f) => f.kind === "fridge_door") && on("switch.fridge_freezer_plug")) this.watts["Fridge Freezer Plug Power"] = j(150);
 		void h;
 	}
@@ -371,12 +386,11 @@ export class World {
 	// -------------------------------------------------------------------------- heat, air and damp
 	private thermal(dt: number, h: number, ha: HaView) {
 		const out = this.weather.temp(h), sun = sunAt(h) * (1 - 0.8 * this.weather.cloud);
-		const names = Object.keys(this.rooms), indoor = names.filter((n) => this.rooms[n].conditioned);
-		const mean = indoor.reduce((a, n) => a + this.rooms[n].T, 0) / indoor.length;
+		const rooms = Object.entries(this.rooms), indoor = rooms.filter(([, r]) => r.conditioned);
+		const mean = indoor.reduce((a, [, r]) => a + r.T, 0) / indoor.length;
 		let heat = 0, cool = 0;
 		const sub = Math.max(1, Math.ceil(dt / 30)), d = dt / sub;
-		for (let s = 0; s < sub; s++) for (const n of names) {
-			const R = this.rooms[n];
+		for (let s = 0; s < sub; s++) for (const [n, R] of rooms) {
 			const ocup = this.people.filter((p) => this.roomAt(p.x, p.z) === n).length;
 			const lights = DEVICES.filter((x) => x.room === n && x.kind === "light" && ha(x.entity)?.state === "on").length;
 			const appl = DEVICES.filter((x) => x.room === n && x.sim?.gate).reduce((a, x) => a + (this.watts[x.name] ?? 0) * (HEAT_SHARE[x.name] ?? 0.85), 0);
@@ -404,7 +418,7 @@ export class World {
 
 	// -------------------------------------------------------------------------- power and energy
 	private powerFlow(dt: number, h: number, ha: HaView, out: Out) {
-		const sendNum = (helper: string | undefined, v: number, dp: number, lo?: number, hi?: number) => {
+		const sendNum = (helper: string | undefined, v: number, dp: number, lo?: number | null, hi?: number | null) => {
 			if (!helper || !Number.isFinite(v)) return;
 			const c = Math.round(clamp(v, lo ?? -1e9, hi ?? 1e9) * 10 ** dp) / 10 ** dp, prev = this.sent.get(helper);
 			if (prev !== undefined && Math.abs((prev as number) - c) < 10 ** -dp * 0.5) return;
@@ -414,7 +428,7 @@ export class World {
 		const solar = this.weather.solar(h) * (1 + gauss(this.r) * 0.01);
 		let lightsW = 0; for (const d of DEVICES) if (d.kind === "light" && ha(d.entity)?.state === "on") lightsW += 5 + 0.045 * Number(ha(d.entity)?.attrs.brightness ?? 160);
 		let fansW = 0; for (const d of DEVICES) if (d.kind === "fan" && ha(d.entity)?.state === "on") fansW += 38;
-		let plugsW = 0; for (const k in this.watts) plugsW += this.watts[k];
+		let plugsW = 0; for (const w of Object.values(this.watts)) plugsW += w;
 		const home = 215 + lightsW + fansW + plugsW + this.hvac.elecW + gauss(this.r) * 6;
 		this.power = { home, solar, grid: home - solar };
 		for (const [n, v] of Object.entries(this.watts)) sensor(n, v, 0);
@@ -428,7 +442,7 @@ export class World {
 			sensor(`${n} Temperature`, R.T + gauss(this.r) * 0.02, 1);
 			if (n !== "Hallway" && n !== "Garage" && n !== "Home Office") sensor(`${n} Humidity`, R.hum + gauss(this.r) * 0.3, 0);
 		}
-		sensor("Bedroom CO2", this.rooms["Master Bedroom"].co2, 0); sensor("Living Room CO2", this.rooms["Living Room"].co2, 0);
+		sensor("Bedroom CO2", this.roomState("Master Bedroom").co2, 0); sensor("Living Room CO2", this.roomState("Living Room").co2, 0);
 		sensor("Outdoor Temperature", this.weather.temp(h) + gauss(this.r) * 0.05, 1); sensor("Outdoor Humidity", this.weather.humidity(h), 0); sensor("Wind Speed", this.weather.wind, 0);
 		const soil = Number(ha("sensor.garden_soil_moisture")?.state);
 		const wet = ha("switch.front_lawn_sprinkler")?.state === "on";
@@ -449,7 +463,7 @@ export class World {
 		for (const f of this.faults.filter((x) => x.endsAt <= this.t)) this.endFault(f, out);
 		this.faults = this.faults.filter((x) => x.endsAt > this.t);
 		if (this.t > this.nextFault && this.nextFault > 0) {
-			const kinds = Object.keys(FAULTS) as FaultKind[], k = kinds[Math.floor(this.r() * kinds.length)];
+			const k = choose(FAULT_KINDS, this.r);
 			this.startFault(k, out); this.nextFault = this.t + (8 + this.r() * 20) * 3600e3;
 		}
 	}
@@ -466,10 +480,10 @@ export class World {
 		const set = (entity: string, on: boolean) => { const hp = boolHelper(entity); if (hp) { this.sent.set(hp, on); out.bool(hp, on); } };
 		const open = (entity: string, on: boolean) => (entity.startsWith("cover.") ? out.call("cover", on ? "open_cover" : "close_cover", entity) : set(entity, on));
 		if (kind === "door_ajar") { out.call("lock", "unlock", "lock.front_door_lock"); set("binary_sensor.front_door_contact", true); }
-		if (kind === "window_open") { const w = detail || WINDOW_FAULTS[Math.floor(this.r() * WINDOW_FAULTS.length)]; f.detail = w; open(w, true); }
+		if (kind === "window_open") { const w = detail || choose(WINDOW_FAULTS, this.r); f.detail = w; open(w, true); }
 		if (kind === "leak") set("binary_sensor.bathroom_leak_sensor", true);
 		if (kind === "smoke") set("binary_sensor.kitchen_smoke_detector", true);
-		if (kind === "power_spike") f.detail = detail || ["Workstation Plug Power", "Monitor Plug Power", "TV Plug Power", "Humidifier Power", "Dishwasher Power"].filter((n) => this.watts[n] > 0)[0] || "Fridge Freezer Plug Power";
+		if (kind === "power_spike") f.detail = detail || ["Workstation Plug Power", "Monitor Plug Power", "TV Plug Power", "Humidifier Power", "Dishwasher Power"].find((n) => (this.watts[n] ?? 0) > 0) || "Fridge Freezer Plug Power";
 		if (kind === "fridge_door") set("binary_sensor.fridge_door", true);
 		if (kind === "garage_open") out.call("cover", "open_cover", "cover.garage_door");
 		this.faults.push(f); this.events.push(FAULTS[kind].label);

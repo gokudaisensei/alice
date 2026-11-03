@@ -4,6 +4,7 @@ COPY package.json bun.lock ./
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
 COPY apps/mock-ha/package.json apps/mock-ha/
+COPY apps/simulator/package.json apps/simulator/
 RUN bun install --frozen-lockfile
 COPY apps/web apps/web
 WORKDIR /repo/apps/web

@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
+import { scalar } from "./sql";
 import { createDeviceService } from "./devices";
 import { createInsights, createSampler, SAMPLE_MS } from "./insights";
 import { createNotifier, pushEndpointOk, RATE_PER_HOUR } from "./notify";
 import { startRules } from "./rules";
-import { ent, setup } from "./testkit";
+import { ent, setup, type Body } from "./testkit";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const FAST = { offlineMs: 40, lockMs: 40, hubMs: 40 };
@@ -16,11 +17,11 @@ async function home() {
   await t.reauth(admin.cookie!, "a1");
   const member = await t.addUser(admin.cookie!, "member", "m1");
   const guest = await t.addUser(admin.cookie!, "guest", "g1");
-  const j = (m: string, p: string, cookie: string, body?: any) => t.call(m, p, { cookie, body });
+  const j = (m: string, p: string, cookie: string, body?: unknown) => t.call(m, p, { cookie, body });
   t.ha.set("switch.heater", "off"); // the fixture heater starts offline; keep it out of these scenarios
   const svc = createDeviceService(t.db, t.ha);
   const nf = createNotifier(t.db, svc, t.push, () => t.clock.t);
-  const titles = async (cookie: string) => ((await j("GET", "/api/notifications", cookie)).json.notifications as any[]).map((n) => n.title);
+  const titles = async (cookie: string) => ((await j("GET", "/api/notifications", cookie)).json.notifications as Body[]).map((n) => n.title);
   return { t, admin: admin.cookie!, member, guest, j, svc, nf, titles };
 }
 
@@ -76,24 +77,24 @@ test("quiet hours hold back push, never the inbox", async () => {
   await j("POST", "/api/push/subscribe", admin, { endpoint: EP, keys: KEYS });
   await j("PUT", "/api/me/notifications", admin, { quiet: { enabled: true, start: "22:00", end: "07:00", tz: "UTC" } });
   const at = (h: number) => { const d = new Date(t.clock.t); d.setUTCHours(h, 30, 0, 0); t.clock.t = d.getTime(); };
-  const n = (k: string) => nf.emit({ householdId: (t.db.query("SELECT id FROM households").get() as any).id, kind: "hub", title: k, body: "b", dedupeKey: k });
+  const n = (k: string) => nf.emit({ householdId: scalar(t.db, "SELECT id FROM households", ""), kind: "hub", title: k, body: "b", dedupeKey: k });
   at(23); let r = await n("night"); expect([r.recipients > 0, r.pushed]).toEqual([true, 0]);
   at(3); await n("small hours"); expect(t.push.sent.length).toBe(0);
   at(12); r = await n("noon"); expect(r.pushed).toBe(1);
-  expect(t.push.sent[0].payload).toMatchObject({ title: "noon" });
+  expect(t.push.sent[0]?.payload).toMatchObject({ title: "noon" });
   expect((await titles(admin)).length).toBe(3);
 });
 
 test("muted categories are skipped, and a flood is collapsed into one line", async () => {
   const { t, admin, j, nf, titles } = await home();
-  const h = (t.db.query("SELECT id FROM households").get() as any).id;
+  const h = scalar(t.db, "SELECT id FROM households", "");
   await j("PUT", "/api/me/notifications", admin, { muted: ["insight"] });
   expect((await nf.emit({ householdId: h, kind: "insight", title: "x", body: "b", dedupeKey: "i" })).recipients).toBe(2 - 1); // member still hears it, admin muted it
   await j("PUT", "/api/me/notifications", admin, { muted: [] });
   await j("POST", "/api/push/subscribe", admin, { endpoint: EP, keys: KEYS });
   t.push.sent.length = 0;
   for (let i = 0; i < RATE_PER_HOUR + 4; i++) await nf.emit({ householdId: h, kind: "hub", title: `n${i}`, body: "b", dedupeKey: `k${i}` });
-  const mine = (await j("GET", "/api/notifications", admin)).json.notifications as any[];
+  const mine = (await j("GET", "/api/notifications", admin)).json.notifications as Body[];
   expect(mine.filter((x) => x.kind === "summary")).toHaveLength(1);
   expect(mine.find((x) => x.kind === "summary").body).toContain("4 more notifications were held back");
   expect(t.push.sent.length).toBe(RATE_PER_HOUR); // nothing pushed beyond the limit
@@ -105,7 +106,7 @@ test("muted categories are skipped, and a flood is collapsed into one line", asy
 
 test("people only see and mark their own notifications", async () => {
   const { t, admin, member, j, nf } = await home();
-  const h = (t.db.query("SELECT id FROM households").get() as any).id;
+  const h = scalar(t.db, "SELECT id FROM households", "");
   await nf.emit({ householdId: h, kind: "hub", title: "T", body: "b", dedupeKey: "d" });
   expect((await j("GET", "/api/notifications/unread", admin)).json.unread).toBe(1);
   const adminId = (await j("GET", "/api/notifications", admin)).json.notifications[0].id;
@@ -145,14 +146,14 @@ test("a subscription the push service has dropped is removed", async () => {
   const { t, admin, j, nf } = await home();
   await j("POST", "/api/push/subscribe", admin, { endpoint: EP, keys: KEYS });
   t.push.results.set(EP, "gone");
-  const h = (t.db.query("SELECT id FROM households").get() as any).id;
+  const h = scalar(t.db, "SELECT id FROM households", "");
   await nf.emit({ householdId: h, kind: "hub", title: "T", body: "b", dedupeKey: "d" });
   expect((await j("GET", "/api/me/notifications", admin)).json.pushDevices).toBe(0);
 });
 
 test("notification preferences are validated", async () => {
   const { j, admin } = await home();
-  const put = (b: any) => j("PUT", "/api/me/notifications", admin, b);
+  const put = (b: Body) => j("PUT", "/api/me/notifications", admin, b);
   expect((await put({ muted: ["nope"] })).status).toBe(400);
   expect((await put({ quiet: { start: "25:00" } })).status).toBe(400);
   expect((await put({ quiet: { tz: "Mars/Base" } })).status).toBe(400);
@@ -162,7 +163,7 @@ test("notification preferences are validated", async () => {
 
 // ---------- samples, insights, energy ----------
 
-function seed(t: any, id: string, count: number, value: (i: number) => number) {
+function seed(t: ReturnType<typeof setup>, id: string, count: number, value: (i: number) => number) {
   const ins = t.db.query("INSERT INTO samples (entity_id, ts, value) VALUES (?,?,?)");
   for (let i = 0; i < count; i++) ins.run(id, t.clock.t - (count - 1 - i) * SAMPLE_MS, value(i));
 }
@@ -172,7 +173,7 @@ test("the sampler records useful readings and leaves gaps alone", async () => {
   t.ha.entities.set("sensor.house_energy", ent("sensor.house_energy", "12.5", { unit_of_measurement: "kWh", device_class: "energy" }));
   t.ha.set("light.hall", "unavailable");
   createSampler(t.db, t.ha, () => t.clock.t).sampleOnce();
-  const rows = Object.fromEntries((t.db.query("SELECT entity_id, value FROM samples").all() as any[]).map((r) => [r.entity_id, r.value]));
+  const rows = Object.fromEntries((t.db.query("SELECT entity_id, value FROM samples").all() as Body[]).map((r) => [r.entity_id, r.value]));
   expect(rows["sensor.house_energy"]).toBe(12.5);
   expect(rows["sensor.plug_power"]).toBe(42);
   expect(rows["light.kitchen"]).toBeDefined();
@@ -184,14 +185,14 @@ test("a light left on all day becomes an insight, with a suggestion and no actio
   const { t, admin, member, j, svc } = await home();
   t.ha.set("light.desk", "on");
   seed(t, "light.desk", 40, () => 1); // ten hours of readings
-  const r = (await j("GET", "/api/insights", admin)).json.insights as any[];
+  const r = (await j("GET", "/api/insights", admin)).json.insights as Body[];
   const i = r.find((x) => x.key === "long_on:light.desk");
   expect(i.title).toMatch(/has been on for about 10 hours/);
   expect(i.suggestion.href).toBe("/automations/new?device=light.desk");
   expect(t.ha.calls.filter((c) => c.entityId === "light.desk")).toEqual([]); // nothing was switched off for them
   await j("POST", "/api/insights/dismiss", admin, { key: i.key });
-  expect(((await j("GET", "/api/insights", admin)).json.insights as any[]).some((x) => x.key === i.key)).toBe(false);
-  expect(((await j("GET", "/api/insights", member.cookie)).json.insights as any[]).some((x) => x.key === i.key)).toBe(true); // dismissal is personal
+  expect(((await j("GET", "/api/insights", admin)).json.insights as Body[]).some((x) => x.key === i.key)).toBe(false);
+  expect(((await j("GET", "/api/insights", member.cookie)).json.insights as Body[]).some((x) => x.key === i.key)).toBe(true); // dismissal is personal
   void svc;
 });
 
@@ -211,7 +212,7 @@ test("a constant standby draw is reported with the numbers behind it", async () 
   const { t, admin, j } = await home();
   seed(t, "sensor.plug_power", 90, (i) => 12 + (i % 3));
   t.ha.set("sensor.plug_power", "13");
-  const i = ((await j("GET", "/api/insights", admin)).json.insights as any[]).find((x) => x.kind === "standby");
+  const i = ((await j("GET", "/api/insights", admin)).json.insights as Body[]).find((x) => x.kind === "standby");
   expect(i.title).toBe("plug power uses at least 12 W around the clock");
   expect(i.body).toContain("0.3 kWh a day");
 });
@@ -229,7 +230,7 @@ test("a jump in daily energy is flagged against the previous days", async () => 
     total += (day === 1 ? 9 : 5) / 96;
     ins.run("sensor.house_energy", ts, total);
   }
-  const found = ((await j("GET", "/api/insights", admin)).json.insights as any[]).find((x) => x.kind === "energy_up");
+  const found = ((await j("GET", "/api/insights", admin)).json.insights as Body[]).find((x) => x.kind === "energy_up");
   expect(found.title).toBe("house energy used more than usual yesterday");
   expect(found.body).toMatch(/kWh yesterday, against a usual \d+(\.\d)? kWh over the previous \d+ days/);
 });
@@ -238,7 +239,7 @@ test("the energy page shows only meters you can see, and says how it measures", 
   const { t, admin, guest, j } = await home();
   seed(t, "sensor.plug_power", 10, (i) => 40 + i);
   const e = (await j("GET", "/api/energy", admin)).json;
-  const m = e.meters.find((x: any) => x.id === "sensor.plug_power");
+  const m = e.meters.find((x: Body) => x.id === "sensor.plug_power");
   expect(m).toMatchObject({ kind: "power", peak24h: 49, low24h: 40, unit: "W" });
   expect(e.note).toContain("15 minutes");
   expect(e.sampledSince).not.toBeNull();
@@ -253,7 +254,7 @@ test("the daily sweep tells only the people who can see the device", async () =>
   const ins = createInsights(t.db, t.ha, svc, () => t.clock.t);
   expect(await ins.sweep(nf)).toBe(2);
   expect(await ins.sweep(nf)).toBe(0); // not again within three days
-  expect(((await j("GET", "/api/notifications", guest.cookie)).json.notifications as any[])).toEqual([]);
+  expect(((await j("GET", "/api/notifications", guest.cookie)).json.notifications as Body[])).toEqual([]);
   void admin; void member;
 });
 

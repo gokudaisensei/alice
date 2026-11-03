@@ -1,3 +1,4 @@
+import { capitalize } from './utils.js';
 import type { Device } from './home.svelte.js';
 
 export type Step =
@@ -29,14 +30,13 @@ export function actionsFor(d: Device): ActionOption[] {
 	return out;
 }
 
-const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 
 /** A plain sentence for a step, e.g. "Turn off Living room". */
 export function stepText(s: Step, nameOf: (id: string) => string, actions?: ActionOption[]): string {
 	if (s.type === 'scene') return `Activate the scene “${nameOf(s.entityId)}”`;
-	if (s.type === 'mode') return `Set the household mode to ${cap(s.mode)}`;
+	if (s.type === 'mode') return `Set the household mode to ${capitalize(s.mode)}`;
 	if (s.type === 'delay') return `Wait ${s.seconds} second${s.seconds === 1 ? '' : 's'}`;
-	const label = actions?.find((a) => a.action === s.action)?.label ?? cap(s.action.replace(/_/g, ' '));
+	const label = actions?.find((a) => a.action === s.action)?.label ?? capitalize(s.action.replace(/_/g, ' '));
 	const unit = actions?.find((a) => a.action === s.action)?.input;
 	const v = s.value !== undefined && unit?.kind === 'number' ? ` to ${s.value}${unit.unit}` : s.value !== undefined ? ` to ${s.value}` : '';
 	return `${label}${v} — ${nameOf(s.entityId)}`;

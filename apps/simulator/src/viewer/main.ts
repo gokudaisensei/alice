@@ -95,7 +95,8 @@ const car = new THREE.Group(); FURN.add(car); car.position.set(14.8, 0, 9.4);
 box(2.0, 0.6, 4.0, 0x2d3a64, 0, 0.25, 0, car, { metalness: 0.5, roughness: 0.4 }); box(1.7, 0.5, 2.0, 0x1b2342, 0, 0.85, -0.2, car, { metalness: 0.4 });
 const chargeGlow = new THREE.Mesh(new THREE.RingGeometry(1.5, 1.8, 40), new THREE.MeshBasicMaterial({ color: 0x4dffb8, transparent: true, opacity: 0, side: THREE.DoubleSide })); chargeGlow.rotation.x = -Math.PI / 2; chargeGlow.position.set(14.8, 0.15, 9.4); scene.add(chargeGlow);
 const treeAt = (x: number, z: number, s = 1) => { const t = new THREE.Group(); box(0.35, 1.6 * s, 0.35, 0x6b4a2f, 0, 0, 0, t); const c = new THREE.Mesh(new THREE.ConeGeometry(1.2 * s, 3 * s, 8), std(0x2f7a4a)); c.position.y = 3 * s; c.castShadow = true; t.add(c); t.position.set(x, 0, z); scene.add(t); };
-[[-2, 14.5, 1.1], [3.5, 16.5, 0.9], [14, 15.5, 1.2], [19, 13, 1], [-2, 2, 1.2], [19, 2, 1.3], [8, 17.5, 1]].forEach(([x, z, s]) => treeAt(x, z, s));
+const TREES: [x: number, z: number, scale: number][] = [[-2, 14.5, 1.1], [3.5, 16.5, 0.9], [14, 15.5, 1.2], [19, 13, 1], [-2, 2, 1.2], [19, 2, 1.3], [8, 17.5, 1]];
+for (const [x, z, s] of TREES) treeAt(x, z, s);
 for (let i = 0; i < 7; i++) box(0.9, 0.05, 0.5, 0xb8b2a3, 6 + i * 0.6, 0, 12.8 + i * 0.5, scene);
 const spray = new THREE.Mesh(new THREE.ConeGeometry(1.6, 1.4, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0x7fd0ff, transparent: true, opacity: 0, side: THREE.DoubleSide })); spray.position.set(3, 0.8, 14.5); scene.add(spray);
 const puddle = new THREE.Mesh(new THREE.CircleGeometry(0.1, 24), new THREE.MeshBasicMaterial({ color: 0x4aa3ff, transparent: true, opacity: 0.75 })); puddle.rotation.x = -Math.PI / 2; puddle.position.set(7.4, 0.14, 4.2); puddle.visible = false; scene.add(puddle);
@@ -126,7 +127,8 @@ win(["binary_sensor.kitchen_window", "cover.kitchen_window"], 11.3, 11.94, "x");
 // the garage door rolls up; the pergola's slats turn
 const garageDoor = box(2.4, 2.1, 0.06, 0xaab0c0, 14, 0.12, 11.97, scene, { metalness: 0.3, roughness: 0.5 }); let garageOpen = 0;
 const pergola = new THREE.Group(); scene.add(pergola); pergola.position.set(10.25, 2.3, 15);
-for (const [px, pz] of [[-2, -1.4], [2, -1.4], [-2, 1.4], [2, 1.4]]) box(0.12, 2.3, 0.12, 0x8d6e50, px, -2.3, pz, pergola);
+const POSTS: [x: number, z: number][] = [[-2, -1.4], [2, -1.4], [-2, 1.4], [2, 1.4]];
+for (const [px, pz] of POSTS) box(0.12, 2.3, 0.12, 0x8d6e50, px, -2.3, pz, pergola);
 const slats: THREE.Mesh[] = [];
 for (let i = 0; i < 9; i++) { const sl = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.04, 0.26), std(0x9a7a58)); sl.position.set(0, 0, -1.4 + i * 0.35); sl.castShadow = true; pergola.add(sl); slats.push(sl); }
 box(2.2, 0.08, 1.2, 0x8d6e50, 10.25, 0.12, 15.6, scene); box(0.5, 0.45, 0.5, 0x8d6e50, 9.2, 0.12, 15.6, scene); box(0.5, 0.45, 0.5, 0x8d6e50, 11.3, 0.12, 15.6, scene);
@@ -195,7 +197,8 @@ const powerTags = new Map<string, HTMLElement>();
 
 // ------------------------------------------------------------------ people
 const COLORS: Record<string, number> = { Maya: 0xff7b8f, Dev: 0x7f9bff, Kiran: 0xffc247, Nani: 0x5fd0a0 };
-type Figure = { g: THREE.Group; body: THREE.Group; legs: THREE.Group[]; arms: THREE.Group[]; target: THREE.Vector3; label: HTMLElement; facing: number; k: { bodyY: number; legX: number; lie: number; armX: number }; pose: string; walking: boolean };
+type Pair = [left: THREE.Group, right: THREE.Group];
+type Figure = { g: THREE.Group; body: THREE.Group; legs: Pair; arms: Pair; target: THREE.Vector3; label: HTMLElement; facing: number; k: { bodyY: number; legX: number; lie: number; armX: number }; pose: string; walking: boolean };
 const folk = new Map<string, Figure>();
 function person(name: string): Figure {
 	const g = new THREE.Group(), body = new THREE.Group(); g.add(body);
@@ -205,11 +208,13 @@ function person(name: string): Figure {
 	const torso = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.6, 0.24), cloth); torso.position.y = 1.2; torso.castShadow = true; body.add(torso);
 	const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 14, 12), skin); head.position.y = 1.64; head.castShadow = true; body.add(head);
 	const hair = new THREE.Mesh(new THREE.SphereGeometry(0.175, 14, 12, 0, Math.PI * 2, 0, Math.PI / 2), std(name === "Nani" ? 0xe6e6ee : 0x2a2018)); hair.position.y = 1.66; hair.rotation.x = -0.25; body.add(hair);
-	const legs: THREE.Group[] = [], arms: THREE.Group[] = [];
-	for (const sx of [-1, 1]) {
-		const leg = new THREE.Group(); leg.position.set(sx * 0.11, 0.9, 0); const lm = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.85, 0.16), trousers); lm.position.y = -0.425; lm.castShadow = true; leg.add(lm); body.add(leg); legs.push(leg);
-		const arm = new THREE.Group(); arm.position.set(sx * 0.28, 1.46, 0); const am = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.58, 0.12), cloth); am.position.y = -0.29; am.castShadow = true; arm.add(am); body.add(arm); arms.push(arm);
-	}
+	const limbs = (sx: -1 | 1) => {
+		const leg = new THREE.Group(); leg.position.set(sx * 0.11, 0.9, 0); const lm = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.85, 0.16), trousers); lm.position.y = -0.425; lm.castShadow = true; leg.add(lm); body.add(leg);
+		const arm = new THREE.Group(); arm.position.set(sx * 0.28, 1.46, 0); const am = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.58, 0.12), cloth); am.position.y = -0.29; am.castShadow = true; arm.add(am); body.add(arm);
+		return { leg, arm };
+	};
+	const left = limbs(-1), right = limbs(1);
+	const legs: Pair = [left.leg, right.leg], arms: Pair = [left.arm, right.arm];
 	scene.add(g); const el = document.createElement("div"); el.className = "label who"; el.textContent = name; $("labels").appendChild(el);
 	return { g, body, legs, arms, target: new THREE.Vector3(), label: el, facing: 0, k: { bodyY: 0, legX: 0, lie: 0, armX: 0 }, pose: "stand", walking: false };
 }
@@ -249,7 +254,7 @@ function hud(s: Snap) {
 	const bar = (label: string, w: number, col: string) => `<div class="row"><span>${label}</span><b>${fmtW(w)}</b></div><div class="bar"><div style="width:${Math.min(100, (Math.abs(w) / max) * 100)}%;background:${col}"></div></div>`;
 	$("powerRows").innerHTML = bar("Home is using", s.power.home, "#ffc247") + bar("Solar is making", s.power.solar, "#5fd0a0") + bar(s.power.grid >= 0 ? "Drawing from the grid" : "Sending to the grid", s.power.grid, s.power.grid >= 0 ? "#ff7b8f" : "#7f9bff") + (s.hvac.heatW + s.hvac.coolW > 0 ? `<div class="row"><span>${s.hvac.heatW > 0 ? "Heating" : "Cooling"}</span><b>${fmtW(s.hvac.heatW + s.hvac.coolW)}</b></div>` : "");
 	$("active").innerHTML = s.faults.map((f) => `${f.label} <span style="color:var(--mut)">(${f.left} min left)</span>`).join("<br>");
-	$("events").textContent = s.events.length ? s.events[s.events.length - 1] : "Quiet at home.";
+	$("events").textContent = s.events.at(-1) ?? "Quiet at home.";
 }
 
 // ------------------------------------------------------------------ keeping the scene in step with the simulator
@@ -257,7 +262,6 @@ const skyDay = new THREE.Color(0x9cc8ff), skyDusk = new THREE.Color(0xf0a078), s
 const tmp = new THREE.Color(), cold = new THREE.Color(0x6aa8ff), hot = new THREE.Color(0xff8a5c), warmDim = new THREE.Color(0xff9a48), warmFull = new THREE.Color(0xffe2b8);
 const open01 = (s: Snap, id: string) => { const c = s.covers[id]; if (c) return c.s === "closed" ? 0 : Math.min(1, c.pos / 100); return s.devices[id]?.s === "on" ? 1 : 0; };
 let tvPlaying = false;
-const drawn = { cloudFlat: 0 };
 function apply(s: Snap) {
 	const h = s.hour, a = ((h - 6) / 12) * Math.PI, day = s.sun;
 	sun.position.set(8.5 + Math.cos(a) * 38, Math.max(2, Math.sin(a) * 42), 8 - Math.sin(a) * 6 + 12);
@@ -329,7 +333,7 @@ function apply(s: Snap) {
 // ------------------------------------------------------------------ picking
 const ray = new THREE.Raycaster(), mouse = new THREE.Vector2(), tip = $("tip");
 let down = { x: 0, y: 0 };
-function hit(e: MouseEvent) { mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(mouse, camera); const hs = ray.intersectObjects(pick, true); return hs.length ? (hs[0].object.userData.entity as string) : null; }
+function hit(e: MouseEvent) { mouse.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1); ray.setFromCamera(mouse, camera); const first = ray.intersectObjects(pick, true)[0]; return first ? (first.object.userData.entity as string) : null; }
 renderer.domElement.addEventListener("pointerdown", (e) => (down = { x: e.clientX, y: e.clientY }));
 renderer.domElement.addEventListener("pointerup", async (e) => {
 	if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) return;

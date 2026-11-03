@@ -7,7 +7,7 @@
 
 	type Item = { id: string; name: string; kind: 'device' | 'scene' | 'routine'; enabled: boolean };
 	let items = $state<Item[]>([]), cloud = $state<{ loggedIn: boolean } | null | undefined>(undefined), msg = $state(''), busy = $state<Record<string, boolean>>({});
-	async function load() { const r = await api('GET', '/api/admin/voice'); if (r.ok) { items = r.data.items; cloud = r.data.cloud; } }
+	async function load() { const r = await api<{ items: Item[]; cloud: { loggedIn: boolean } | null }>('GET', '/api/admin/voice'); if (r.ok) { items = r.data.items; cloud = r.data.cloud; } }
 	onMount(load);
 	async function set(i: Item, enabled: boolean) {
 		busy[i.id] = true; msg = '';

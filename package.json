@@ -11,6 +11,7 @@
     "test": "cd apps/server && bun test",
     "build:web": "cd apps/web && bun run build",
     "dev:simulator": "cd apps/simulator && bun run start",
-    "test:simulator": "cd apps/simulator && bun test"
+    "test:simulator": "cd apps/simulator && bun test",
+    "typecheck": "bun run --filter '*' typecheck"
   }
 }

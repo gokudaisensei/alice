@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createOperator } from "./ops";
-import { setup } from "./testkit";
+import { setup, type Body } from "./testkit";
 
 async function home() {
   const t = setup();
@@ -8,7 +8,7 @@ async function home() {
   await t.reauth(admin.cookie!, "a1");
   const member = await t.addUser(admin.cookie!, "member", "Mia");
   const guest = await t.addUser(admin.cookie!, "guest", "Gus");
-  const j = (m: string, p: string, cookie: string | undefined, body?: any) => t.call(m, p, { cookie, body });
+  const j = (m: string, p: string, cookie: string | undefined, body?: unknown) => t.call(m, p, { cookie, body });
   async function operator(name: string, cred: string) {
     const { id, token } = createOperator(t.db, name);
     const o = await t.call("POST", "/api/ops/auth/enroll/options", { body: { token } });
@@ -99,13 +99,13 @@ test("an operator only gets what was granted, and only after claiming the sessio
   expect((await j("POST", "/api/ops/support/claim", op.cookie)).status).toBe(200);
   const d = await j("GET", "/api/ops/support/diagnostics", op.cookie);
   expect(d.status).toBe(200);
-  expect(d.json.checks.find((c: any) => c.id === "hub").status).toBe("ok");
+  expect(d.json.checks.find((c: Body) => c.id === "hub").status).toBe("ok");
   expect((await j("GET", "/api/ops/support/config", op.cookie)).status).toBe(403); // not in scope
   expect((await j("GET", "/api/support", admin)).json.active).toMatchObject({ connected: true, operatorName: "Sam", scopes: ["diagnostics"] });
   const other = await operator("Robin", "op-key-2");
   expect((await j("POST", "/api/ops/support/claim", other.cookie)).status).toBe(404); // someone else already has it
   expect((await j("GET", "/api/ops/support/diagnostics", other.cookie)).status).toBe(403);
-  const rows = t.db.query("SELECT action, outcome, actor_type FROM security_audit WHERE actor_type = 'operator' AND action LIKE 'ops.%' AND action NOT IN ('ops.login','ops.enroll')").all() as any[];
+  const rows = t.db.query("SELECT action, outcome, actor_type FROM security_audit WHERE actor_type = 'operator' AND action LIKE 'ops.%' AND action NOT IN ('ops.login','ops.enroll')").all() as Body[];
   expect(rows.map((r) => `${r.action}:${r.outcome}`)).toEqual(expect.arrayContaining(["ops.diagnostics:success", "ops.read_config:denied", "ops.claim:success"]));
 });
 
@@ -146,7 +146,7 @@ test("support activity is visible to the household without naming anyone", async
   await grant(["diagnostics"]);
   await j("POST", "/api/ops/support/claim", op.cookie);
   await j("POST", "/api/ops/support/end", op.cookie);
-  const acts = ((await j("GET", "/api/admin/activity", admin)).json.events ?? (await j("GET", "/api/admin/activity", admin)).json) as any;
+  const acts = ((await j("GET", "/api/admin/activity", admin)).json.events ?? (await j("GET", "/api/admin/activity", admin)).json) as Body;
   const text = JSON.stringify(acts);
   expect(text).toContain("support");
   expect(text).not.toContain("Sam");
@@ -160,11 +160,11 @@ test("voice access is opt-in, one item at a time, and never offered for doors or
   expect((await j("GET", "/api/admin/voice", member.cookie)).status).toBe(403);
   const list = (await j("GET", "/api/admin/voice", admin)).json;
   expect(list.cloud).toEqual({ loggedIn: true });
-  const ids = list.items.map((i: any) => i.id);
+  const ids = list.items.map((i: Body) => i.id);
   expect(ids).toContain("light.kitchen");
   expect(ids).toContain("scene.movie_time");
   for (const never of ["lock.front", "camera.porch", "cover.blind", "sensor.temp"]) expect(ids).not.toContain(never);
-  expect(list.items.every((i: any) => i.enabled === false)).toBe(true); // nothing exposed by default
+  expect(list.items.every((i: Body) => i.enabled === false)).toBe(true); // nothing exposed by default
   expect((await j("PUT", "/api/admin/voice", admin, { entityId: "lock.front", enabled: true })).status).toBe(404);
   t.db.query("UPDATE sessions SET reauth_at = 0").run();
   expect((await j("PUT", "/api/admin/voice", admin, { entityId: "light.kitchen", enabled: true })).json.error).toBe("reauth_required");
@@ -172,9 +172,9 @@ test("voice access is opt-in, one item at a time, and never offered for doors or
   const r = await j("PUT", "/api/admin/voice", admin, { entityId: "light.kitchen", enabled: true });
   expect(r.status).toBe(200);
   expect(t.ha.wsCalls.filter((c) => c.type === "homeassistant/expose_entity")).toEqual([{ type: "homeassistant/expose_entity", assistants: ["cloud.alexa", "cloud.google_assistant"], entity_ids: ["light.kitchen"], should_expose: true }]);
-  expect((await j("GET", "/api/admin/voice", admin)).json.items.find((i: any) => i.id === "light.kitchen").enabled).toBe(true);
+  expect((await j("GET", "/api/admin/voice", admin)).json.items.find((i: Body) => i.id === "light.kitchen").enabled).toBe(true);
   await j("PUT", "/api/admin/voice", admin, { entityId: "light.kitchen", enabled: false });
-  expect((await j("GET", "/api/admin/voice", admin)).json.items.find((i: any) => i.id === "light.kitchen").enabled).toBe(false);
+  expect((await j("GET", "/api/admin/voice", admin)).json.items.find((i: Body) => i.id === "light.kitchen").enabled).toBe(false);
 });
 
 test("if Home Assistant doesn't accept a voice change, nothing is recorded", async () => {

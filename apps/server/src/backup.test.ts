@@ -1,20 +1,21 @@
 import { expect, test } from "bun:test";
+import { scalar } from "./sql";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { KEEP } from "./backup";
 import { createHealth } from "./health";
-import { setup } from "./testkit";
+import { setup, type Body } from "./testkit";
 
 async function home() {
   const t = setup();
   const admin = await t.bootstrapAdmin("a1");
   await t.reauth(admin.cookie!, "a1");
   const member = await t.addUser(admin.cookie!, "member", "m1");
-  const j = (m: string, p: string, cookie: string, body?: any) => t.call(m, p, { cookie, body });
+  const j = (m: string, p: string, cookie: string, body?: unknown) => t.call(m, p, { cookie, body });
   const key = async () => (await j("POST", "/api/admin/backups/key", admin.cookie!)).json as { identity: string; recipient: string };
   return { t, admin: admin.cookie!, member, j, key };
 }
-const dirs = (t: any) => ({ local: join(t.root, "local"), usb: join(t.root, "usb") });
+const dirs = (t: Body) => ({ local: join(t.root, "local"), usb: join(t.root, "usb") });
 
 test("backups need a key first, and only an admin can set one up", async () => {
   const { t, admin, member, j } = await home();
@@ -82,7 +83,7 @@ test("a changed or missing copy is noticed, and the intact one is still used", a
   const { id, name } = (await j("POST", "/api/admin/backups", admin)).json.backup;
   writeFileSync(join(dirs(t).usb, name), "bit rot");
   let b = (await j("GET", "/api/admin/backups", admin)).json.backups[0];
-  expect(b.copies.map((c: any) => c.state)).toEqual(["ok", "changed"]);
+  expect(b.copies.map((c: Body) => c.state)).toEqual(["ok", "changed"]);
   expect(b.offDevice).toBe(false); // the only good copy is on the device itself
   expect((await j("POST", `/api/admin/backups/${id}/restore-test`, admin, { identity: k.identity })).json.ok).toBe(true);
   const dl = await t.app.handle(new Request(`http://localhost/api/admin/backups/${id}/download`, { headers: { cookie: admin, "x-requested-with": "alice" } }));
@@ -93,7 +94,7 @@ test("a changed or missing copy is noticed, and the intact one is still used", a
   expect(r.json.ok).toBe(false);
   expect(r.json.detail).toContain("No intact copy");
   b = (await j("GET", "/api/admin/backups", admin)).json.backups[0];
-  expect(b.copies.map((c: any) => c.state)).toEqual(["missing", "missing"]);
+  expect(b.copies.map((c: Body) => c.state)).toEqual(["missing", "missing"]);
   expect((await j("GET", `/api/admin/backups/${id}/download`, admin)).status).toBe(404);
 });
 
@@ -104,7 +105,7 @@ test("downloads need a fresh confirmation and old backups are pruned", async () 
   expect((await j("GET", `/api/admin/backups/${first.id}/download`, member.cookie)).status).toBe(403);
   t.db.query("UPDATE sessions SET reauth_at = 0").run();
   expect((await j("GET", `/api/admin/backups/${first.id}/download`, admin)).json.error).toBe("reauth_required");
-  for (let i = 0; i < KEEP + 3; i++) { t.clock.t += 60_000; await t.backups.create((t.db.query("SELECT id FROM households").get() as any).id, "auto"); }
+  for (let i = 0; i < KEEP + 3; i++) { t.clock.t += 60_000; await t.backups.create(scalar(t.db, "SELECT id FROM households", ""), "auto"); }
   expect(readdirSync(dirs(t).local).filter((f) => f.endsWith(".age")).length).toBe(KEEP);
   expect(existsSync(join(dirs(t).local, first.name))).toBe(false);
 });
@@ -112,7 +113,7 @@ test("downloads need a fresh confirmation and old backups are pruned", async () 
 test("the health page says what is wrong and what to do", async () => {
   const { t, admin, member, j, key } = await home();
   const h = () => j("GET", "/api/admin/health", admin).then((r) => r.json);
-  const by = (r: any, id: string) => r.checks.find((c: any) => c.id === id);
+  const by = (r: Body, id: string) => r.checks.find((c: Body) => c.id === id);
   expect((await j("GET", "/api/admin/health", member.cookie)).status).toBe(403);
   let r = await h();
   expect(by(r, "hub").status).toBe("ok");

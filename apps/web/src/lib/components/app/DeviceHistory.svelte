@@ -4,17 +4,19 @@
 
 	let { id }: { id: string } = $props();
 	type P = { t: number; state: string };
-	let data = $state<{ kind: 'state' | 'numeric'; points: P[]; now: number } | null>(null), failed = $state(false);
-	onMount(async () => { const r = await api('GET', `/api/devices/${encodeURIComponent(id)}/history`); if (r.ok) data = r.data; else failed = true; });
+	type History = { kind: 'state' | 'numeric'; points: P[]; now: number };
+	let data = $state<History | null>(null), failed = $state(false);
+	onMount(async () => { const r = await api<History>('GET', `/api/devices/${encodeURIComponent(id)}/history`); if (r.ok) data = r.data; else failed = true; });
 
 	const DAY = 86400_000;
 	const COLOR: Record<string, string> = { none: 'transparent', on: 'var(--on)', off: 'var(--border)', locked: 'var(--ok)', unlocked: 'var(--signal)', unavailable: 'var(--input)', playing: 'var(--primary)', heat: 'var(--on)', cool: 'var(--primary)' };
 	const segs = $derived.by(() => {
 		if (!data || data.kind !== 'state' || !data.points.length) return [];
-		const start = data.now - DAY, pts = data.points;
-		const run = pts.map((p, i) => { const a = Math.max(p.t, start), b = i + 1 < pts.length ? pts[i + 1].t : data!.now; return { state: p.state, a, b }; }).filter((s) => s.b > start);
+		const now = data.now, start = now - DAY, pts = data.points;
+		const run = pts.map((p, i) => ({ state: p.state, a: Math.max(p.t, start), b: pts[i + 1]?.t ?? now })).filter((s) => s.b > start);
 		// Time before the first record is unknown, not "on": leave it blank.
-		return run.length && run[0].a > start ? [{ state: 'none', a: start, b: run[0].a }, ...run] : run;
+		const first = run[0];
+		return first && first.a > start ? [{ state: 'none', a: start, b: first.a }, ...run] : run;
 	});
 	const total = (state: string) => segs.filter((s) => s.state === state).reduce((n, s) => n + (s.b - s.a), 0);
 	const hrs = (ms: number) => (ms >= 3600_000 ? `${(ms / 3600_000).toFixed(ms >= 36e5 * 10 ? 0 : 1)} h` : `${Math.max(1, Math.round(ms / 60_000))} min`);

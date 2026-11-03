@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import { activity, audit } from "./audit";
 import { readCookie, clientIp } from "./auth";
 import { authorize } from "./guard";
-import { say } from "./messages";
 import { RateLimiter } from "./ratelimit";
 import { newToken, sha256 } from "./session";
 import type { WebAuthnService } from "./webauthn";
@@ -12,14 +11,24 @@ import type { HaApi } from "./ha";
 import type { HealthSnapshot } from "./health";
 import type { RoutineService } from "./routines";
 import type { AutomationService } from "./automations";
+import { asObject, denyWith as deny, oneOf, type StatusSetter } from "./http";
+import { all, one } from "./sql";
 
 export const SCOPES = ["diagnostics", "read_config"] as const;
 export const OPS = { idleMs: 30 * 60_000, absoluteMs: 8 * 3600_000, enrollMs: 3600_000 };
 const COOKIE = (secure: boolean) => (secure ? "__Host-ops" : "ops");
 
-export function activeSupport(db: Database, householdId: string, now = Date.now()) {
-  return db.query("SELECT s.*, o.name operator_name FROM support_sessions s LEFT JOIN operators o ON o.id = s.operator_id WHERE s.household_id = ? AND s.ended_at IS NULL AND s.expires_at > ? ORDER BY s.created_at DESC LIMIT 1").get(householdId, now) as any | null;
+export type SupportSession = {
+  id: string; household_id: string; granted_by: string; operator_id: string | null; scopes: string;
+  created_at: number; claimed_at: number | null; expires_at: number; ended_at: number | null; operator_name: string | null;
+};
+
+export function activeSupport(db: Database, householdId: string, now = Date.now()): SupportSession | null {
+  return one<SupportSession>(db, "SELECT s.*, o.name operator_name FROM support_sessions s LEFT JOIN operators o ON o.id = s.operator_id WHERE s.household_id = ? AND s.ended_at IS NULL AND s.expires_at > ? ORDER BY s.created_at DESC LIMIT 1", householdId, now);
 }
+
+type EnrollmentRow = { token_hash: string; operator_id: string; expires_at: number; used_at: number | null };
+type OperatorPasskeyRow = { credential_id: string; operator_id: string; public_key: string; counter: number; transports: string | null; status: string };
 
 /** Physical-access CLI helper: create an operator and a one-time enrollment code. */
 export function createOperator(db: Database, name: string) {
@@ -32,26 +41,26 @@ export function createOperator(db: Database, name: string) {
 
 /** Household side: grant, see, and end a support session. Visible to everyone in the home while it lasts. */
 export function supportRoutes(db: Database, secure: boolean) {
-  const deny = (set: any, status: number, error: string) => { set.status = status; return { error, message: say(error) }; };
-  const shape = (s: any) => ({ id: s.id, scopes: JSON.parse(s.scopes), expiresAt: s.expires_at, connected: !!s.operator_id, operatorName: s.operator_name ?? null });
+  const shape = (s: SupportSession) => ({ id: s.id, scopes: JSON.parse(s.scopes) as string[], expiresAt: s.expires_at, connected: !!s.operator_id, operatorName: s.operator_name ?? null });
   return new Elysia({ name: "support" })
     .get("/api/support", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const s = activeSupport(db, g.user.householdId);
       return { active: s ? shape(s) : null, canManage: g.user.permissions.includes("admin.access") };
     })
-    .post("/api/admin/support", ({ request, body, set }: any) => {
+    .post("/api/admin/support", ({ request, body, set }) => {
       const g = authorize(db, request, secure, ["admin.access"], true); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      const scopes = body?.scopes, hours = body?.hours ?? 4;
-      if (!Array.isArray(scopes) || !scopes.length || !scopes.every((x: unknown) => (SCOPES as readonly string[]).includes(x as string)) || !Number.isInteger(hours) || hours < 1 || hours > 72) return deny(set, 400, "invalid_input");
+      const input = asObject(body), scopes = input.scopes, hours = input.hours ?? 4;
+      if (!Array.isArray(scopes) || !scopes.length || !scopes.every((x): x is (typeof SCOPES)[number] => oneOf(SCOPES, x)) || typeof hours !== "number" || !Number.isInteger(hours) || hours < 1 || hours > 72) return deny(set, 400, "invalid_input");
       if (activeSupport(db, g.user.householdId)) return deny(set, 409, "invalid_input");
       const id = randomUUID(), t = Date.now();
       db.query("INSERT INTO support_sessions (id, household_id, granted_by, scopes, created_at, expires_at) VALUES (?,?,?,?,?,?)").run(id, g.user.householdId, g.user.id, JSON.stringify([...new Set(scopes)]), t, t + hours * 3600_000);
       audit(db, { householdId: g.user.householdId, actorType: "user", actorId: g.user.id, action: "support.grant", target: id, outcome: "success", reason: `${scopes.join(",")} ${hours}h` });
       activity(db, g.user.householdId, "support", "A support session was allowed");
-      return { ok: true, active: shape(activeSupport(db, g.user.householdId)) };
+      const active = activeSupport(db, g.user.householdId);
+      return { ok: true, active: active ? shape(active) : null };
     })
-    .delete("/api/admin/support/:id", ({ request, params, set }: any) => {
+    .delete("/api/admin/support/:id", ({ request, params, set }) => {
       const g = authorize(db, request, secure, ["admin.access"]); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const r = db.query("UPDATE support_sessions SET ended_at = ? WHERE id = ? AND household_id = ? AND ended_at IS NULL").run(Date.now(), params.id, g.user.householdId);
       if (!r.changes) return deny(set, 404, "not_found");
@@ -70,48 +79,54 @@ export function opsRoutes(d: { db: Database; webauthn: WebAuthnService; secure: 
   const stash = (p: Omit<Pending, "expires">) => { const id = randomUUID(); pending.set(id, { ...p, expires: Date.now() + 5 * 60_000 }); return id; };
   const take = (id: unknown, kind: Pending["kind"]) => { const p = typeof id === "string" ? pending.get(id) : undefined; if (typeof id === "string") pending.delete(id); return p && p.kind === kind && p.expires > Date.now() ? p : null; };
   const setCookie = (t: string, age: number) => `${cookie}=${t}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${d.secure ? "; Secure" : ""}`;
-  const deny = (set: any, status: number, error: string) => { set.status = status; return { error, message: say(error) }; };
 
   function operatorFrom(req: Request) {
     const t = readCookie(req, cookie); if (!t) return null;
-    const r: any = db.query("SELECT s.created_at, s.last_seen, o.id, o.name, o.status FROM operator_sessions s JOIN operators o ON o.id = s.operator_id WHERE s.token_hash = ?").get(sha256(t));
+    const r = one<{ created_at: number; last_seen: number; id: string; name: string; status: string }>(db, "SELECT s.created_at, s.last_seen, o.id, o.name, o.status FROM operator_sessions s JOIN operators o ON o.id = s.operator_id WHERE s.token_hash = ?", sha256(t));
     const now = Date.now();
     if (!r || r.status !== "active" || now - r.created_at > OPS.absoluteMs || now - r.last_seen > OPS.idleMs) { if (r) db.query("DELETE FROM operator_sessions WHERE token_hash = ?").run(sha256(t)); return null; }
     db.query("UPDATE operator_sessions SET last_seen = ? WHERE token_hash = ?").run(now, sha256(t));
-    return { id: r.id as string, name: r.name as string };
+    return { id: r.id, name: r.name };
   }
   const startSession = (opId: string) => { const t = newToken(); db.query("INSERT INTO operator_sessions (token_hash, operator_id, created_at, last_seen) VALUES (?,?,?,?)").run(sha256(t), opId, Date.now(), Date.now()); return t; };
-  const household = () => (db.query("SELECT id FROM households LIMIT 1").get() as any)?.id as string | undefined;
-  const log = (op: { id: string }, action: string, outcome: "success" | "failure" | "denied" = "success", target?: string) => audit(db, { householdId: household(), actorType: "operator", actorId: op.id, action, target, outcome });
+  const household = () => one<{ id: string }>(db, "SELECT id FROM households LIMIT 1")?.id;
+  const log = (op: { id: string }, action: string, outcome: "success" | "failure" | "denied" = "success", target?: string) => audit(db, { householdId: household() ?? null, actorType: "operator", actorId: op.id, action, target: target ?? null, outcome });
   /** The only door to a home's data: an active grant, claimed by this operator, covering this scope. */
-  function window(op: { id: string }, scope: string, set: any) {
+  function window(op: { id: string }, scope: string, set: StatusSetter) {
     const h = household(), s = h ? activeSupport(db, h) : null;
     if (!s || s.operator_id !== op.id || !(JSON.parse(s.scopes) as string[]).includes(scope)) { log(op, `ops.${scope}`, "denied"); return deny(set, 403, "forbidden"); }
     return s;
   }
 
   return new Elysia({ name: "ops" })
-    .onBeforeHandle(({ request, set }) => { if (new URL(request.url).pathname.startsWith("/api/ops/auth/") && !ipLimit.take(clientIp(request))) { set.status = 429; return { error: "rate_limited" }; } })
-    .post("/api/ops/auth/enroll/options", async ({ body, set }: any) => {
-      const t: any = typeof body?.token === "string" ? db.query("SELECT * FROM operator_enrollment WHERE token_hash = ?").get(sha256(body.token)) : null;
-      if (!t || t.used_at || t.expires_at < Date.now()) { audit(db, { actorType: "anonymous", action: "ops.enroll.options", outcome: "failure" }); return deny(set, 400, "invalid_or_expired_code"); }
-      const o: any = db.query("SELECT id, name FROM operators WHERE id = ?").get(t.operator_id);
-      const { options, challenge } = await d.webauthn.regOptions({ id: o.id, name: o.name }, [], { hardwareKey: true });
-      return { challengeId: stash({ challenge, kind: "enroll", token: body.token, operatorId: o.id }), options };
+    .onBeforeHandle(({ request, set }) => {
+      if (new URL(request.url).pathname.startsWith("/api/ops/auth/") && !ipLimit.take(clientIp(request))) { set.status = 429; return { error: "rate_limited" }; }
+      return undefined;
     })
-    .post("/api/ops/auth/enroll/verify", async ({ body, set }: any) => {
-      const p = take(body?.challengeId, "enroll");
-      const t: any = p?.token ? db.query("SELECT * FROM operator_enrollment WHERE token_hash = ?").get(sha256(p.token)) : null;
-      if (!p || !t || t.used_at || t.expires_at < Date.now()) return deny(set, 400, "invalid_or_expired_code");
-      const cred = await d.webauthn.regVerify(body?.response, p.challenge);
+    .post("/api/ops/auth/enroll/options", async ({ body, set }) => {
+      const token = asObject(body).token;
+      const t = typeof token === "string" ? one<EnrollmentRow>(db, "SELECT * FROM operator_enrollment WHERE token_hash = ?", sha256(token)) : null;
+      if (typeof token !== "string" || !t || t.used_at || t.expires_at < Date.now()) { audit(db, { actorType: "anonymous", action: "ops.enroll.options", outcome: "failure" }); return deny(set, 400, "invalid_or_expired_code"); }
+      const o = one<{ id: string; name: string }>(db, "SELECT id, name FROM operators WHERE id = ?", t.operator_id);
+      if (!o) return deny(set, 400, "invalid_or_expired_code");
+      const { options, challenge } = await d.webauthn.regOptions({ id: o.id, name: o.name }, [], { hardwareKey: true });
+      return { challengeId: stash({ challenge, kind: "enroll", token, operatorId: o.id }), options };
+    })
+    .post("/api/ops/auth/enroll/verify", async ({ body, set }) => {
+      const input = asObject(body);
+      const p = take(input.challengeId, "enroll");
+      const t = p?.token ? one<EnrollmentRow>(db, "SELECT * FROM operator_enrollment WHERE token_hash = ?", sha256(p.token)) : null;
+      if (!p?.operatorId || !t || t.used_at || t.expires_at < Date.now()) return deny(set, 400, "invalid_or_expired_code");
+      const operatorId = p.operatorId;
+      const cred = await d.webauthn.regVerify(input.response, p.challenge);
       if (!cred) { audit(db, { actorType: "anonymous", action: "ops.enroll.verify", outcome: "failure" }); return deny(set, 400, "passkey_rejected"); }
       db.transaction(() => {
         if (db.query("UPDATE operator_enrollment SET used_at = ? WHERE token_hash = ? AND used_at IS NULL").run(Date.now(), t.token_hash).changes !== 1) throw new Error("used");
-        db.query("INSERT INTO operator_passkeys (credential_id, operator_id, public_key, counter, transports, created_at) VALUES (?,?,?,?,?,?)").run(cred.credentialId, p.operatorId!, cred.publicKey, cred.counter, JSON.stringify(cred.transports), Date.now());
-        db.query("UPDATE operators SET status = 'active' WHERE id = ? AND status != 'revoked'").run(p.operatorId!);
+        db.query("INSERT INTO operator_passkeys (credential_id, operator_id, public_key, counter, transports, created_at) VALUES (?,?,?,?,?,?)").run(cred.credentialId, operatorId, cred.publicKey, cred.counter, JSON.stringify(cred.transports), Date.now());
+        db.query("UPDATE operators SET status = 'active' WHERE id = ? AND status != 'revoked'").run(operatorId);
       })();
-      audit(db, { actorType: "operator", actorId: p.operatorId, action: "ops.enroll", outcome: "success" });
-      set.headers["set-cookie"] = setCookie(startSession(p.operatorId!), OPS.absoluteMs / 1000);
+      audit(db, { actorType: "operator", actorId: operatorId, action: "ops.enroll", outcome: "success" });
+      set.headers["set-cookie"] = setCookie(startSession(operatorId), OPS.absoluteMs / 1000);
       return { ok: true };
     })
     .post("/api/ops/auth/login/options", async ({ request, set }) => {
@@ -119,14 +134,15 @@ export function opsRoutes(d: { db: Database; webauthn: WebAuthnService; secure: 
       const { options, challenge } = await d.webauthn.authOptions();
       return { challengeId: stash({ challenge, kind: "login" }), options };
     })
-    .post("/api/ops/auth/login/verify", async ({ body, request, set }: any) => {
+    .post("/api/ops/auth/login/verify", async ({ body, request, set }) => {
       const ip = clientIp(request);
       if (failures.count(ip) >= 5) return deny(set, 429, "rate_limited");
-      const p = take(body?.challengeId, "login");
-      const row: any = p && typeof body?.response?.id === "string" ? db.query("SELECT k.*, o.status FROM operator_passkeys k JOIN operators o ON o.id = k.operator_id WHERE k.credential_id = ?").get(body.response.id) : null;
-      const fail = () => { failures.record(ip); audit(db, { actorType: "anonymous", actorId: row?.operator_id, action: "ops.login", outcome: "failure" }); return deny(set, 401, "login_failed"); };
+      const input = asObject(body), credId = asObject(input.response).id;
+      const p = take(input.challengeId, "login");
+      const row = p && typeof credId === "string" ? one<OperatorPasskeyRow>(db, "SELECT k.*, o.status FROM operator_passkeys k JOIN operators o ON o.id = k.operator_id WHERE k.credential_id = ?", credId) : null;
+      const fail = () => { failures.record(ip); audit(db, { actorType: "anonymous", actorId: row?.operator_id ?? null, action: "ops.login", outcome: "failure" }); return deny(set, 401, "login_failed"); };
       if (!p || !row || row.status !== "active") return fail();
-      const n = await d.webauthn.authVerify(body.response, p.challenge, { credentialId: row.credential_id, publicKey: row.public_key, counter: row.counter, transports: JSON.parse(row.transports ?? "[]") });
+      const n = await d.webauthn.authVerify(input.response, p.challenge, { credentialId: row.credential_id, publicKey: row.public_key, counter: row.counter, transports: JSON.parse(row.transports ?? "[]") as string[] });
       if (n === null) return fail();
       db.query("UPDATE operator_passkeys SET counter = ? WHERE credential_id = ?").run(n, row.credential_id);
       audit(db, { actorType: "operator", actorId: row.operator_id, action: "ops.login", outcome: "success" });
@@ -138,13 +154,13 @@ export function opsRoutes(d: { db: Database; webauthn: WebAuthnService; secure: 
     .get("/api/ops/support", ({ request, set }) => {
       const op = operatorFrom(request); if (!op) return deny(set, 401, "unauthenticated");
       const h = household(), s = h ? activeSupport(db, h) : null;
-      return { active: s ? { id: s.id, scopes: JSON.parse(s.scopes), expiresAt: s.expires_at, claimedByYou: s.operator_id === op.id, claimedByOther: !!s.operator_id && s.operator_id !== op.id } : null };
+      return { active: s ? { id: s.id, scopes: JSON.parse(s.scopes) as string[], expiresAt: s.expires_at, claimedByYou: s.operator_id === op.id, claimedByOther: !!s.operator_id && s.operator_id !== op.id } : null };
     })
     .post("/api/ops/support/claim", ({ request, set }) => {
       const op = operatorFrom(request); if (!op) return deny(set, 401, "unauthenticated");
       const h = household(), s = h ? activeSupport(db, h) : null;
       if (!s || (s.operator_id && s.operator_id !== op.id)) { log(op, "ops.claim", "denied"); return deny(set, 404, "not_found"); }
-      if (!s.operator_id) { db.query("UPDATE support_sessions SET operator_id = ?, claimed_at = ? WHERE id = ?").run(op.id, Date.now(), s.id); activity(db, h!, "support", "Support connected"); }
+      if (!s.operator_id) { db.query("UPDATE support_sessions SET operator_id = ?, claimed_at = ? WHERE id = ?").run(op.id, Date.now(), s.id); if (h) activity(db, h, "support", "Support connected"); }
       log(op, "ops.claim", "success", s.id);
       return { ok: true };
     })
@@ -159,10 +175,10 @@ export function opsRoutes(d: { db: Database; webauthn: WebAuthnService; secure: 
       const op = operatorFrom(request); if (!op) return deny(set, 401, "unauthenticated");
       const w = window(op, "read_config", set); if (!("id" in w)) return w;
       log(op, "ops.read_config", "success", w.id);
-      const h = w.household_id as string;
+      const h = w.household_id;
       return {
-        rooms: (db.query("SELECT id, name FROM rooms WHERE household_id = ?").all(h) as any[]),
-        devices: (db.query("SELECT entity_id id, name, room_id roomId, hidden FROM device_meta WHERE household_id = ?").all(h) as any[]).map((r) => ({ ...r, hidden: !!r.hidden })),
+        rooms: all<{ id: string; name: string }>(db, "SELECT id, name FROM rooms WHERE household_id = ?", h),
+        devices: all<{ id: string; name: string | null; roomId: string | null; hidden: number }>(db, "SELECT entity_id id, name, room_id roomId, hidden FROM device_meta WHERE household_id = ?", h).map((r) => ({ ...r, hidden: !!r.hidden })),
         routines: d.routines.rows(h).map((r) => { const v = d.routines.view(r); return { name: v.name, summary: v.summary, needsAttention: v.needsAttention }; }),
         automations: d.automations.rows(h).map((r) => { const v = d.automations.view(r); return { name: v.name, summary: v.summary, enabled: v.enabled, needsAttention: v.needsAttention }; }),
       };
@@ -172,7 +188,7 @@ export function opsRoutes(d: { db: Database; webauthn: WebAuthnService; secure: 
       const h = household(), s = h ? activeSupport(db, h) : null;
       if (!s || s.operator_id !== op.id) return deny(set, 404, "not_found");
       db.query("UPDATE support_sessions SET ended_at = ? WHERE id = ?").run(Date.now(), s.id);
-      activity(db, h!, "support", "Support disconnected");
+      if (h) activity(db, h, "support", "Support disconnected");
       log(op, "ops.end", "success", s.id);
       return { ok: true };
     });

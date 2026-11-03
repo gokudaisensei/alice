@@ -1,14 +1,14 @@
-<script lang="ts">
+<script lang="ts" generics="T extends string">
 	import type { Component } from 'svelte';
 	import { haptics } from '#lib/haptics.js';
 
-	type Opt = { id: string; label: string; badge?: number; icon?: Component<{ class?: string }> };
+	type Opt = { id: T; label: string; badge?: number; icon?: Component<{ class?: string }> };
 	/** A segmented control whose highlight glides to the chosen option. `stack` puts the icon above the label. */
-	let { options, value = $bindable(), onselect, label = 'View', stack = false, disabled = false }: { options: Opt[]; value: string | null | undefined; onselect?: (id: string) => void; label?: string; stack?: boolean; disabled?: boolean } = $props();
+	let { options, value = $bindable(), onselect, label = 'View', stack = false, disabled = false }: { options: Opt[]; value: T | null | undefined; onselect?: (id: T) => void; label?: string; stack?: boolean; disabled?: boolean } = $props();
 	const n = $derived(options.length);
 	const idx = $derived(Math.max(0, options.findIndex((o) => o.id === value)));
 	const has = $derived(options.some((o) => o.id === value));
-	function pick(id: string) { if (id === value) return; haptics.tap(); if (onselect) onselect(id); else value = id; }
+	function pick(id: T) { if (id === value) return; haptics.tap(); if (onselect) onselect(id); else value = id; }
 </script>
 
 <div class="relative grid gap-0 rounded-2xl bg-secondary p-1" style="grid-template-columns: repeat({n}, minmax(0, 1fr))" role="tablist" aria-label={label}>

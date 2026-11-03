@@ -2,9 +2,10 @@ import { Elysia } from "elysia";
 import type { Database } from "bun:sqlite";
 import { activity } from "./audit";
 import { authorize } from "./guard";
-import { say } from "./messages";
 import type { HaApi } from "./ha";
 import type { DeviceService } from "./devices";
+import { all } from "./sql";
+import { asObject, denyWith as deny, oneOf } from "./http";
 
 export const MODES = ["home", "away", "night", "vacation"] as const;
 export type Mode = (typeof MODES)[number];
@@ -29,21 +30,19 @@ export function modeSuggestion(ha: HaApi, current: Mode | null): { mode: Mode; r
 
 export const currentMode = (ha: HaApi): Mode | null => {
   const s = ha.entities.get(MODE_ENTITY)?.state;
-  return (MODES as readonly string[]).includes(s ?? "") ? (s as Mode) : null;
+  return oneOf(MODES, s) ? s : null;
 };
 
 export function modeRoutes(db: Database, ha: HaApi, secure: boolean, svc: DeviceService) {
-  const deny = (set: any, status: number, error: string) => { set.status = status; return { error, message: say(error) }; };
-
   return new Elysia({ name: "modes" })
     .get("/api/mode", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const ok = svc.accessor(g.user), current = currentMode(ha);
       // What each mode is actually connected to, so the effect of switching is never a mystery.
       const linked: Record<string, string[]> = Object.fromEntries(MODES.map((m) => [m, []]));
-      for (const r of db.query("SELECT id, name, steps FROM routines WHERE household_id = ?").all(g.user.householdId) as any[]) {
+      for (const r of all<{ id: string; name: string; steps: string }>(db, "SELECT id, name, steps FROM routines WHERE household_id = ?", g.user.householdId)) {
         if (!ok(`routine:${r.id}`)) continue;
-        for (const s of JSON.parse(r.steps)) if (s.type === "mode") linked[s.mode].push(r.name);
+        for (const s of JSON.parse(r.steps) as { type: string; mode: Mode }[]) if (s.type === "mode") linked[s.mode]?.push(r.name);
       }
       return {
         available: ha.entities.has(MODE_ENTITY) && !ha.isStale(), current, modes: MODES,
@@ -52,10 +51,10 @@ export function modeRoutes(db: Database, ha: HaApi, secure: boolean, svc: Device
         note: "Changing the mode doesn't switch any devices by itself. Only routines and automations you've set up do that.",
       };
     })
-    .post("/api/mode", async ({ request, body, set }: any) => {
+    .post("/api/mode", async ({ request, body, set }) => {
       const g = authorize(db, request, secure, ["modes.set"]); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      const mode = body?.mode;
-      if (!(MODES as readonly string[]).includes(mode)) return deny(set, 400, "invalid_value");
+      const mode = asObject(body).mode;
+      if (!oneOf(MODES, mode)) return deny(set, 400, "invalid_value");
       if (ha.isStale()) return deny(set, 503, "ha_unavailable");
       const before = ha.entities.get(MODE_ENTITY);
       if (!before) return deny(set, 409, "mode_unavailable");

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ensureModeHelper, MODE_ENTITY } from "./modes";
-import { setup } from "./testkit";
+import { setup, type Body } from "./testkit";
 
 async function home() {
   const t = setup();
@@ -10,7 +10,7 @@ async function home() {
   await t.reauth(admin.cookie!, "a1");
   const member = await t.addUser(admin.cookie!, "member", "m1");
   const guest = await t.addUser(admin.cookie!, "guest", "g1");
-  const j = (m: string, p: string, cookie: string, body?: any) => t.call(m, p, { cookie, body });
+  const j = (m: string, p: string, cookie: string, body?: unknown) => t.call(m, p, { cookie, body });
   const grant = (uid: string, ids: string[]) => t.call("PUT", `/api/admin/users/${uid}/devices`, { cookie: admin.cookie, body: { allow: ids } });
   return { t, admin: admin.cookie!, member, guest, j, grant };
 }
@@ -84,7 +84,7 @@ test("presence only ever produces a suggestion", async () => {
 
 test("scenes are listed per person and activated honestly", async () => {
   const { t, member, guest, grant, j } = await home();
-  expect((await j("GET", "/api/scenes", member.cookie)).json.scenes.map((s: any) => s.id)).toEqual(["scene.movie_time"]);
+  expect((await j("GET", "/api/scenes", member.cookie)).json.scenes.map((s: Body) => s.id)).toEqual(["scene.movie_time"]);
   expect((await j("GET", "/api/scenes", guest.cookie)).json.scenes).toEqual([]);
   expect((await j("POST", "/api/scenes/scene.movie_time/activate", guest.cookie)).status).toBe(404);
   await grant(guest.userId, ["scene.movie_time"]);
@@ -103,10 +103,10 @@ test("scenes can be created from current device state, edited and deleted (manag
   const cfg = [...t.ha.configs.entries()].find(([k]) => k.startsWith("scene/alice_"))![1];
   expect(cfg).toEqual({ name: "Cozy", entities: { "light.kitchen": { state: "on", brightness: 128 }, "switch.plug": { state: "on" }, "fan.bedroom": { state: "off" } } });
   const list = (await j("GET", "/api/scenes", member.cookie)).json.scenes;
-  expect(list.find((s: any) => s.id === c.json.id)).toMatchObject({ name: "Cozy", managed: true });
-  expect(list.find((s: any) => s.id === "scene.movie_time").managed).toBe(false);
+  expect(list.find((s: Body) => s.id === c.json.id)).toMatchObject({ name: "Cozy", managed: true });
+  expect(list.find((s: Body) => s.id === "scene.movie_time").managed).toBe(false);
   expect((await j("PUT", `/api/scenes/${c.json.id}`, member.cookie, { name: "Cozy evening", entityIds: ["light.kitchen"] })).status).toBe(200);
-  expect((await j("GET", "/api/scenes", member.cookie)).json.scenes.find((s: any) => s.id === c.json.id).name).toBe("Cozy evening");
+  expect((await j("GET", "/api/scenes", member.cookie)).json.scenes.find((s: Body) => s.id === c.json.id).name).toBe("Cozy evening");
   expect((await j("PUT", "/api/scenes/scene.movie_time", member.cookie, { name: "x", entityIds: ["light.kitchen"] })).status).toBe(404); // not ours to edit
   expect((await j("DELETE", "/api/scenes/scene.movie_time", member.cookie)).status).toBe(404);
   expect((await j("DELETE", `/api/scenes/${c.json.id}`, member.cookie)).status).toBe(200);
@@ -138,8 +138,8 @@ test("suggested routines are clearly separate and nothing is configured or run u
   const { t, member, guest, j } = await home();
   const r = (await j("GET", "/api/routines", member.cookie)).json;
   expect(r.routines).toEqual([]);
-  expect(r.suggested.map((s: any) => s.key)).toEqual(["good_morning", "good_night", "leaving_home", "arriving_home"]);
-  expect(r.suggested.every((s: any) => s.configured === false)).toBe(true);
+  expect(r.suggested.map((s: Body) => s.key)).toEqual(["good_morning", "good_night", "leaving_home", "arriving_home"]);
+  expect(r.suggested.every((s: Body) => s.configured === false)).toBe(true);
   expect((await j("GET", "/api/routines", guest.cookie)).json.suggested).toEqual([]); // only people who can set them up
   expect(t.ha.calls.length).toBe(0);
   expect(t.ha.configs.size).toBe(0);
@@ -160,7 +160,7 @@ test("a routine is built into a Home Assistant script, summarised in plain words
   const view = (await j("GET", "/api/routines", member.cookie)).json;
   expect(view.routines[0].summary).toBe("Turn off kitchen, then Wait 5 seconds, then Turn on desk, then Set the household mode to Night");
   expect(view.routines[0].needsAttention).toBe(false);
-  expect(view.suggested.map((s: any) => s.key)).not.toContain("good_night");
+  expect(view.suggested.map((s: Body) => s.key)).not.toContain("good_night");
   expect(t.ha.calls.some((x) => x.service === "turn_on" && x.domain === "script")).toBe(false); // configured, not run
   expect(t.ha.entities.get("light.kitchen")!.state).toBe("on");
   expect(key).toContain("alice_routine_");
@@ -183,8 +183,8 @@ test("running a routine starts the HA script and only claims 'started'", async (
 
 test("routine steps are validated against what the author may use and what devices support", async () => {
   const { t, member, guest, admin, j } = await home();
-  const make = (steps: any[], cookie = member.cookie) => j("POST", "/api/routines", cookie, { name: "R", steps });
-  const bad = async (steps: any[], status: number, cookie?: string) => { const r = await make(steps, cookie); expect(r.status).toBe(status); return r; };
+  const make = (steps: unknown[], cookie = member.cookie) => j("POST", "/api/routines", cookie, { name: "R", steps });
+  const bad = async (steps: unknown[], status: number, cookie?: string) => { const r = await make(steps, cookie); expect(r.status).toBe(status); return r; };
   const r = await bad([{ type: "delay", seconds: 1 }, { type: "device", entityId: "light.hall", action: "set_brightness", value: 50 }], 400);
   expect(r.json.step).toBe(1); // says which step is wrong
   await bad([{ type: "device", entityId: "lock.front", action: "unlock" }], 400); // doors are never unlocked by a stored routine
@@ -245,8 +245,8 @@ test("search finds scenes and routines the person may use", async () => {
   const { member, guest, grant, j } = await home();
   const c = await j("POST", "/api/routines", member.cookie, { name: "Movie night", steps: nightSteps });
   const q = async (cookie: string, s: string) => (await j("GET", `/api/search?q=${s}`, cookie)).json;
-  expect((await q(member.cookie, "movie")).scenes.map((x: any) => x.id)).toEqual(["scene.movie_time"]);
-  expect((await q(member.cookie, "movie")).routines.map((x: any) => x.name)).toEqual(["Movie night"]);
+  expect((await q(member.cookie, "movie")).scenes.map((x: Body) => x.id)).toEqual(["scene.movie_time"]);
+  expect((await q(member.cookie, "movie")).routines.map((x: Body) => x.name)).toEqual(["Movie night"]);
   expect((await q(guest.cookie, "movie")).scenes).toEqual([]);
   expect((await q(guest.cookie, "movie")).routines).toEqual([]);
   await grant(guest.userId, [`routine:${c.json.id}`]);
@@ -258,7 +258,7 @@ test("admins can share scenes and routines with individual people; unknown targe
   const c = await j("POST", "/api/routines", member.cookie, { name: "R", steps: nightSteps });
   const a = (await j("GET", "/api/admin/actions", admin)).json;
   expect(a.routines).toEqual([{ id: `routine:${c.json.id}`, name: "R" }]);
-  expect(a.scenes.map((s: any) => s.id)).toContain("scene.movie_time");
+  expect(a.scenes.map((s: Body) => s.id)).toContain("scene.movie_time");
   expect((await j("GET", "/api/admin/actions", member.cookie)).status).toBe(403);
   expect((await t.call("PUT", `/api/admin/users/${guest.userId}/devices`, { cookie: admin, body: { allow: ["routine:nope"] } })).status).toBe(400);
 });

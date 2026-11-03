@@ -1,6 +1,6 @@
 // The house as one flat plan, in metres. x runs left to right, z runs top (back of the house) to bottom (front garden).
 // Both the world model (where people are, what a motion sensor can see) and the 3D viewer read this, so they never disagree.
-import devices from "./devices.json";
+import devices from "./devices.json" with { type: "json" };
 
 export type Rect = { x0: number; x1: number; z0: number; z1: number };
 export type Room = Rect & { name: string; indoor: boolean; color: number; door: { x: number; z: number } };
@@ -17,14 +17,28 @@ export const ROOMS: Room[] = [
 	{ name: "Garage", x0: 12.5, x1: 17, z0: 6.5, z1: 12, indoor: true, color: 0xcfcfd2, door: { x: 14.75, z: 6.5 } },
 	{ name: "Garden", x0: -3, x1: 20, z0: 12, z1: 18, indoor: false, color: 0xbfe0b0, door: { x: 10.25, z: 12 } },
 ];
-export const room = (name: string) => ROOMS.find((r) => r.name === name)!;
+export const room = (name: string): Room => {
+	const found = ROOMS.find((r) => r.name === name);
+	if (!found) throw new Error(`No room called ${name}`);
+	return found;
+};
 export const centre = (r: Rect) => ({ x: (r.x0 + r.x1) / 2, z: (r.z0 + r.z1) / 2 });
 export const HALL_Z = 5.75;
 export const FRONT_DOOR = { x: 0, z: HALL_Z }; // west end of the hallway
 export const OUTSIDE = { x: -3.5, z: HALL_Z }; // "away" residents leave and arrive here
 
-export type Dev = { entity: string; name: string; room: string; kind: string; sim?: Record<string, any> };
-export const DEVICES = devices as Dev[];
+/** How a simulated device behaves, as written in devices.json. */
+export type Sim = {
+	/** The Home Assistant helper this device's reading is written to. */
+	helper?: string; base?: number; jitter?: number; lo?: number | null; hi?: number | null;
+	/** The switch that has to be on for this device to draw power. */
+	gate?: string; flip_mins?: number | null; hold_s?: number; dc?: string; accumulate?: boolean; per_day?: number;
+};
+export type Dev = { entity: string; name: string; room: string; kind: string; sim?: Sim };
+export const DEVICES: readonly Dev[] = devices satisfies readonly Dev[];
+
+/** "light.floor_lamp" is in the "light" domain. */
+export const domainOf = (entity: string) => entity.split(".")[0] ?? "";
 
 export type Placed = Dev & { x: number; y: number; z: number };
 
@@ -38,6 +52,7 @@ const FIXED: Record<string, [number, number, number]> = {
 	"switch.garden_path_lights": [6, 0.2, 14], "switch.front_lawn_sprinkler": [3, 0.2, 14.5], "light.porch_light": [1, 2.2, 11.9],
 };
 const HEIGHT: Record<string, number> = { light: 2.35, fan: 2.4, switch: 0.35, lock: 1.2, bsensor: 1.4, sensor: 1.5, energy: 0.3, meter: 0.3 };
+const heightOf = (kind: string) => HEIGHT[kind] ?? 1.4;
 
 /** Every device in a place: pinned ones where they belong, the rest spaced along the room so they never overlap. */
 export function place(): Placed[] {
@@ -52,16 +67,16 @@ export function place(): Placed[] {
 		const w = r.x1 - r.x0, h = r.z1 - r.z0;
 		if (d.kind === "light" || d.kind === "fan") {
 			const row = Math.floor(i / 3), col = i % 3;
-			out.push({ ...d, x: r.x0 + w * (0.25 + 0.25 * col), y: HEIGHT[d.kind], z: r.z0 + h * (0.3 + 0.25 * row) });
-		} else if (d.kind === "switch") out.push({ ...d, x: r.x0 + 0.35 + i * 0.7, y: HEIGHT.switch, z: r.z1 - 0.35 });
+			out.push({ ...d, x: r.x0 + w * (0.25 + 0.25 * col), y: heightOf(d.kind), z: r.z0 + h * (0.3 + 0.25 * row) });
+		} else if (d.kind === "switch") out.push({ ...d, x: r.x0 + 0.35 + i * 0.7, y: heightOf(d.kind), z: r.z1 - 0.35 });
 		else if (d.kind === "sensor") out.push({ ...d, x: r.x1 - 0.3 - (i % 5) * 0.28, y: 1.5, z: r.z0 + 0.3 + Math.floor(i / 5) * 0.3 });
-		else out.push({ ...d, x: r.x0 + w * 0.5 + i * 0.4, y: HEIGHT[d.kind] ?? 1.4, z: r.z0 + h * 0.5 });
+		else out.push({ ...d, x: r.x0 + w * 0.5 + i * 0.4, y: heightOf(d.kind), z: r.z0 + h * 0.5 });
 	}
 	return out;
 }
 
 /** The walk from anywhere to a room: out to the hallway, along it, in through the door. Rooms off the hallway share its centre line. */
-export function route(from: { x: number; z: number }, fromRoom: string, to: string): { x: number; z: number }[] {
+export function route(fromRoom: string, to: string): { x: number; z: number }[] {
 	if (fromRoom === to) return [];
 	const pts: { x: number; z: number }[] = [];
 	const toHall = (name: string) => {

@@ -1,8 +1,5 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { api } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
-	import { session, forget } from '#lib/session.svelte.js';
 	import { Button } from '#lib/components/ui/button';
 	import Page from '#lib/components/app/Page.svelte';
 	import Segmented from '#lib/components/app/Segmented.svelte';
@@ -12,6 +9,13 @@
 	import { Switch } from '#lib/components/ui/switch';
 	import { ArrowDown, ArrowUp } from '@lucide/svelte';
 	import { haptics, hapticsAvailable, hapticsEnabled, setHaptics } from '#lib/haptics.js';
+	import { ui } from '#lib/ui.svelte.js';
+	import { allowShake, shakeSupported } from '#lib/shake.js';
+	import { LayoutDashboard, Image } from '@lucide/svelte';
+	async function setShake(on: boolean) {
+		if (on && !(await allowShake())) { home.say('error', 'Shake needs motion access. Allow it when your phone asks, or in your browser’s site settings.'); return; }
+		ui.set('shake', on); if (on) haptics.success();
+	}
 	let hapticsOn = $state(hapticsEnabled());
 
 	const p = $derived(home.prefs);
@@ -21,15 +25,21 @@
 	] as const;
 	const sectionList = [['favorites', 'Favorites'], ['rooms', 'Rooms'], ['sensors', 'Sensors at a glance']] as const;
 
-	function move<T>(arr: T[], i: number, d: number) { const a = [...arr], j = i + d; if (j < 0 || j >= a.length) return a; [a[i], a[j]] = [a[j], a[i]]; return a; }
+	/** `arr` with the item at `i` moved `d` places. Out of range leaves it as it was. */
+	function move<T>(arr: T[], i: number, d: number): T[] {
+		const j = i + d;
+		if (i < 0 || i >= arr.length || j < 0 || j >= arr.length) return arr;
+		const a = [...arr];
+		a.splice(j, 0, ...a.splice(i, 1));
+		return a;
+	}
 	const toggleSection = (id: string) => home.savePrefs({ sections: p!.sections.includes(id) ? p!.sections.filter((s) => s !== id) : [...p!.sections, id] });
-	async function logout() { await api('POST', '/api/auth/logout'); forget(); session.me = null; goto('/login'); }
 </script>
 
 <Page title="Appearance and home screen" subtitle="Only you see these choices." back={{ href: '/you', label: 'You' }} width="md">
 	{#if p}
 		<Section title="Appearance">
-			<Segmented label="Appearance" value={p.appearance} options={[{ id: 'system', label: 'Match device' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }]} onselect={(a) => home.savePrefs({ appearance: a as any })} />
+			<Segmented label="Appearance" value={p.appearance} options={[{ id: 'system', label: 'Match device' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }]} onselect={(a) => home.savePrefs({ appearance: a })} />
 		</Section>
 
 		{#if hapticsAvailable()}
@@ -37,6 +47,19 @@
 				<Group><Row title="Haptic feedback" description="A small tap you can feel when you switch, lock or dim something">{#snippet trailing()}<Switch checked={hapticsOn} aria-label="Haptic feedback" onCheckedChange={(v) => { hapticsOn = v; setHaptics(v); if (v) haptics.success(); }} />{/snippet}</Row></Group>
 			</Section>
 		{/if}
+
+		<Section title="Comfort" hint="These stay on this phone.">
+			<Group>
+				<Row title="Reduce motion" description="Fewer animations and slides">{#snippet trailing()}<Switch checked={ui.reduceMotion} aria-label="Reduce motion" onCheckedChange={(v) => ui.set('reduceMotion', v)} />{/snippet}</Row>
+				<Row title="One-handed mode" description="A search button within thumb reach, bottom right">{#snippet trailing()}<Switch checked={ui.oneHand} aria-label="One-handed mode" onCheckedChange={(v) => ui.set('oneHand', v)} />{/snippet}</Row>
+				<Row title="Larger text and buttons" description="Bigger everything, easier to hit">{#snippet trailing()}<Switch checked={ui.large} aria-label="Larger text and buttons" onCheckedChange={(v) => ui.set('large', v)} />{/snippet}</Row>
+				{#if shakeSupported()}<Row title="Shake to undo" description="Shake your phone to take back the last thing you did">{#snippet trailing()}<Switch checked={ui.shake} aria-label="Shake to undo" onCheckedChange={setShake} />{/snippet}</Row>{/if}
+			</Group>
+			<Group>
+				<Row title="Wall panel" description="A full-screen control panel for an old phone or tablet on the wall" href="/panel">{#snippet icon()}<LayoutDashboard class="size-[18px]" />{/snippet}</Row>
+				<Row title="Status picture" description="A shareable picture of how the home looks right now" href="/glance">{#snippet icon()}<Image class="size-[18px]" />{/snippet}</Row>
+			</Group>
+		</Section>
 
 		<Section title="Home screen">
 			<div class="grid gap-3 sm:grid-cols-2" role="group" aria-label="Home screen layout">

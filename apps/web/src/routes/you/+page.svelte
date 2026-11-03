@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { api } from '#lib/api.js';
-	import { session, forget } from '#lib/session.svelte.js';
+	import { session } from '#lib/session.svelte.js';
 	import { manageNav } from '#lib/nav.js';
 	import Page from '#lib/components/app/Page.svelte';
 	import Section from '#lib/components/app/Section.svelte';
@@ -14,7 +13,7 @@
 	const blurb: Record<string, string> = { '/admin/rooms': 'Rooms, device names and groups', '/admin/users': 'Invite people and choose what they can use', '/admin/voice': 'What Alexa and Google may control', '/admin/system': 'Health, backups, updates and support' };
 	const initial = $derived((session.me?.displayName ?? '?').trim().charAt(0).toUpperCase());
 	const role = $derived(session.me?.role === 'admin' ? 'Admin' : session.me?.role === 'member' ? 'Member' : 'Guest');
-	async function logout() { await api('POST', '/api/auth/logout'); forget(); session.me = null; goto('/login'); }
+	async function logout() { await session.signOut(); goto('/login'); }
 </script>
 
 <Page title="You" width="md">

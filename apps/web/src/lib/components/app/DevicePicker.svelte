@@ -27,7 +27,7 @@
 		if (q.trim()) qs.set('q', q.trim());
 		if (notRoom) qs.set('notRoom', notRoom);
 		if (only === 'none') qs.set('room', 'none');
-		const r = await api('GET', `/api/admin/devices?${qs}`);
+		const r = await api<{ devices: Row[]; total: number }>('GET', `/api/admin/devices?${qs}`);
 		loading = false;
 		if (!r.ok) { error = r.data?.message ?? explain(r.data?.error); return; }
 		rows = offset ? [...rows, ...r.data.devices] : r.data.devices; total = r.data.total;

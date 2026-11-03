@@ -8,7 +8,8 @@
     "apps/mock-ha": {
       "name": "@alice/mock-ha",
       "devDependencies": {
-        "@types/bun": "latest",
+        "@types/bun": "^1.4.4",
+        "typescript": "^7.0.2",
       },
     },
     "apps/server": {
@@ -16,11 +17,11 @@
       "dependencies": {
         "@simplewebauthn/server": "^14.0.3",
         "age-encryption": "^0.3.1",
-        "elysia": "latest",
+        "elysia": "^1.4.30",
         "web-push": "^3.6.7",
       },
       "devDependencies": {
-        "@types/bun": "latest",
+        "@types/bun": "^1.4.4",
         "@types/web-push": "^3.6.4",
         "typescript": "^7.0.2",
       },
@@ -31,9 +32,9 @@
         "three": "^0.170.0",
       },
       "devDependencies": {
-        "@types/bun": "latest",
+        "@types/bun": "^1.4.4",
         "@types/three": "^0.170.0",
-        "typescript": "^5",
+        "typescript": "^7.0.2",
       },
     },
     "apps/web": {
@@ -496,8 +497,6 @@
     "web-push": ["web-push@3.6.7", "", { "dependencies": { "asn1.js": "^5.3.0", "http_ece": "1.2.0", "https-proxy-agent": "^7.0.0", "jws": "^4.0.0", "minimist": "^1.2.5" }, "bin": { "web-push": "src/cli.js" } }, "sha512-OpiIUe8cuGjrj3mMBFWY+e4MMIkW3SVT+7vEIjvD9kejGUypv8GPDf84JdPWskK8zMRIJ6xYGm+Kxr8YkPyA0A=="],
 
     "zimmerframe": ["zimmerframe@1.1.5", "", {}, "sha512-msJxIvYDYcoNL+PJsu+7qmpDWsYmAxTY+2TNYXXF0hzBzBk0BMecOqDOG/EckUoKCuKwObfbugIl8QpqHDXeFA=="],
-
-    "@alice/simulator/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "@noble/post-quantum/@noble/curves": ["@noble/curves@2.0.1", "", { "dependencies": { "@noble/hashes": "2.0.1" } }, "sha512-vs1Az2OOTBiP4q0pwjW5aF0xp9n4MxVrmkFBxc6EKZc6ddYx5gaZiAsZoq0uRRXWbi3AT/sBqn05eRPtn1JCPw=="],
 

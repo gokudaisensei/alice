@@ -1,13 +1,15 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ChevronDown } from '@lucide/svelte';
+	import { ChevronDown, Share2 } from '@lucide/svelte';
+	import { drawEnergy, sharePicture } from '#lib/sharePicture.js';
+	import { haptics } from '#lib/haptics.js';
 	import { api } from '#lib/api.js';
 	import Empty from '#lib/components/app/Empty.svelte';
 
 	type Meter = { id: string; name: string; available: boolean; unit: string; now: number | null; kind: 'energy' | 'power' | 'other'; todayKwh?: number | null; days?: { date: string; kwh: number }[]; peak24h?: number | null; low24h?: number | null };
 	let meters = $state<Meter[]>([]), note = $state(''), since = $state<number | null>(null), loaded = $state(false);
 	let picked = $state<string | null>(null), showAll = $state(false), showOther = $state(false);
-	onMount(async () => { const r = await api('GET', '/api/energy'); if (r.ok) { meters = r.data.meters; note = r.data.note; since = r.data.sampledSince; } loaded = true; });
+	onMount(async () => { const r = await api<{ meters: Meter[]; note: string; sampledSince: number | null }>('GET', '/api/energy'); if (r.ok) { meters = r.data.meters; note = r.data.note; since = r.data.sampledSince; } loaded = true; });
 
 	// The few meters that describe the whole home come first; the many plugs are a ranked list below.
 	const headline = /whole|house|grid|solar|total/i;
@@ -33,10 +35,17 @@
 	const day = (iso: string) => new Date(iso + 'T12:00').toLocaleDateString([], { weekday: 'short' });
 	const stats = $derived.by(() => {
 		const d = cur?.days ?? [];
-		if (!d.length) return null;
-		const total = d.reduce((a, x) => a + x.kwh, 0), avg = total / d.length, best = d.reduce((a, x) => (x.kwh > a.kwh ? x : a), d[0]);
+		const [first] = d;
+		if (!first) return null;
+		const total = d.reduce((a, x) => a + x.kwh, 0), avg = total / d.length, best = d.reduce((a, x) => (x.kwh > a.kwh ? x : a), first);
 		return { total, avg, best, max: Math.max(0.1, ...d.map((x) => x.kwh)) };
 	});
+	async function share() {
+		if (!cur || !stats) return;
+		haptics.tap();
+		const label = cur.name.replace(/ energy( produced)?$/i, cur.name.match(/produced/i) ? ' produced' : '');
+		await sharePicture((g, w, h) => drawEnergy(g, w, h, { name: label, today: cur.todayKwh ?? null, avg: stats.avg, days: (cur.days ?? []).map((d) => ({ label: day(d.date), kwh: d.kwh })) }), 'energy-week', `${label}, this week`);
+	}
 	const pct = (v: number, lo: number, hi: number) => (hi > lo ? Math.min(100, Math.max(0, ((v - lo) / (hi - lo)) * 100)) : 0);
 </script>
 
@@ -70,6 +79,7 @@
 				<p class="figure text-[1.75rem] leading-none">{cur.todayKwh != null ? num(cur.todayKwh) : '—'}<span class="ml-1 text-base font-medium text-muted-foreground">kWh today</span></p>
 				<p class="text-right text-xs text-muted-foreground">Average {num(stats.avg)} kWh a day<br />Best {day(stats.best.date)}, {num(stats.best.kwh)}</p>
 			</div>
+			<div class="mt-3 flex justify-end"><button type="button" onclick={share} class="flex h-9 items-center gap-1.5 rounded-full bg-secondary px-3.5 text-[0.8125rem] font-medium text-foreground transition-transform active:scale-95"><Share2 class="size-4" />Share this week</button></div>
 			<div class="relative mt-4 flex h-24 items-end gap-1.5" role="img" aria-label="Daily kWh: {(cur.days ?? []).map((d) => `${day(d.date)} ${d.kwh}`).join(', ')}">
 				<span class="pointer-events-none absolute inset-x-0 border-t border-dashed border-foreground/25" style="bottom:{(stats.avg / stats.max) * 100}%" aria-hidden="true"></span>
 				{#each cur.days ?? [] as d, i}

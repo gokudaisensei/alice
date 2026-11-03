@@ -1,26 +1,28 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { startAuthentication } from '@simplewebauthn/browser';
-	import { api, explain } from '#lib/api.js';
+	import { startAuthentication, type PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
+	import { api, passkeyFailure } from '#lib/api.js';
 	import { session } from '#lib/session.svelte.js';
 	import { Button } from '#lib/components/ui/button';
 	import { Fingerprint } from '@lucide/svelte';
 
+	// Already signed in on this device? There is nothing to do here.
+	$effect(() => { if (session.me) goto('/', { replaceState: true }); });
 	let busy = $state(false);
 	let error = $state('');
 
 	async function signIn() {
 		busy = true; error = '';
 		try {
-			const o = await api('POST', '/api/auth/login/options');
-			if (!o.ok) throw o.data?.error;
+			const o = await api<{ challengeId: string; options: PublicKeyCredentialRequestOptionsJSON }>('POST', '/api/auth/login/options');
+			if (!o.ok) throw o.data.error;
 			const response = await startAuthentication({ optionsJSON: o.data.options });
 			const v = await api('POST', '/api/auth/login/verify', { challengeId: o.data.challengeId, response });
-			if (!v.ok) throw v.data?.error;
+			if (!v.ok) throw v.data.error;
 			await session.refresh();
 			goto('/');
-		} catch (e: any) {
-			error = typeof e === 'string' ? explain(e) : e?.name === 'NotAllowedError' ? 'Sign-in was cancelled.' : explain();
+		} catch (e) {
+			error = passkeyFailure(e, 'Sign-in was cancelled.');
 		} finally { busy = false; }
 	}
 </script>

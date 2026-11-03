@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { setup } from "./testkit";
+import { setup, type Body } from "./testkit";
 
 async function home() {
   const t = setup(), admin = await t.bootstrapAdmin("a1");
@@ -24,8 +24,8 @@ test("a change made on one device reaches another person's waiting device", asyn
   await new Promise((r) => setTimeout(r, 30));
   await t.call("POST", "/api/devices/light.kitchen/command", { cookie: admin, body: { action: "turn_off" } });
   const r = (await waiting).json;
-  expect(r.devices.map((d: any) => d.id)).toContain("light.kitchen");
-  expect(r.devices.find((d: any) => d.id === "light.kitchen").state).toBe("off");
+  expect(r.devices.map((d: Body) => d.id)).toContain("light.kitchen");
+  expect(r.devices.find((d: Body) => d.id === "light.kitchen").state).toBe("off");
 });
 
 test("something the app stores (a new room) tells other screens to refresh", async () => {

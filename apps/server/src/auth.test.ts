@@ -20,7 +20,7 @@ test("bootstrap code is single-use and cannot create a second household", async 
 test("unauthenticated requests cannot reach protected resources", async () => {
   const t = setup();
   await t.bootstrapAdmin();
-  for (const [m, p] of [["GET", "/api/me"], ["GET", "/api/admin/users"], ["GET", "/api/admin/activity"], ["POST", "/api/admin/users"], ["DELETE", "/api/admin/users/x"]]) {
+  for (const [m, p] of [["GET", "/api/me"], ["GET", "/api/admin/users"], ["GET", "/api/admin/activity"], ["POST", "/api/admin/users"], ["DELETE", "/api/admin/users/x"]] as const) {
     expect((await t.call(m, p, { body: m === "POST" ? {} : undefined })).status).toBe(401);
   }
 });

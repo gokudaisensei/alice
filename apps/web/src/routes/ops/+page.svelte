@@ -1,29 +1,38 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
-	import { api, explain } from '#lib/api.js';
+	import { startAuthentication, startRegistration, type PublicKeyCredentialCreationOptionsJSON, type PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
+	import { api, passkeyFailure } from '#lib/api.js';
+	import type { Health } from '#lib/dto.js';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
 
 	let me = $state<{ name: string } | null>(null), loaded = $state(false), code = $state(''), msg = $state(''), busy = $state(false);
-	let support = $state<any>(undefined), diag = $state<any>(null), cfg = $state<any>(null);
+	/** The household's support grant as an operator sees it. `undefined` until asked; `null` when there is none. */
+	type Grant = { id: string; scopes: string[]; expiresAt: number; claimedByYou: boolean; claimedByOther: boolean };
+	/** Structure only: names of rooms, devices, routines and automations. */
+	type Config = { rooms: { id: string; name: string }[]; devices: { id: string; name: string | null; roomId: string | null; hidden: boolean }[]; routines: { name: string; summary: string; needsAttention: boolean }[]; automations: { name: string; summary: string; enabled: boolean | null; needsAttention: boolean }[] };
+	type Challenge<O> = { challengeId: string; options: O };
+	let support = $state<Grant | null | undefined>(undefined), diag = $state<Health | null>(null), cfg = $state<Config | null>(null);
 
-	async function refresh() { const r = await api('GET', '/api/ops/me'); me = r.ok ? r.data : null; loaded = true; if (me) { const s = await api('GET', '/api/ops/support'); support = s.ok ? s.data.active : null; } }
+	async function refresh() { const r = await api<{ id: string; name: string }>('GET', '/api/ops/me'); me = r.ok ? r.data : null; loaded = true; if (me) { const s = await api<{ active: Grant | null }>('GET', '/api/ops/support'); support = s.ok ? s.data.active : null; } }
 	onMount(refresh);
-	async function run(f: () => Promise<void>) { busy = true; msg = ''; try { await f(); } catch (e: any) { msg = typeof e === 'string' ? explain(e) : e?.name === 'NotAllowedError' ? 'Cancelled.' : explain(); } busy = false; }
+	async function run(f: () => Promise<void>) { busy = true; msg = ''; try { await f(); } catch (e) { msg = passkeyFailure(e, 'Cancelled.'); } busy = false; }
 	const login = () => run(async () => {
-		const o = await api('POST', '/api/ops/auth/login/options'); if (!o.ok) throw o.data?.error;
+		const o = await api<Challenge<PublicKeyCredentialRequestOptionsJSON>>('POST', '/api/ops/auth/login/options'); if (!o.ok) throw o.data.error;
 		const v = await api('POST', '/api/ops/auth/login/verify', { challengeId: o.data.challengeId, response: await startAuthentication({ optionsJSON: o.data.options }) });
-		if (!v.ok) throw v.data?.error; await refresh();
+		if (!v.ok) throw v.data.error; await refresh();
 	});
 	const enroll = () => run(async () => {
-		const o = await api('POST', '/api/ops/auth/enroll/options', { token: code.trim() }); if (!o.ok) throw o.data?.error;
+		const o = await api<Challenge<PublicKeyCredentialCreationOptionsJSON>>('POST', '/api/ops/auth/enroll/options', { token: code.trim() }); if (!o.ok) throw o.data.error;
 		const v = await api('POST', '/api/ops/auth/enroll/verify', { challengeId: o.data.challengeId, response: await startRegistration({ optionsJSON: o.data.options }) });
-		if (!v.ok) throw v.data?.error; await refresh();
+		if (!v.ok) throw v.data.error; await refresh();
 	});
-	const claim = () => run(async () => { const r = await api('POST', '/api/ops/support/claim'); if (!r.ok) throw r.data?.error; await refresh(); });
+	const claim = () => run(async () => { const r = await api('POST', '/api/ops/support/claim'); if (!r.ok) throw r.data.error; await refresh(); });
 	const end = () => run(async () => { await api('POST', '/api/ops/support/end'); diag = cfg = null; await refresh(); });
-	const load = (what: 'diagnostics' | 'config') => run(async () => { const r = await api('GET', `/api/ops/support/${what}`); if (!r.ok) throw r.data?.error; if (what === 'diagnostics') diag = r.data; else cfg = r.data; });
+	const load = (what: 'diagnostics' | 'config') => run(async () => {
+		if (what === 'diagnostics') { const r = await api<Health>('GET', '/api/ops/support/diagnostics'); if (!r.ok) throw r.data.error; diag = r.data; }
+		else { const r = await api<Config>('GET', '/api/ops/support/config'); if (!r.ok) throw r.data.error; cfg = r.data; }
+	});
 	async function logout() { await api('POST', '/api/ops/auth/logout'); me = null; support = diag = cfg = null; }
 </script>
 

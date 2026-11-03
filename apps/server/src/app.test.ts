@@ -42,7 +42,7 @@ test("CSP allows only the build's own inline start-up script, by hash", async ()
   const html = await res.text();
   const inline = [...html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/g)];
   expect(inline.length).toBeGreaterThan(0);
-  for (const m of inline) expect(csp).toContain(`'sha256-${new Bun.CryptoHasher("sha256").update(m[1]).digest("base64")}'`);
+  for (const m of inline) expect(csp).toContain(`'sha256-${new Bun.CryptoHasher("sha256").update(m[1] ?? "").digest("base64")}'`);
   expect(csp).not.toContain("unsafe-inline'; frame"); // no blanket inline scripts
   expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/);
   expect(csp).toContain("frame-ancestors 'none'");

@@ -23,6 +23,11 @@ export type Template = { key: string; name: string; blurb: string; triggers: Tri
 export const DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']] as const;
 
 /** The states a person can pick for this device, based on what it can actually do. */
+/** The states of a device that can be tested for, or none when there is no device. */
+export const statesOf = (d: Device | undefined): string[] => (d ? statesFor(d) : []);
+/** The first state worth offering for a device. */
+export const firstState = (d: Device | undefined): string => statesOf(d)[0] ?? 'on';
+
 export function statesFor(d: Device): string[] {
 	const out: string[] = [];
 	for (const c of d.controls) {

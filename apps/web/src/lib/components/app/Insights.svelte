@@ -12,12 +12,12 @@
 	let loaded = $state(false);
 	type Insight = { key: string; title: string; body: string; suggestion: { label: string; href: string } };
 	let items = $state<Insight[]>([]);
-	onMount(async () => { const r = await api('GET', '/api/insights'); if (r.ok) items = full ? r.data.insights : r.data.insights.slice(0, 3); loaded = true; });
+	onMount(async () => { const r = await api<{ insights: Insight[] }>('GET', '/api/insights'); if (r.ok) items = full ? r.data.insights : r.data.insights.slice(0, 3); loaded = true; });
 	// The full page groups what's alike and keeps each one to a line until you open it, so a long list reads at a glance.
 	const labels: Record<string, string> = { standby: 'Always on', energy_up: 'Higher than usual' };
 	const groups = $derived.by(() => {
 		const m = new Map<string, Insight[]>();
-		for (const i of items) { const k = i.key.split(':')[0]; m.set(k, [...(m.get(k) ?? []), i]); }
+		for (const i of items) { const k = i.key.split(':')[0] ?? ''; m.set(k, [...(m.get(k) ?? []), i]); }
 		return [...m].map(([k, list]) => ({ k, label: labels[k] ?? 'Other', list }));
 	});
 	let open = $state<string | null>(null);

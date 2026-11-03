@@ -1,5 +1,22 @@
 export type HaConn = "connecting" | "connected" | "auth_failed" | "disconnected";
-export type HaEntity = { entity_id: string; state: string; attributes: Record<string, any>; last_updated?: string };
+/** Whatever the device reports. Read it through {@link attrString}, {@link attrNumber}, or narrow it yourself. */
+export type HaAttributes = Record<string, unknown>;
+export type HaEntity = { entity_id: string; state: string; attributes: HaAttributes; last_updated?: string };
+
+/** The entity's `friendly_name`, falling back to `fallback` (its id by default). */
+export const friendlyName = (e: HaEntity | undefined, fallback = e?.entity_id ?? ""): string => String(e?.attributes.friendly_name ?? fallback);
+export const attrString = (e: HaEntity | undefined, key: string): string | undefined => {
+  const v = e?.attributes[key];
+  return typeof v === "string" ? v : undefined;
+};
+
+/** Messages on the Home Assistant WebSocket that this client reads. Anything else is ignored. */
+type HaMessage =
+  | { type: "auth_required" | "auth_invalid" | "auth_ok" }
+  | { type: "event"; event?: { event_type?: string; data: { entity_id: string; new_state: HaEntity | null } } }
+  | HaReply;
+/** The answer to a command we sent, matched by `id`. */
+export type HaReply = { type?: "result"; id?: number; success: boolean; error?: { code?: string; message?: string }; result?: unknown };
 export interface HaHealth { health(): "ok" | "unreachable" | "auth_failed" }
 export type HaEvent = { type: "entity"; entityId: string } | { type: "conn" };
 export type CallResult = { ok: true } | { ok: false; error: string };
@@ -13,13 +30,15 @@ export interface HaApi extends HaHealth {
   /** Write/delete HA's own config (scenes, scripts). Needs an HA admin token; see docs/SECURITY.md. */
   config(method: "POST" | "DELETE", path: string, body?: unknown): Promise<{ ok: boolean; error?: string }>;
   /** Raw WebSocket command (used for creating the mode helper). */
-  ws(msg: Record<string, unknown>): Promise<{ success: boolean; error?: any; result?: any }>;
+  ws(msg: Record<string, unknown>): Promise<HaReply>;
   /** Resolves with the first entity (now or soon) matching `pred`, or null on timeout. */
   waitFor(pred: (e: HaEntity) => boolean, ms: number): Promise<HaEntity | null>;
   snapshot?(entityId: string): Promise<{ body: ArrayBuffer; type: string } | null>;
   /** State changes for one entity over the last `hours`, oldest first. */
   history?(entityId: string, hours: number): Promise<{ t: number; state: string }[] | null>;
 }
+
+type HistoryRow = { state: unknown; last_changed?: string; last_updated?: string };
 
 /** Single persistent WebSocket to Home Assistant. State cache is in memory only; HA stays the source of truth. */
 export class HaClient implements HaApi {
@@ -28,9 +47,9 @@ export class HaClient implements HaApi {
   lastMessageAt = 0;
   private sock: WebSocket | null = null;
   private nextId = 1;
-  private waiting = new Map<number, (m: any) => void>();
+  private waiting = new Map<number, (m: HaReply) => void>();
   private backoff = 1000;
-  private timer: Timer | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
   private listeners = new Set<(e: HaEvent) => void>();
 
@@ -45,7 +64,9 @@ export class HaClient implements HaApi {
     });
   }
 
-  constructor(private url: string, private token: string) {}
+  private readonly url: string;
+  private readonly token: string;
+  constructor(url: string, token: string) { this.url = url; this.token = token; }
 
   health() { return this.conn === "connected" ? "ok" : this.conn === "auth_failed" ? "auth_failed" : "unreachable"; }
   /** Cached state can't be trusted while disconnected. Callers must show it as stale. */
@@ -58,7 +79,7 @@ export class HaClient implements HaApi {
     this.conn = "connecting";
     const ws = new WebSocket(new URL("/api/websocket", this.url.replace(/^http/, "ws")).toString());
     this.sock = ws;
-    ws.onmessage = (ev) => this.onMessage(JSON.parse(String(ev.data)));
+    ws.onmessage = (ev) => void this.onMessage(JSON.parse(String(ev.data)) as HaMessage);
     ws.onclose = () => this.onClose();
     ws.onerror = () => {};
   }
@@ -74,9 +95,9 @@ export class HaClient implements HaApi {
     this.timer = setTimeout(() => this.connect(), wait);
   }
 
-  private async onMessage(m: any) {
+  private async onMessage(m: HaMessage) {
     this.lastMessageAt = Date.now();
-    if (m.type === "auth_required") return this.sock!.send(JSON.stringify({ type: "auth", access_token: this.token }));
+    if (m.type === "auth_required") return this.sock?.send(JSON.stringify({ type: "auth", access_token: this.token }));
     if (m.type === "auth_invalid") { this.conn = "auth_failed"; return this.sock?.close(); }
     if (m.type === "auth_ok") {
       this.backoff = 1000;
@@ -87,11 +108,11 @@ export class HaClient implements HaApi {
     }
     if (m.type === "event" && m.event?.event_type === "state_changed") {
       const { entity_id, new_state } = m.event.data;
-      new_state ? this.entities.set(entity_id, new_state) : this.entities.delete(entity_id);
+      if (new_state) this.entities.set(entity_id, new_state); else this.entities.delete(entity_id);
       this.emit({ type: "entity", entityId: entity_id });
       return;
     }
-    if (typeof m.id === "number") { this.waiting.get(m.id)?.(m); this.waiting.delete(m.id); }
+    if ("id" in m && typeof m.id === "number") { this.waiting.get(m.id)?.(m); this.waiting.delete(m.id); }
   }
 
   ws(msg: Record<string, unknown>) { return this.send(msg); }
@@ -117,7 +138,7 @@ export class HaClient implements HaApi {
     } catch { return { ok: false, error: "ha_unavailable" }; }
   }
 
-  private send(msg: Record<string, unknown>): Promise<any> {
+  private send(msg: Record<string, unknown>): Promise<HaReply> {
     return new Promise((resolve) => {
       if (this.sock?.readyState !== WebSocket.OPEN) return resolve({ success: false, error: { code: "disconnected", message: "Home Assistant is not connected" } });
       const id = this.nextId++;
@@ -141,8 +162,8 @@ export class HaClient implements HaApi {
       const start = new Date(Date.now() - hours * 3600_000).toISOString();
       const r = await fetch(new URL(`/api/history/period/${start}?filter_entity_id=${encodeURIComponent(entityId)}&minimal_response&no_attributes`, this.url), { headers: { Authorization: `Bearer ${this.token}` }, signal: AbortSignal.timeout(8000) });
       if (!r.ok) return null;
-      const rows = ((await r.json()) as any[][])[0] ?? [];
-      return rows.map((x) => ({ t: Date.parse(x.last_changed ?? x.last_updated), state: String(x.state) })).filter((x) => Number.isFinite(x.t));
+      const rows = ((await r.json()) as HistoryRow[][])[0] ?? [];
+      return rows.map((x) => ({ t: Date.parse(x.last_changed ?? x.last_updated ?? ""), state: String(x.state) })).filter((x) => Number.isFinite(x.t));
     } catch { return null; }
   }
 

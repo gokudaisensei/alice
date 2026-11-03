@@ -227,3 +227,26 @@
 	[data-device] { transition: border-color 0.15s, box-shadow 0.2s, transform 0.2s; }
 	[data-device]:hover { border-color: var(--input); box-shadow: 0 6px 18px -10px color-mix(in oklab, var(--foreground) 35%, transparent); transform: translateY(-1px); }
 }
+
+/* ---- phone gestures and comfort settings ---- */
+@keyframes holdfill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.hold-fill { transform-origin: left center; animation-name: holdfill; animation-timing-function: linear; animation-fill-mode: forwards; }
+/* Feedback after a command: success is the icon giving a small spring; failure is a soft red wash across the tile and a short wobble of the icon. The tile itself never jumps. */
+@keyframes pop { 0% { transform: scale(1); } 35% { transform: scale(1.16); } 70% { transform: scale(0.96); } 100% { transform: scale(1); } }
+@keyframes wobble { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-9deg); } 50% { transform: rotate(7deg); } 75% { transform: rotate(-3deg); } }
+@keyframes wash { 0% { opacity: 0; } 18% { opacity: 1; } 100% { opacity: 0; } }
+.flash-ok [data-chip] { animation: pop 0.42s cubic-bezier(0.3, 1.4, 0.5, 1); }
+.flash-fail [data-chip] { animation: wobble 0.45s ease-in-out; }
+.flash-fail::after { content: ''; position: absolute; inset: 0; z-index: 25; pointer-events: none; border-radius: inherit; background: color-mix(in oklab, var(--signal) 22%, transparent); animation: wash 0.9s ease-out forwards; }
+.lifted { transform: scale(1.035); box-shadow: 0 14px 30px -12px color-mix(in oklab, var(--foreground) 35%, transparent); }
+body { overscroll-behavior-y: contain; }
+html.reduce-motion *, html.reduce-motion *::before, html.reduce-motion *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+html.large-ui { font-size: 112.5%; }
+html.large-ui button, html.large-ui [role='tab'], html.large-ui a[role='button'] { min-height: 2.75rem; }
+
+/* The icon morph when a tile opens its sheet. The page itself does not cross-fade; only the icon travels. */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-group(dev-chip) { animation-duration: 380ms; animation-timing-function: cubic-bezier(0.3, 0.7, 0.2, 1); }
+html.selecting body { padding-bottom: 6rem; }
+@keyframes holdring { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+.hold-ring { stroke-dashoffset: 100; animation-name: holdring; animation-timing-function: linear; animation-fill-mode: forwards; }

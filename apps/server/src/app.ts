@@ -3,7 +3,7 @@ import { Elysia } from "elysia";
 import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { join, normalize } from "node:path";
+import { join } from "node:path";
 import { adminRoutes } from "./admin";
 import { authRoutes } from "./auth";
 import type { HaApi } from "./ha";
@@ -25,6 +25,7 @@ import { voiceRoutes } from "./voice";
 import { opsRoutes, supportRoutes } from "./ops";
 import { createUpdates, updateRoutes, type Updates } from "./updates";
 import type { WebAuthnService } from "./webauthn";
+import { scalar } from "./sql";
 
 export type AppDeps = {
   db: Database; ha: HaApi; webauthn: WebAuthnService;
@@ -39,7 +40,7 @@ export function buildCsp(webDir?: string): string {
   const index = webDir ? join(webDir, "index.html") : "";
   if (index && existsSync(index)) {
     for (const m of readFileSync(index, "utf8").matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/g))
-      hashes.push(`'sha256-${createHash("sha256").update(m[1]).digest("base64")}'`);
+      hashes.push(`'sha256-${createHash("sha256").update(m[1] ?? "").digest("base64")}'`);
   }
   return ["default-src 'self'", `script-src 'self' ${hashes.join(" ")}`.trim(), "img-src 'self' data:", "style-src 'self' 'unsafe-inline'", "connect-src 'self'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'"].join("; ");
 }
@@ -50,7 +51,7 @@ export function createApp(deps: AppDeps) {
   const powerLimits = deps.powerLimits ?? createPowerLimits(deps.db, deps.now);
   const csp = buildCsp(deps.webDir);
   const staticFiles = deps.webDir ? createStatic(deps.webDir) : null;
-  const scenes = createSceneService(deps.db, deps.ha, devices), routines = createRoutineService(deps.db, deps.ha, devices);
+  const scenes = createSceneService(deps.ha, devices), routines = createRoutineService(deps.db, deps.ha, devices);
   const automations = createAutomationService(deps.db, deps.ha, devices, routines);
   const notifier = createNotifier(deps.db, devices, deps.push ?? null, deps.now), insights = createInsights(deps.db, deps.ha, devices, deps.now);
   const backups = deps.backups ?? createBackups(deps.db, parseDests(tmpdir(), ""), deps.now);
@@ -79,6 +80,7 @@ export function createApp(deps: AppDeps) {
           return new Response(JSON.stringify({ error: "csrf" }), { status: 403, headers: { "content-type": "application/json" } });
         }
       }
+      return undefined;
     })
     .onAfterResponse(({ request, set }) => {
       // Anything a person changes (rooms, groups, scenes, access...) tells every other open screen to refresh. Device commands already arrive as device events.
@@ -108,7 +110,7 @@ export function createApp(deps: AppDeps) {
     .use(prefsRoutes(deps.db, deps.cookieSecure, devices))
     // For the container health check and the updater: is THIS app up, and which version. Deliberately independent of Home Assistant.
     .get("/healthz", ({ set }) => {
-      try { const schema = (deps.db.query("SELECT MAX(version) v FROM schema_migrations").get() as any).v; return { ok: true, version: deps.version ?? "dev", schema }; }
+      try { const schema = scalar(deps.db, "SELECT MAX(version) FROM schema_migrations", 0); return { ok: true, version: deps.version ?? "dev", schema }; }
       catch { set.status = 503; return { ok: false }; }
     })
     .get("/api/health", () => {
@@ -120,8 +122,8 @@ export function createApp(deps: AppDeps) {
     .get("/api/bootstrap", async ({ request, set }) => {
       const cookie = request.headers.get("cookie") ?? "";
       const get = async (path: string) => {
-        const r = await self!.handle(new Request(new URL(path, request.url), { headers: { cookie } }));
-        return r.ok ? await r.json() : null;
+        const r = await self?.handle(new Request(new URL(path, request.url).toString(), { headers: { cookie } }));
+        return r?.ok ? await r.json() as unknown : null;
       };
       const [me, devices, rooms, groups, prefs, mode, scenes, routines] = await Promise.all(["/api/me", "/api/devices", "/api/rooms", "/api/groups", "/api/me/prefs", "/api/mode", "/api/scenes", "/api/routines"].map(get));
       if (!me) { set.status = 401; return { error: "unauthenticated" }; }

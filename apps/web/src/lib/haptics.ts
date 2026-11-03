@@ -40,5 +40,11 @@ export const haptics = {
 	/** something finished well: a door locked, a scene ran */
 	success: () => fire([10, 50, 16]),
 	/** something did not happen */
-	warn: () => fire([28, 60, 28])
+	warn: () => fire([28, 60, 28]),
+	/** one notch of a dial: every ten percent while scrubbing */
+	detent: () => fire(4),
+	/** a firm click: a bolt thrown or drawn */
+	click: () => fire(22),
+	/** it did not go through: two sharp taps */
+	error: () => fire([18, 40, 18])
 };

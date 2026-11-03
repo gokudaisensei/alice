@@ -17,7 +17,7 @@ async function home() {
   const admin = await t.bootstrapAdmin("a1");
   const member = await t.addUser(admin.cookie!, "member", "m1");
   const guest = await t.addUser(admin.cookie!, "guest", "g1");
-  const routes = ((t.app as any).routes as { method: string; path: string }[]).filter((r) => r.path.startsWith("/api") && r.method !== "HEAD" && r.method !== "OPTIONS");
+  const routes = t.app.routes.filter((r) => r.path.startsWith("/api") && r.method !== "HEAD" && r.method !== "OPTIONS");
   const hit = async (r: { method: string; path: string }, o: { cookie?: string; headers?: Record<string, string>; body?: string } = {}) => {
     const res = await t.app.handle(new Request("http://localhost" + fill(r.path), {
       method: r.method, headers: { "content-type": "application/json", "x-forwarded-for": `10.9.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}`, ...(o.cookie ? { cookie: o.cookie } : {}), ...o.headers },

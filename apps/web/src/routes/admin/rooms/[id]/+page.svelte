@@ -14,13 +14,14 @@
 	import * as Drawer from '#lib/components/ui/drawer';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
-	import { Switch } from '#lib/components/ui/switch';
+	import { capitalize } from '#lib/utils.js';
+	import type { IconComponent } from '#lib/icons.js';
 	import { Pencil, Plus, Lightbulb, Plug, Fan, Thermometer, Lock, Camera, Tv, Gauge, Zap } from '@lucide/svelte';
 
 	const id = $derived(page.params.id ?? '');
 	const room = $derived(home.rooms.find((r) => r.id === id));
 	const devices = $derived(home.inRoom(id));
-	const icons: Record<string, any> = { light: Lightbulb, switch: Plug, fan: Fan, climate: Thermometer, lock: Lock, camera: Camera, media: Tv, sensor: Gauge, energy: Zap };
+	const icons: Record<string, IconComponent> = { light: Lightbulb, switch: Plug, fan: Fan, climate: Thermometer, lock: Lock, camera: Camera, media: Tv, sensor: Gauge, energy: Zap };
 	let addOpen = $state(false), renameOpen = $state(false), name = $state(''), edit = $state<Device | null>(null), devName = $state(''), error = $state('');
 	let ready = false;
 	onMount(() => { ready = true; if (page.url.searchParams.get('add') === '1') addOpen = true; });
@@ -30,6 +31,7 @@
 		const r = await api('PUT', `/api/admin/rooms/${id}/devices`, { add: ids });
 		if (!r.ok) return r.data?.message ?? explain(r.data?.error);
 		haptics.success(); await home.load();
+		return undefined;
 	}
 	async function removeDevice(d: Device) { const r = await api('PUT', `/api/admin/rooms/${id}/devices`, { remove: [d.id] }); if (!r.ok) error = explain(r.data?.error); else haptics.tap(); await home.load(); edit = null; }
 	async function renameRoom() { const r = await api('PATCH', `/api/admin/rooms/${id}`, { name: name.trim() }); if (!r.ok) { error = explain(r.data?.error); return; } renameOpen = false; await home.load(); }
@@ -48,7 +50,7 @@
 			{#if devices.length}
 				<Group>{#each devices as d (d.id)}
 					{@const Icon = icons[d.category] ?? Gauge}
-					<Row onclick={() => open(d)} title={d.name} description={d.available ? d.category[0].toUpperCase() + d.category.slice(1) : 'Offline'}>
+					<Row onclick={() => open(d)} title={d.name} description={d.available ? capitalize(d.category) : 'Offline'}>
 						{#snippet icon()}<Icon class="size-[18px]" />{/snippet}
 						{#snippet trailing()}<Pencil class="size-4 text-muted-foreground/70" />{/snippet}
 					</Row>

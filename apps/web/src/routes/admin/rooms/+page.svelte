@@ -23,12 +23,12 @@
 	const suggestions = $derived(SUGGEST.filter((s) => !home.rooms.some((r) => r.name.toLowerCase() === s.toLowerCase())).slice(0, 6));
 	const unplaced = $derived(home.devices.filter((d) => !d.roomId && !['sensor', 'energy'].includes(d.category)).length);
 
-	async function loadGroups() { const r = await api('GET', '/api/admin/groups'); if (r.ok) groups = r.data.groups; else error = explain(r.data?.error); }
+	async function loadGroups() { const r = await api<{ groups: G[] }>('GET', '/api/admin/groups'); if (r.ok) groups = r.data.groups; else error = explain(r.data?.error); }
 	onMount(loadGroups);
 
 	async function createRoom() {
 		creating = true; error = '';
-		const r = await api('POST', '/api/admin/rooms', { name: roomName.trim() });
+		const r = await api<{ id: string }>('POST', '/api/admin/rooms', { name: roomName.trim() });
 		creating = false;
 		if (!r.ok) { error = r.data?.message ?? explain(r.data?.error); return; }
 		haptics.success(); roomOpen = false; roomName = ''; await home.load();
@@ -40,6 +40,7 @@
 		const r = editing ? await api('PUT', `/api/admin/groups/${editing.id}`, { name, entityIds: ids }) : await api('POST', '/api/admin/groups', { name, entityIds: ids });
 		if (!r.ok) return r.data?.message ?? explain(r.data?.error);
 		haptics.success(); await Promise.all([loadGroups(), home.load()]);
+		return undefined;
 	}
 	async function delGroup(g: G) { if (!confirm(`Delete the group “${g.name}”? The devices stay.`)) return; const r = await api('DELETE', `/api/admin/groups/${g.id}`); if (!r.ok) error = explain(r.data?.error); await Promise.all([loadGroups(), home.load()]); }
 </script>

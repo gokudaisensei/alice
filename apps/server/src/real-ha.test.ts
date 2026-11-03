@@ -3,15 +3,15 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { HaClient } from "./ha";
 import { ensureModeHelper, MODE_ENTITY } from "./modes";
-import { setup } from "./testkit";
+import { setup, type Body } from "./testkit";
 
 const URL_ = process.env.HA_REAL_URL, TOKEN = process.env.HA_REAL_TOKEN;
 const real = URL_ && TOKEN ? test : test.skip;
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let ha: HaClient, t: ReturnType<typeof setup>, admin: string;
-const j = (m: string, p: string, body?: any) => t.call(m, p, { cookie: admin, body });
-const state = async (id: string) => (await fetch(`${URL_}/api/states/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json())) as any;
+const j = (m: string, p: string, body?: unknown) => t.call(m, p, { cookie: admin, body });
+const state = async (id: string) => (await fetch(`${URL_}/api/states/${id}`, { headers: { authorization: `Bearer ${TOKEN}` } }).then((r) => r.json())) as Body;
 const until = async (f: () => Promise<boolean>, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await f()) return true; await wait(250); } return false; };
 
 beforeAll(async () => {
@@ -24,12 +24,12 @@ beforeAll(async () => {
 afterAll(() => { ha?.stop?.(); });
 
 real("connects, loads the demo home, and describes real devices", async () => {
-  const devs = (await j("GET", "/api/devices")).json.devices as any[];
+  const devs = (await j("GET", "/api/devices")).json.devices as Body[];
   const by = (id: string) => devs.find((d) => d.id === id);
   expect(devs.length).toBeGreaterThan(10);
-  expect(by("light.ceiling_lights").controls.map((c: any) => c.type)).toEqual(expect.arrayContaining(["power", "brightness"]));
-  expect(by("climate.hvac").controls.map((c: any) => c.type)).toContain("thermostat");
-  expect(by("lock.front_door").controls.map((c: any) => c.type)).toContain("lock");
+  expect(by("light.ceiling_lights").controls.map((c: Body) => c.type)).toEqual(expect.arrayContaining(["power", "brightness"]));
+  expect(by("climate.hvac").controls.map((c: Body) => c.type)).toContain("thermostat");
+  expect(by("lock.front_door").controls.map((c: Body) => c.type)).toContain("lock");
   expect(by("sensor.power_consumption")).toMatchObject({ category: "energy" });
   expect(by("cover.kitchen_window")).toBeUndefined(); // covers are out of scope for ordinary users
 });
@@ -67,7 +67,7 @@ real("a scene is written through HA's config API, appears, and activates", async
   await j("POST", `/api/devices/${encodeURIComponent("light.bed_light")}/command`, { action: "turn_on" });
   const c = await j("POST", "/api/scenes", { name: "Test movie night", entityIds: ["light.bed_light", "light.ceiling_lights"] });
   expect(c.status).toBe(200);
-  const sc = (await j("GET", "/api/scenes")).json.scenes.find((s: any) => s.name === "Test movie night");
+  const sc = (await j("GET", "/api/scenes")).json.scenes.find((s: Body) => s.name === "Test movie night");
   expect(sc?.managed).toBe(true);
   await j("POST", `/api/devices/${encodeURIComponent("light.bed_light")}/command`, { action: "turn_off" });
   const a = await j("POST", `/api/scenes/${encodeURIComponent(sc.id)}/activate`);
@@ -98,7 +98,7 @@ real("an automation is accepted by real HA, can be switched, and actually fires"
   };
   const c = await j("POST", "/api/automations", body);
   expect(c.status).toBe(200);
-  const a = (await j("GET", "/api/automations")).json.automations.find((x: any) => x.id === c.json.id);
+  const a = (await j("GET", "/api/automations")).json.automations.find((x: Body) => x.id === c.json.id);
   expect(a.enabled).toBe(true);
   // Off: nothing happens. On: it fires.
   expect((await j("POST", `/api/automations/${c.json.id}/enabled`, { enabled: false })).json.enabled).toBe(false);
@@ -108,14 +108,14 @@ real("an automation is accepted by real HA, can be switched, and actually fires"
   expect((await j("POST", `/api/automations/${c.json.id}/enabled`, { enabled: true })).json.enabled).toBe(true);
   await j("POST", "/api/mode", { mode: "away" });
   expect(await until(async () => (await state("light.bed_light")).state === "on")).toBe(true);
-  expect(await until(async () => !!(await j("GET", "/api/automations")).json.automations.find((x: any) => x.id === c.json.id).lastTriggered)).toBe(true);
+  expect(await until(async () => !!(await j("GET", "/api/automations")).json.automations.find((x: Body) => x.id === c.json.id).lastTriggered)).toBe(true);
   await j("POST", "/api/mode", { mode: "home" });
   expect((await j("DELETE", `/api/automations/${c.json.id}`)).status).toBe(200);
 });
 
 real("every trigger and condition type is valid HA configuration", async () => {
   const ids: string[] = [];
-  const body = (over: any) => ({ name: "Test shape " + ids.length, triggers: [{ type: "time", at: "03:15" }], conditions: [], actions: [{ type: "device", entityId: "light.bed_light", action: "turn_off" }], ...over });
+  const body = (over: Body) => ({ name: "Test shape " + ids.length, triggers: [{ type: "time", at: "03:15" }], conditions: [], actions: [{ type: "device", entityId: "light.bed_light", action: "turn_off" }], ...over });
   const cases = [
     { triggers: [{ type: "device_state", entityId: "light.ceiling_lights", to: "off", forSeconds: 300 }] },
     { triggers: [{ type: "sensor", entityId: "sensor.outside_temperature", above: 30, forSeconds: 60 }] },
@@ -130,7 +130,7 @@ real("every trigger and condition type is valid HA configuration", async () => {
     if (i === cases.length - 1) { expect(r.status).toBe(404); continue; }
     expect([i, r.status, r.json?.error]).toEqual([i, 200, undefined]);
     ids.push(r.json.id);
-    const entity = (await j("GET", "/api/automations")).json.automations.find((x: any) => x.id === r.json.id);
+    const entity = (await j("GET", "/api/automations")).json.automations.find((x: Body) => x.id === r.json.id);
     expect([i, entity.enabled, entity.needsAttention]).toEqual([i, true, false]);
   }
   for (const id of ids) await j("DELETE", `/api/automations/${id}`);
@@ -147,7 +147,7 @@ real("voice exposure works against real HA Cloud's exposure list", async () => {
 });
 
 real("energy meters are recognised and sampled", async () => {
-  const meters = (await j("GET", "/api/energy")).json.meters as any[];
+  const meters = (await j("GET", "/api/energy")).json.meters as Body[];
   expect(meters.map((m) => m.id)).toEqual(expect.arrayContaining(["sensor.power_consumption", "sensor.total_energy_kwh"]));
   expect(meters.find((m) => m.id === "sensor.power_consumption")).toMatchObject({ kind: "power", unit: "W" });
   expect(meters.find((m) => m.id === "sensor.total_energy_kwh")).toMatchObject({ kind: "energy", unit: "kWh" });
@@ -176,18 +176,18 @@ disruptive("the hub going away and coming back is reported honestly and recovers
     // While it's gone: last-known state is still shown, marked unreachable; commands refuse instead of pretending.
     const list = (await j("GET", "/api/devices")).json;
     expect(list.haHealth).not.toBe("ok");
-    expect(list.devices.find((d: any) => d.id === "light.bed_light")).toMatchObject({ available: false, reason: "home_assistant_unavailable" });
+    expect(list.devices.find((d: Body) => d.id === "light.bed_light")).toMatchObject({ available: false, reason: "home_assistant_unavailable" });
     const cmd = await j("POST", `/api/devices/${id}/command`, { action: "turn_on" });
     expect([cmd.status, cmd.json.error]).toEqual([503, "ha_unavailable"]);
     expect((await j("POST", "/api/mode", { mode: "away" })).status).toBe(503);
     expect((await j("POST", "/api/automations", { name: "x", triggers: [{ type: "time", at: "01:00" }], actions: [{ type: "device", entityId: "light.bed_light", action: "turn_off" }] })).status).toBe(503);
-    expect(await until(async () => ((await j("GET", "/api/notifications")).json.notifications as any[]).some((n) => n.title === "Home hub unreachable"), 10_000)).toBe(true);
+    expect(await until(async () => ((await j("GET", "/api/notifications")).json.notifications as Body[]).some((n) => n.title === "Home hub unreachable"), 10_000)).toBe(true);
 
     docker("start", dockerName!);
     expect(await until(async () => !ha.isStale() && ha.health() === "ok", 120_000)).toBe(true);
     expect((await j("POST", `/api/devices/${id}/command`, { action: "turn_on" })).json).toMatchObject({ ok: true });
-    expect(await until(async () => ((await j("GET", "/api/notifications")).json.notifications as any[]).some((n) => n.title === "Home hub is back"), 10_000)).toBe(true);
-    expect((await j("GET", "/api/devices")).json.devices.find((d: any) => d.id === "light.bed_light").available).toBe(true);
+    expect(await until(async () => ((await j("GET", "/api/notifications")).json.notifications as Body[]).some((n) => n.title === "Home hub is back"), 10_000)).toBe(true);
+    expect((await j("GET", "/api/devices")).json.devices.find((d: Body) => d.id === "light.bed_light").available).toBe(true);
   } finally { docker("start", dockerName!); stop(); }
 }, 240_000);
 

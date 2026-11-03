@@ -5,7 +5,8 @@ const b64u = (b: Buffer | Uint8Array) => Buffer.from(b).toString("base64url");
 const sha = (b: Buffer | string) => createHash("sha256").update(b).digest();
 
 // Minimal CBOR encoder: uints, negative ints, byte strings, text, maps.
-function cbor(v: any): Buffer {
+type Cbor = number | string | Buffer | Map<Cbor, Cbor> | { [key: string]: Cbor };
+function cbor(v: Cbor): Buffer {
   const head = (major: number, n: number) => {
     if (n < 24) return Buffer.from([(major << 5) | n]);
     if (n < 256) return Buffer.from([(major << 5) | 24, n]);
@@ -14,7 +15,7 @@ function cbor(v: any): Buffer {
   if (typeof v === "number") return v >= 0 ? head(0, v) : head(1, -1 - v);
   if (typeof v === "string") { const s = Buffer.from(v); return Buffer.concat([head(3, s.length), s]); }
   if (Buffer.isBuffer(v)) return Buffer.concat([head(2, v.length), v]);
-  const entries = v instanceof Map ? [...v.entries()] : Object.entries(v);
+  const entries: [Cbor, Cbor][] = v instanceof Map ? [...v.entries()] : Object.entries(v);
   return Buffer.concat([head(5, entries.length), ...entries.flatMap(([k, x]) => [cbor(k), cbor(x)])]);
 }
 
@@ -25,18 +26,21 @@ export class SoftAuthenticator {
   private priv: KeyObject;
   private x: Buffer; private y: Buffer;
   counter = 0;
-  constructor(private rpID = "home.test", private origin = "https://home.test") {
+  private readonly rpID: string;
+  private readonly origin: string;
+  constructor(rpID = "home.test", origin = "https://home.test") {
+    this.rpID = rpID; this.origin = origin;
     const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
     this.priv = privateKey;
-    const jwk = publicKey.export({ format: "jwk" }) as any;
-    this.x = Buffer.from(jwk.x, "base64url"); this.y = Buffer.from(jwk.y, "base64url");
+    const { x, y } = publicKey.export({ format: "jwk" });
+    this.x = Buffer.from(x ?? "", "base64url"); this.y = Buffer.from(y ?? "", "base64url");
   }
   get id() { return b64u(this.credId); }
 
   private flags(uv: boolean, at: boolean) { return 0x01 | (uv ? 0x04 : 0) | (at ? 0x40 : 0); }
 
   register(challenge: string, o: AuthOpts = {}) {
-    const cose = cbor(new Map<number, any>([[1, 2], [3, -7], [-1, 1], [-2, this.x], [-3, this.y]]));
+    const cose = cbor(new Map<Cbor, Cbor>([[1, 2], [3, -7], [-1, 1], [-2, this.x], [-3, this.y]]));
     const len = Buffer.alloc(2); len.writeUInt16BE(this.credId.length);
     const cnt = Buffer.alloc(4); cnt.writeUInt32BE(this.counter);
     const authData = Buffer.concat([sha(o.rpID ?? this.rpID), Buffer.from([this.flags(o.uv ?? true, true)]), cnt, Buffer.alloc(16), len, this.credId, cose]);
@@ -53,7 +57,7 @@ export class SoftAuthenticator {
     const authData = Buffer.concat([sha(o.rpID ?? this.rpID), Buffer.from([this.flags(o.uv ?? true, false)]), cnt]);
     const clientData = Buffer.from(JSON.stringify({ type: "webauthn.get", challenge, origin: o.origin ?? this.origin, crossOrigin: false }));
     const signed = sign("sha256", Buffer.concat([authData, sha(clientData)]), this.priv); // DER
-    if (o.badSignature) signed[signed.length - 1] ^= 0xff;
+    if (o.badSignature) signed[signed.length - 1] = (signed.at(-1) ?? 0) ^ 0xff;
     return {
       id: this.id, rawId: this.id, type: "public-key", clientExtensionResults: {},
       response: { clientDataJSON: b64u(clientData), authenticatorData: b64u(authData), signature: b64u(signed) },

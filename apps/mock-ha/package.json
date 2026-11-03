@@ -1,6 +1,12 @@
 {
   "name": "@alice/mock-ha",
   "type": "module",
-  "scripts": { "dev": "bun --watch src/index.ts" },
-  "devDependencies": { "@types/bun": "latest" }
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
+  }
 }

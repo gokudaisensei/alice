@@ -17,6 +17,12 @@ class Session {
 		this.loaded = true;
 		try { if (me) localStorage.setItem('me:v1', JSON.stringify(me)); else forget(); } catch { /* ignore */ }
 	}
+	/** End this sign-in on the server, forget what this device kept about the home, and show the person as signed out. */
+	async signOut() {
+		await api('POST', '/api/auth/logout');
+		forget();
+		this.me = null;
+	}
 	async refresh() {
 		const r = await api<Me>('GET', '/api/me');
 		this.remember(r.ok ? r.data : null);

@@ -1,8 +1,8 @@
 // The simulated home: runs the world, keeps Home Assistant in step with it, and serves the 3D viewer.
 import { join } from "node:path";
 import { createHa } from "./ha";
-import { place, ROOMS } from "./layout";
-import { FAULTS, World, hourOf, sunAt, type FaultKind, type Out } from "./world";
+import { domainOf, place, ROOMS } from "./layout";
+import { FAULTS, World, hourOf, isFaultKind, sunAt, type Out } from "./world";
 
 const HA_URL = process.env.HA_URL ?? "http://127.0.0.1:8123", HA_TOKEN = process.env.HA_TOKEN ?? "", PORT = Number(process.env.PORT ?? 3100);
 if (!HA_TOKEN) { console.error("Set HA_TOKEN to a Home Assistant long-lived access token."); process.exit(1); }
@@ -10,6 +10,8 @@ if (!HA_TOKEN) { console.error("Set HA_TOKEN to a Home Assistant long-lived acce
 const KEY = process.env.SIM_KEY ?? "";
 const cookieOk = (req: Request) => !KEY || (req.headers.get("cookie") ?? "").split(/;\s*/).includes(`simkey=${KEY}`);
 const sameOrigin = (req: Request) => { const o = req.headers.get("origin"); return !o || new URL(o).host === req.headers.get("host"); };
+/** A request body that isn't a JSON object reads as empty. */
+const asRecord = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
 const ha = createHa(HA_URL, HA_TOKEN);
 const placed = place();
 const publicDir = join(import.meta.dir, "..", "public");
@@ -68,10 +70,10 @@ const server = Bun.serve({
 		if (url.pathname === "/ws" && !sameOrigin(req)) return new Response("wrong origin", { status: 403 });
 		if (url.pathname === "/ws") return srv.upgrade(req) ? undefined : new Response("upgrade needed", { status: 400 });
 		if (req.method === "POST") {
-			const b: any = await req.json().catch(() => ({}));
+			const b = asRecord(await req.json().catch(() => ({})));
 			if (url.pathname === "/api/act") {
 				const d = placed.find((x) => x.entity === b.entity); if (!d) return Response.json({ error: "unknown" }, { status: 404 });
-				const dom = d.entity.split(".")[0], on = ha.view(d.entity)?.state;
+				const dom = domainOf(d.entity), on = ha.view(d.entity)?.state;
 				const level = typeof b.level === "number" ? b.level : null;
 				if (dom === "lock") await ha.call("lock", on === "locked" ? "unlock" : "lock", d.entity);
 				else if (dom === "light" && level !== null) await ha.call("light", "turn_on", d.entity, { brightness: Math.round((Math.min(100, Math.max(1, level)) / 100) * 255) });
@@ -81,7 +83,7 @@ const server = Bun.serve({
 				return Response.json({ ok: true });
 			}
 			if (url.pathname === "/api/speed") { if (typeof b.speed === "number" && b.speed > 0 && b.speed <= 3600) world.speed = b.speed; if (typeof b.paused === "boolean") world.paused = b.paused; return Response.json({ speed: world.speed, paused: world.paused }); }
-			if (url.pathname === "/api/fault") { if (!(b.kind in FAULTS)) return Response.json({ error: "unknown" }, { status: 400 }); world.trigger(b.kind as FaultKind, out); await ha.flush(); return Response.json({ ok: true }); }
+			if (url.pathname === "/api/fault") { if (!isFaultKind(b.kind)) return Response.json({ error: "unknown" }, { status: 400 }); world.trigger(b.kind, out); await ha.flush(); return Response.json({ ok: true }); }
 			return new Response("not found", { status: 404 });
 		}
 		if (url.pathname === "/api/layout") return Response.json({ rooms: ROOMS, devices: placed.map(({ entity, name, room, kind, x, y, z }) => ({ entity, name, room, kind, x, y, z })), faults: Object.entries(FAULTS).map(([k, v]) => ({ kind: k, label: v.label })) });

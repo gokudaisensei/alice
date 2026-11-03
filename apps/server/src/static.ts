@@ -3,7 +3,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 
-type Entry = { type: string; etag: string; raw: Uint8Array; br?: Uint8Array; gz?: Uint8Array; immutable: boolean };
+type Bytes = Uint8Array<ArrayBuffer>;
+type Entry = { type: string; etag: string; raw: Bytes; br?: Bytes; gz?: Bytes; immutable: boolean };
 
 const TYPES: Record<string, string> = {
   ".html": "text/html;charset=utf-8", ".js": "text/javascript;charset=utf-8", ".css": "text/css;charset=utf-8", ".json": "application/json", ".svg": "image/svg+xml",
@@ -45,6 +46,6 @@ export function createStatic(dir: string) {
     if (e.br && /\bbr\b/.test(ae)) { body = e.br; headers["content-encoding"] = "br"; }
     else if (e.gz && /\bgzip\b/.test(ae)) { body = e.gz; headers["content-encoding"] = "gzip"; }
     headers["content-length"] = String(body.length);
-    return new Response(body as unknown as BodyInit, { headers });
+    return new Response(body, { headers });
   };
 }

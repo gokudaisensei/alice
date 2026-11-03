@@ -1,6 +1,11 @@
 export class RateLimiter {
   private hits = new Map<string, number[]>();
-  constructor(private max: number, private windowMs: number, private now: () => number = Date.now) {}
+  private readonly max: number;
+  private readonly windowMs: number;
+  private readonly now: () => number;
+  constructor(max: number, windowMs: number, now: () => number = Date.now) {
+    this.max = max; this.windowMs = windowMs; this.now = now;
+  }
   /** Returns true if the call is allowed (and records it). */
   take(key: string): boolean {
     const t = this.now();

@@ -3,16 +3,16 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs
 import { join } from "node:path";
 import { createNotifier } from "./notify";
 import { createDeviceService } from "./devices";
-import { setup } from "./testkit";
+import { setup, type Body } from "./testkit";
 
 async function home() {
   const t = setup();
   const admin = await t.bootstrapAdmin("a1");
   await t.reauth(admin.cookie!, "a1");
   const member = await t.addUser(admin.cookie!, "member", "m1");
-  const j = (m: string, p: string, cookie: string, body?: any) => t.call(m, p, { cookie, body });
+  const j = (m: string, p: string, cookie: string, body?: unknown) => t.call(m, p, { cookie, body });
   const event = (e: object, seq: number) => appendFileSync(join(t.upOut, "events.jsonl"), JSON.stringify({ seq, ts: new Date(t.clock.t).toISOString(), ...e }) + "\n");
-  const titles = async (cookie: string) => ((await j("GET", "/api/notifications", cookie)).json.notifications as any[]).map((n) => n.title);
+  const titles = async (cookie: string) => ((await j("GET", "/api/notifications", cookie)).json.notifications as Body[]).map((n) => n.title);
   return { t, admin: admin.cookie!, member, j, event, titles };
 }
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -62,7 +62,7 @@ test("a failed update is reported honestly, including whether it was undone", as
   await j("GET", "/api/admin/updates", admin);
   expect(await titles(admin)).toContain("Update problem");
   writeFileSync(join(t.upOut, "status.json"), JSON.stringify({ state: "broken", message: "x" }));
-  const h = (await j("GET", "/api/admin/health", admin)).json.checks.find((c: any) => c.id === "updates");
+  const h = (await j("GET", "/api/admin/health", admin)).json.checks.find((c: Body) => c.id === "updates");
   expect([h.status, h.advice]).toEqual(["fail", "Contact support now."]);
   expect(t.db.query("SELECT outcome FROM security_audit WHERE action = 'update.failed' ORDER BY id").all()).toEqual([{ outcome: "failure" }, { outcome: "failure" }]);
 });
@@ -70,7 +70,7 @@ test("a failed update is reported honestly, including whether it was undone", as
 test("a refused release is audited and flagged but never announced as an update", async () => {
   const { t, admin, j, event, titles } = await home();
   event({ type: "update_refused", version: "9.9.9", why: "image" }, 1);
-  const h = (await j("GET", "/api/admin/health", admin)).json.checks.find((c: any) => c.id === "updates");
+  const h = (await j("GET", "/api/admin/health", admin)).json.checks.find((c: Body) => c.id === "updates");
   expect(h.status).toBe("warn");
   expect(h.detail).toContain("signature");
   await j("GET", "/api/admin/updates", admin); // the audit entry is written when the event is ingested
@@ -88,7 +88,7 @@ test("a stale notice does not linger", async () => {
 
 test("an admin can ask for the verified release and nothing else", async () => {
   const { t, admin, member, j } = await home();
-  const apply = (cookie: string, version: any) => j("POST", "/api/admin/updates/apply", cookie, { version });
+  const apply = (cookie: string, version: unknown) => j("POST", "/api/admin/updates/apply", cookie, { version });
   expect((await apply(admin, "1.2.0")).status).toBe(409); // nothing is available
   writeFileSync(join(t.upOut, "available.json"), JSON.stringify({ version: "1.2.0", notes: "Better things", created: iso(t.clock.t) }));
   writeFileSync(join(t.upOut, "last-check"), String(Math.floor(t.clock.t / 1000)));
@@ -109,7 +109,7 @@ test("an admin can ask for the verified release and nothing else", async () => {
 
 test("health tells the household about updates in plain words", async () => {
   const { t, admin, j } = await home();
-  const chk = async () => (await j("GET", "/api/admin/health", admin)).json.checks.find((c: any) => c.id === "updates");
+  const chk = async () => (await j("GET", "/api/admin/health", admin)).json.checks.find((c: Body) => c.id === "updates");
   expect((await chk()).detail).toContain("Hasn't checked");
   writeFileSync(join(t.upOut, "last-check"), String(Math.floor(t.clock.t / 1000)));
   expect((await chk()).status).toBe("ok");

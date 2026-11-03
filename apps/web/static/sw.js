@@ -67,5 +67,7 @@ self.addEventListener('fetch', (event) => {
 		event.respondWith(caches.open(FILES).then(async (c) => (await c.match(req)) ?? fetch(req).then((r) => { if (r.ok) c.put(req, r.clone()); return r; })));
 		return;
 	}
-	if (/\.(png|svg|woff2|webmanifest)$/.test(url.pathname)) event.respondWith(fromCacheThenUpdate(req, req));
+	// The manifest is read when the app is installed or updated, so it must never be a stale copy: go to the network first.
+	if (url.pathname.endsWith('.webmanifest')) { event.respondWith(fetch(req).catch(() => caches.match(req).then((r) => r ?? Response.error()))); return; }
+	if (/\.(png|svg|woff2)$/.test(url.pathname)) event.respondWith(fromCacheThenUpdate(req, req));
 });

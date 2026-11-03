@@ -7,35 +7,50 @@ import type { HaApi, HaEntity } from "./ha";
 import { SESSION, lookupSession, type SessionUser } from "./session";
 import { readCookie } from "./auth";
 import { MODE_ENTITY } from "./modes";
+import { all } from "./sql";
+import { asObject, deny, text, type ErrorBody } from "./http";
+
+/** The readings a screen needs from a device, which ones depend on its kind. The hub's raw attributes never leave the server. */
+export type DeviceAttrs = {
+  brightnessPct?: number | null; colorTempK?: number | null; hs?: number[] | null; // lights
+  speedPct?: number | null; // fans
+  target?: number | null; hvacAction?: string | null; // thermostats
+  volumePct?: number | null; title?: string | null; // media players
+};
 
 export type DeviceView = {
   id: string; name: string; category: Category; roomId: string | null;
   /** false when the device is offline OR Home Assistant is unreachable; `reason` says which */
   available: boolean; reason: "device_offline" | "home_assistant_unavailable" | null;
   state: string; controls: Control[]; reading: Reading;
-  attrs: Record<string, number | string | number[] | null>;
+  attrs: DeviceAttrs;
 };
+
+export type DeviceMeta = { entity_id: string; name: string | null; room_id: string | null; hidden: number };
+type RunResult =
+  | { status: 200; body: { ok: true; confirmed: boolean; device: DeviceView | null } }
+  | { status: 400 | 401 | 404 | 409 | 503; body: ErrorBody };
 
 const round = (n: unknown) => (typeof n === "number" ? Math.round(n) : null);
 
-function attrsOf(d: Descriptor, e: HaEntity) {
-  const a = e.attributes ?? {};
-  const out: DeviceView["attrs"] = {};
+function attrsOf(d: Descriptor, e: HaEntity): DeviceAttrs {
+  const a = e.attributes;
+  const out: DeviceAttrs = {};
   if (d.domain === "light") {
     out.brightnessPct = typeof a.brightness === "number" ? Math.round((a.brightness / 255) * 100) : null;
-    out.colorTempK = round(a.color_temp_kelvin); out.hs = Array.isArray(a.hs_color) ? a.hs_color : null;
+    out.colorTempK = round(a.color_temp_kelvin); out.hs = Array.isArray(a.hs_color) ? a.hs_color.filter((x): x is number => typeof x === "number") : null;
   } else if (d.domain === "fan") out.speedPct = round(a.percentage);
-  else if (d.domain === "climate") { out.target = typeof a.temperature === "number" ? a.temperature : null; out.hvacAction = a.hvac_action ?? null; }
-  else if (d.domain === "media_player") { out.volumePct = typeof a.volume_level === "number" ? Math.round(a.volume_level * 100) : null; out.title = a.media_title ?? null; }
+  else if (d.domain === "climate") { out.target = typeof a.temperature === "number" ? a.temperature : null; out.hvacAction = typeof a.hvac_action === "string" ? a.hvac_action : null; }
+  else if (d.domain === "media_player") { out.volumePct = typeof a.volume_level === "number" ? Math.round(a.volume_level * 100) : null; out.title = typeof a.media_title === "string" ? a.media_title : null; }
   return out;
 }
 
 export function createDeviceService(db: Database, ha: HaApi) {
-  const meta = (household: string) => new Map((db.query("SELECT entity_id, name, room_id, hidden FROM device_meta WHERE household_id = ?").all(household) as any[]).map((r) => [r.entity_id, r]));
+  const meta = (household: string) => new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r]));
 
   /** Role default, overridable per user. Guests start with nothing. */
-  const accessor = (u: SessionUser) => {
-    const rows = new Map((db.query("SELECT entity_id, allowed FROM device_access WHERE user_id = ?").all(u.id) as any[]).map((r) => [r.entity_id, !!r.allowed]));
+  const accessor = (u: Pick<SessionUser, "id" | "role">) => {
+    const rows = new Map(all<{ entity_id: string; allowed: number }>(db, "SELECT entity_id, allowed FROM device_access WHERE user_id = ?", u.id).map((r) => [r.entity_id, !!r.allowed]));
     return (id: string) => {
       // Guests never see energy use, whatever they were granted: it says when the house is empty and what is in it.
       if (u.role === "guest") { const e = ha.entities.get(id); if (e && describe(e).category === "energy") return false; }
@@ -43,7 +58,7 @@ export function createDeviceService(db: Database, ha: HaApi) {
     };
   };
 
-  function viewOf(e: HaEntity, m: any): DeviceView | null {
+  function viewOf(e: HaEntity, m: DeviceMeta | undefined): DeviceView | null {
     const d = describe(e);
     if (!d.ordinary || m?.hidden) return null;
     const stale = ha.isStale(), offline = e.state === "unavailable";
@@ -75,7 +90,7 @@ export function createDeviceService(db: Database, ha: HaApi) {
   const say = (code: string, name: string) => (code === "device_unavailable" ? `${name} is offline. Check that it has power and Wi-Fi, then try again.` : MESSAGES[code] ?? "The device didn't accept the command.");
 
   /** Execute one command honestly: never queued, never assumed successful. */
-  async function run(u: SessionUser, id: string, cmd: Command) {
+  async function run(u: SessionUser, id: string, cmd: Command): Promise<RunResult> {
     const dev = deviceFor(u, id);
     if (!dev) return { status: 404, body: { error: "not_found" } };
     const { view, entity } = dev;
@@ -98,11 +113,11 @@ export function createDeviceService(db: Database, ha: HaApi) {
 
   function groupsFor(u: SessionUser) {
     const ok = accessor(u);
-    const groups = db.query("SELECT id, name FROM device_groups WHERE household_id = ? ORDER BY name").all(u.householdId) as any[];
+    const groups = all<{ id: string; name: string }>(db, "SELECT id, name FROM device_groups WHERE household_id = ? ORDER BY name", u.householdId);
     return groups.map((g) => {
-      const all = (db.query("SELECT entity_id FROM group_members WHERE group_id = ?").all(g.id) as any[]).map((r) => r.entity_id);
-      const mine = all.filter((id) => ok(id) && ha.entities.has(id));
-      return { id: g.id, name: g.name, deviceIds: mine, hidden: all.length - mine.length };
+      const members = all<{ entity_id: string }>(db, "SELECT entity_id FROM group_members WHERE group_id = ?", g.id).map((r) => r.entity_id);
+      const mine = members.filter((id) => ok(id) && ha.entities.has(id));
+      return { id: g.id, name: g.name, deviceIds: mine, hidden: members.length - mine.length };
     }).filter((g) => g.deviceIds.length > 0);
   }
 
@@ -111,7 +126,6 @@ export function createDeviceService(db: Database, ha: HaApi) {
 export type DeviceService = ReturnType<typeof createDeviceService>;
 
 export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: DeviceService, extraSearch: (u: SessionUser, q: string) => Record<string, unknown[]> = () => ({})) {
-  const deny = (set: any, status: number, error: string) => { set.status = status; return { error }; };
   const openStreams = new Map<string, number>();
 
   return new Elysia({ name: "devices" })
@@ -119,12 +133,13 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
       return { haHealth: ha.health(), stale: ha.isStale(), devices: svc.visibleDevices(g.user) };
     })
-    .post("/api/devices/:id/command", async ({ request, params, body, set }: any) => {
+    .post("/api/devices/:id/command", async ({ request, params, body, set }) => {
       const g = authorize(db, request, secure, ["device.control"]); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      const r = await svc.run(g.user, params.id, { action: String(body?.action ?? ""), value: body?.value });
+      const input = asObject(body);
+      const r = await svc.run(g.user, params.id, { action: text(input.action), value: input.value });
       set.status = r.status; return r.body;
     })
-    .get("/api/devices/:id/snapshot", async ({ request, params, set }: any) => {
+    .get("/api/devices/:id/snapshot", async ({ request, params, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const dev = svc.deviceFor(g.user, params.id);
       if (!dev || dev.view.category !== "camera") return deny(set, 404, "not_found");
@@ -135,7 +150,7 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
     })
     .get("/api/rooms", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      const rooms = db.query("SELECT id, name FROM rooms WHERE household_id = ? ORDER BY position, name").all(g.user.householdId) as { id: string; name: string }[];
+      const rooms = all<{ id: string; name: string }>(db, "SELECT id, name FROM rooms WHERE household_id = ? ORDER BY position, name", g.user.householdId);
       if (g.user.permissions.includes("rooms.manage")) return { rooms };
       // Everyone else only learns about rooms that contain something they can use.
       const used = new Set(svc.visibleDevices(g.user).map((d) => d.roomId));
@@ -145,35 +160,35 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
       return { groups: svc.groupsFor(g.user).map(({ hidden, ...x }) => x) };
     })
-    .post("/api/groups/:id/command", async ({ request, params, body, set }: any) => {
+    .post("/api/groups/:id/command", async ({ request, params, body, set }) => {
       const g = authorize(db, request, secure, ["device.control"]); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      const action = String(body?.action ?? "");
+      const input = asObject(body), action = text(input.action);
       if (action === "lock" || action === "unlock") return deny(set, 400, "unsupported");
       const grp = svc.groupsFor(g.user).find((x) => x.id === params.id);
       if (!grp) return deny(set, 404, "not_found");
       const results = await Promise.all(grp.deviceIds.map(async (id) => {
-        const r = await svc.run(g.user, id, { action, value: body?.value });
+        const r = await svc.run(g.user, id, { action, value: input.value });
         const name = svc.deviceFor(g.user, id)?.view.name ?? id;
-        return r.status === 200 ? { id, name, ok: true, confirmed: !!(r.body as any).confirmed } : { id, name, ok: false, error: (r.body as any).error, message: (r.body as any).message };
+        return r.status === 200 ? { id, name, ok: true, confirmed: r.body.confirmed } : { id, name, ok: false, error: r.body.error, message: r.body.message };
       }));
       const okCount = results.filter((r) => r.ok).length;
       // Members this user may not control are never touched, and never named; they still make the outcome "partial".
       const summary = okCount === results.length && grp.hidden === 0 ? "all" : okCount === 0 ? "none" : "partial";
       return { summary, results, notPermitted: grp.hidden };
     })
-    .get("/api/search", ({ request, query, set }: any) => {
+    .get("/api/search", ({ request, query, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      const q = String(query?.q ?? "").trim().toLowerCase().slice(0, 60);
+      const q = text(query.q).trim().toLowerCase().slice(0, 60);
       if (!q) return { devices: [], rooms: [], scenes: [], routines: [] };
-      const rooms = db.query("SELECT id, name FROM rooms WHERE household_id = ?").all(g.user.householdId) as any[];
-      const roomName = new Map(rooms.map((r) => [r.id, String(r.name).toLowerCase()]));
+      const rooms = all<{ id: string; name: string }>(db, "SELECT id, name FROM rooms WHERE household_id = ?", g.user.householdId);
+      const roomName = new Map(rooms.map((r) => [r.id, r.name.toLowerCase()]));
       const words: Record<Category, string> = { light: "light lights lamp", switch: "switch plug outlet socket", fan: "fan", climate: "thermostat climate air conditioner ac heating", sensor: "sensor", lock: "lock door", camera: "camera", media: "media tv television speaker player", energy: "energy power meter" };
       const matches = (d: DeviceView) => d.name.toLowerCase().includes(q) || (!!d.roomId && !!roomName.get(d.roomId)?.includes(q)) || words[d.category].split(" ").some((w) => w.startsWith(q));
       const devices = svc.visibleDevices(g.user).filter(matches).slice(0, 20);
-      return { devices: devices.map((d) => ({ id: d.id, name: d.name, category: d.category, roomId: d.roomId })), rooms: rooms.filter((r) => String(r.name).toLowerCase().includes(q)).slice(0, 10), ...extraSearch(g.user, q) };
+      return { devices: devices.map((d) => ({ id: d.id, name: d.name, category: d.category, roomId: d.roomId })), rooms: rooms.filter((r) => r.name.toLowerCase().includes(q)).slice(0, 10), ...extraSearch(g.user, q) };
     })
     // Today's story for one device: state changes over the last day, thinned out to a size a phone can draw.
-    .get("/api/devices/:id/history", async ({ request, params, set }: any) => {
+    .get("/api/devices/:id/history", async ({ request, params, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const dev = svc.deviceFor(g.user, params.id);
       if (!dev) return deny(set, 404, "not_found");

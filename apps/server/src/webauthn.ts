@@ -1,16 +1,21 @@
 import {
   generateAuthenticationOptions, generateRegistrationOptions,
   verifyAuthenticationResponse, verifyRegistrationResponse,
+  type AuthenticationResponseJSON, type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 
 export type StoredCredential = { credentialId: string; publicKey: string; counter: number; transports: string[] };
 
-// Interface so tests can substitute a fake authenticator.
+/**
+ * Interface so tests can substitute a fake authenticator.
+ * Browser payloads cross the HTTP boundary as `unknown`; the real service validates them while verifying.
+ */
 export interface WebAuthnService {
-  regOptions(user: { id: string; name: string }, exclude: string[], opts?: { hardwareKey?: boolean }): Promise<{ options: any; challenge: string }>;
-  regVerify(response: any, challenge: string): Promise<StoredCredential | null>;
-  authOptions(): Promise<{ options: any; challenge: string }>;
-  authVerify(response: any, challenge: string, cred: StoredCredential): Promise<number | null>; // new counter
+  /** `options` is passed to the browser untouched. */
+  regOptions(user: { id: string; name: string }, exclude: string[], opts?: { hardwareKey?: boolean }): Promise<{ options: unknown; challenge: string }>;
+  regVerify(response: unknown, challenge: string): Promise<StoredCredential | null>;
+  authOptions(): Promise<{ options: unknown; challenge: string }>;
+  authVerify(response: unknown, challenge: string, cred: StoredCredential): Promise<number | null>; // new counter
 }
 
 const b64 = {
@@ -33,12 +38,12 @@ export function realWebAuthn(opts: { rpID: string; rpName: string; origin: strin
     async regVerify(response, challenge) {
       try {
         const v = await verifyRegistrationResponse({
-          response, expectedChallenge: challenge, expectedOrigin: opts.origin,
+          response: response as RegistrationResponseJSON, expectedChallenge: challenge, expectedOrigin: opts.origin,
           expectedRPID: opts.rpID, requireUserVerification: true,
         });
         if (!v.verified) return null;
         const c = v.registrationInfo.credential;
-        return { credentialId: c.id, publicKey: b64.enc(c.publicKey), counter: c.counter, transports: (c.transports ?? []) as string[] };
+        return { credentialId: c.id, publicKey: b64.enc(c.publicKey), counter: c.counter, transports: c.transports ?? [] };
       } catch { return null; }
     },
     async authOptions() {
@@ -48,9 +53,9 @@ export function realWebAuthn(opts: { rpID: string; rpName: string; origin: strin
     async authVerify(response, challenge, cred) {
       try {
         const v = await verifyAuthenticationResponse({
-          response, expectedChallenge: challenge, expectedOrigin: opts.origin, expectedRPID: opts.rpID,
+          response: response as AuthenticationResponseJSON, expectedChallenge: challenge, expectedOrigin: opts.origin, expectedRPID: opts.rpID,
           requireUserVerification: true,
-          credential: { id: cred.credentialId, publicKey: b64.dec(cred.publicKey), counter: cred.counter, transports: cred.transports as any },
+          credential: { id: cred.credentialId, publicKey: b64.dec(cred.publicKey), counter: cred.counter, transports: cred.transports },
         });
         return v.verified ? v.authenticationInfo.newCounter : null;
       } catch { return null; }

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { DEVICES, ROOMS, place, route, room } from "./layout";
+import { DEVICES, place, route, room } from "./layout";
 import { World, hourOf, sunAt, type HaState, type Out } from "./world";
 
 /** A pretend Home Assistant that obeys the calls the world makes, so a whole day can run in a blink. */
@@ -24,7 +24,7 @@ test("the sun rises and sets, and a day has a shape", () => {
 
 test("every device has a place inside the house or garden", () => {
 	for (const d of place().filter((x) => x.room)) { const r = room(d.room); expect(d.x).toBeGreaterThanOrEqual(r.x0 - 0.6); expect(d.x).toBeLessThanOrEqual(r.x1 + 0.6); }
-	expect(route({ x: 4, z: 9 }, "Living Room", "Master Bedroom").length).toBeGreaterThan(2);
+	expect(route("Living Room", "Master Bedroom").length).toBeGreaterThan(2);
 });
 
 test("a weekday runs: people get up, leave and come back, and nothing goes out of range", () => {
@@ -50,7 +50,7 @@ test("the heating answers the thermostat", () => {
 	for (const R of Object.values(w.rooms)) R.T = 17;
 	for (let i = 0; i < 360; i++) w.step(30, cold.view, cold.out);
 	expect(w.hvac.heatW).toBeGreaterThan(0);
-	const warmed = w.rooms["Living Room"].T;
+	const warmed = w.roomState("Living Room").T;
 	expect(warmed).toBeGreaterThan(17.5);
 	const off = fakeHa(), v = new World(at(3), 5);
 	off.s.set("climate.ecobee", { state: "off", attrs: {} });
@@ -66,7 +66,7 @@ test("an open window cools the room, and a fault clears itself", () => {
 	expect(ha.s.get("binary_sensor.bedroom_window")!.state).toBe("on");
 	for (const R of Object.values(w.rooms)) R.T = 22;
 	for (let i = 0; i < 240; i++) w.step(30, ha.view, ha.out);
-	expect(w.rooms["Master Bedroom"].T).toBeLessThan(w.rooms["Living Room"].T);
+	expect(w.roomState("Master Bedroom").T).toBeLessThan(w.roomState("Living Room").T);
 	for (let i = 0; i < 400; i++) w.step(30, ha.view, ha.out);
 	expect(w.faults.length).toBe(0);
 	expect(ha.s.get("binary_sensor.bedroom_window")!.state).toBe("off");

@@ -9,7 +9,7 @@ class Notifications {
 	unread = $state(0);
 	private timer: ReturnType<typeof setInterval> | null = null;
 
-	async refresh() { const r = await api('GET', '/api/notifications/unread'); if (r.ok) this.unread = r.data.unread; }
+	async refresh() { const r = await api<{ unread: number }>('GET', '/api/notifications/unread'); if (r.ok) this.unread = r.data.unread; }
 	start() {
 		this.refresh();
 		this.timer ??= setInterval(() => document.visibilityState === 'visible' && this.refresh(), 30_000);
@@ -29,7 +29,7 @@ class Notifications {
 	async enablePush(): Promise<string | null> {
 		if (!Notifications.supported()) return "This browser can't receive push notifications. On an iPhone, add the app to your Home Screen first.";
 		if ((await Notification.requestPermission()) !== 'granted') return 'Notifications are blocked for this site in your browser settings.';
-		const k = await api('GET', '/api/push/key');
+		const k = await api<{ publicKey: string }>('GET', '/api/push/key');
 		if (!k.ok) return 'Push notifications are not available on this home.';
 		const reg = await navigator.serviceWorker.register('/sw.js');
 		await navigator.serviceWorker.ready;

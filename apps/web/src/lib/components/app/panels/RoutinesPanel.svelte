@@ -7,7 +7,7 @@
 	import Empty from '#lib/components/app/Empty.svelte';
 	import { Button } from '#lib/components/ui/button';
 	import { Badge } from '#lib/components/ui/badge';
-	import { Play, Sparkles, Workflow, Plus } from '@lucide/svelte';
+	import { Play, Workflow, Plus } from '@lucide/svelte';
 </script>
 
 	<Section>

@@ -15,8 +15,8 @@
 	const now = $derived(device.reading ? `${device.reading.value} ${device.reading.unit ?? ''}`.trim() : null);
 
 	onMount(async () => {
-		const r = await api('GET', '/api/power-limits');
-		const mine = r.ok ? (r.data.limits as { entityId: string; watts: number; enabled: boolean }[]).find((l) => l.entityId === device.id) : null;
+		const r = await api<{ limits: { entityId: string; watts: number; enabled: boolean }[] }>('GET', '/api/power-limits');
+		const mine = r.ok ? r.data.limits.find((l) => l.entityId === device.id) : null;
 		if (mine) { saved = { watts: mine.watts, enabled: mine.enabled }; text = String(mine.watts); on = mine.enabled; }
 		ready = true;
 	});

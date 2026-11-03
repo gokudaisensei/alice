@@ -10,10 +10,14 @@
 	import { notifications } from '#lib/notifications.svelte.js';
 	import { session } from '#lib/session.svelte.js';
 	import { viewport } from '#lib/viewport.svelte.js';
+	import { only } from '#lib/utils.js';
+	import type { IconComponent } from '#lib/icons.js';
 	import { haptics } from '#lib/haptics.js';
 	import { tileClass, isWide } from '#lib/tiles.js';
 	import DeviceCard from '#lib/components/app/DeviceCard.svelte';
 	import Insights from '#lib/components/app/Insights.svelte';
+	import AdaptiveCard from '#lib/components/app/AdaptiveCard.svelte';
+	import { longpress } from '#lib/gestures.svelte.js';
 	import ModeCard from '#lib/components/app/ModeCard.svelte';
 	import Section from '#lib/components/app/Section.svelte';
 	import Collapse from '#lib/components/app/Collapse.svelte';
@@ -38,10 +42,10 @@
 		if (!home.loaded) return 'One moment…';
 		if (home.haHealth !== 'ok') return 'The hub can’t be reached.';
 		if (!home.devices.length) return 'Your home is ready.';
-		const p: string[] = [];
-		if (unlocked.length) p.push(unlocked.length === 1 ? `${unlocked[0].name} is unlocked.` : `${n(unlocked.length)} doors unlocked.`);
+		const p: string[] = [], door = only(unlocked), light = only(lightsOn);
+		if (unlocked.length) p.push(door ? `${door.name} is unlocked.` : `${n(unlocked.length)} doors unlocked.`);
 		else if (locks.length) p.push('Everything is locked.');
-		if (lights.length) p.push(lightsOn.length === 0 ? 'Lights are off.' : lightsOn.length === 1 ? `${lightsOn[0].name} is on.` : `${n(lightsOn.length)} lights on.`);
+		if (lights.length) p.push(lightsOn.length === 0 ? 'Lights are off.' : light ? `${light.name} is on.` : `${n(lightsOn.length)} lights on.`);
 		return p.join(' ') || 'Everything looks calm.';
 	});
 
@@ -52,7 +56,7 @@
 	const cams = $derived(by('camera'));
 	const sensors = $derived(home.devices.filter((d) => (d.category === 'sensor' || d.category === 'energy') && d.reading && d.available && Number.isFinite(Number(d.reading.value))).slice(0, 8));
 	const plugs = $derived(home.devices.filter((d) => ['switch', 'fan'].includes(d.category)));
-	type Chip = { key: string; label: string; value: string; icon: any; tone: 'on' | 'signal' | 'none'; cats: string[] };
+	type Chip = { key: string; label: string; value: string; icon: IconComponent; tone: 'on' | 'signal' | 'none'; cats: string[] };
 	const chips = $derived.by<Chip[]>(() => {
 		const c: Chip[] = [];
 		if (lights.length) c.push({ key: 'lights', label: 'Lights', value: lightsOn.length ? `${lightsOn.length} on` : 'Off', icon: Lightbulb, tone: lightsOn.length ? 'on' : 'none', cats: ['light'] });
@@ -72,8 +76,20 @@
 		return rooms.map((r) => ({ ...r, devices: filtered.filter((d) => (d.roomId ?? null) === r.id) })).filter((r) => r.devices.length);
 	});
 	const toggleChip = (c: Chip) => { if (c.key === 'energy') location.href = '/activity?tab=energy'; else filter = filter === c.key ? null : c.key; };
-	async function allOff(ds: Device[]) { for (const d of ds.filter((x) => x.state === 'on')) await home.command(d.id, 'turn_off'); }
-	async function lockAll() { for (const d of unlocked) await home.command(d.id, 'lock'); }
+	const count = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+	async function allOff(ds: Device[]) { const on = ds.filter((x) => x.state === 'on' && x.available); if (on.length) await home.batch(`Turned off ${count(on.length, 'device')}`, async () => { for (const d of on) await home.command(d.id, 'turn_off'); }); }
+	async function lockAll() { const open = [...unlocked]; if (open.length) await home.batch(`Locked ${count(open.length, 'door')}`, async () => { for (const d of open) await home.command(d.id, 'lock'); }); }
+	/** Hold a room's name to switch off everything that is on in it. */
+	async function roomOff(r: { name: string; devices: Device[] }) {
+		const on = r.devices.filter((d) => d.available && d.state === 'on' && d.controls.some((c) => c.type === 'power'));
+		if (!on.length) { home.say('info', `Everything in ${r.name} is already off.`); return; }
+		await home.batch(`Turned off ${r.name}: ${count(on.length, 'device')}`, async () => { await Promise.all(on.map((d) => home.command(d.id, 'turn_off'))); });
+		haptics.success();
+	}
+	// Things that are risky to leave running, and doors left open to the world.
+	const RISKY = /heater|oven|stove|cooker|hob\b|iron|kettle|toaster|fryer|geyser|radiator/i;
+	const risky = $derived(home.devices.filter((d) => d.category === 'switch' && d.available && d.state === 'on' && RISKY.test(d.name)));
+	const garageOpen = $derived(home.devices.filter((d) => d.category === 'sensor' && /garage/i.test(d.name) && ['on', 'open'].includes((d.reading?.value ?? d.state).toLowerCase())));
 	const toneIcon = { on: 'bg-on text-on-foreground', signal: 'bg-signal text-white', none: 'bg-secondary text-muted-foreground' };
 	const toneChip = { on: 'bg-on-soft text-on-foreground border-transparent', signal: 'bg-signal-soft text-signal-foreground border-transparent', none: 'bg-card' };
 
@@ -126,7 +142,7 @@
 	async function favUp() {
 		if (!dragId) return;
 		const ids = home.favoriteDevices.map((d) => d.id), from = ids.indexOf(dragId);
-		if (overId) { ids.splice(ids.indexOf(overId), 0, ids.splice(from, 1)[0]); await home.saveFavorites(ids, home.prefs?.favorites.rooms ?? []); haptics.success(); }
+		if (overId) { ids.splice(ids.indexOf(overId), 0, ...ids.splice(from, 1)); await home.saveFavorites(ids, home.prefs?.favorites.rooms ?? []); haptics.success(); }
 		dragId = null; overId = null; dragDx = 0; dragDy = 0;
 	}
 
@@ -152,7 +168,7 @@
 	onMount(async () => {
 		try { hidden = localStorage.getItem('setup-hidden') === '1'; } catch {}
 		pushHere = await notifications.thisDevice();
-		if (session.can('users.manage')) { const r = await api('GET', '/api/admin/users'); if (r.ok) others = (r.data.users ?? r.data).length > 1; }
+		if (session.can('users.manage')) { const r = await api<{ users: unknown[] }>('GET', '/api/admin/users'); if (r.ok) others = r.data.users.length > 1; }
 	});
 	const steps = $derived([
 		{ label: 'Star your favorite devices', done: home.favoriteDevices.length > 0, href: '/devices', cta: 'Browse' },
@@ -195,17 +211,27 @@
 			<button type="button" class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground md:hidden" aria-label="Search" onclick={() => (chrome.search = true)}><Search class="size-4" /></button>
 		</header>
 
-		{#if home.loaded && (unlocked.length || offline.length)}
+		{#if home.loaded && (unlocked.length || offline.length || risky.length || garageOpen.length)}
 			<ul class="space-y-2" aria-label="Needs attention">
 				{#if unlocked.length}
+					{@const lone = only(unlocked)}
 					<li class="flex items-center gap-3 rounded-2xl bg-signal-soft px-4 py-3 text-signal-foreground">
 						<ShieldAlert class="size-5 shrink-0" />
-						<span class="min-w-0 flex-1 text-[0.9375rem] font-medium leading-snug">{unlocked.length === 1 ? `${unlocked[0].name} is unlocked.` : `${unlocked.length} doors are unlocked.`}{#if unlocked.length > 1}<span class="block truncate text-sm font-normal opacity-80">{unlocked.map((d) => d.name).join(', ')}</span>{/if}</span>
+						<span class="min-w-0 flex-1 text-[0.9375rem] font-medium leading-snug">{lone ? `${lone.name} is unlocked.` : `${unlocked.length} doors are unlocked.`}{#if unlocked.length > 1}<span class="block truncate text-sm font-normal opacity-80">{unlocked.map((d) => d.name).join(', ')}</span>{/if}</span>
 						<Button size="sm" class="bg-signal text-white hover:bg-signal/85" onclick={lockAll}>{unlocked.length > 1 ? 'Lock all' : 'Lock'}</Button>
 					</li>
 				{/if}
+				{#each risky as d (d.id)}
+					<li class="flex items-center gap-3 rounded-2xl bg-signal-soft px-4 py-3 text-signal-foreground">
+						<ShieldAlert class="size-5 shrink-0" /><span class="min-w-0 flex-1 text-[0.9375rem] font-medium leading-snug">{d.name} is on.</span>
+						<Button size="sm" class="bg-signal text-white hover:bg-signal/85" onclick={() => home.batch(`Turned off ${d.name}`, async () => { await home.command(d.id, 'turn_off'); })}>Turn off</Button>
+					</li>
+				{/each}
+				{#each garageOpen as d (d.id)}
+					<li><a href="/devices?q={encodeURIComponent(d.name)}" class="flex items-center gap-3 rounded-2xl bg-signal-soft px-4 py-3 text-signal-foreground"><ShieldAlert class="size-5 shrink-0" /><span class="flex-1 text-[0.9375rem] font-medium">{d.name} is open.</span><span class="text-sm opacity-80">Check</span></a></li>
+				{/each}
 				{#if offline.length}
-					<li><a href="/devices" class="flex items-center gap-3 rounded-2xl bg-secondary px-4 py-3"><WifiOff class="size-5 shrink-0 text-muted-foreground" /><span class="flex-1 text-[0.9375rem]"><span class="font-medium">{offline.length === 1 ? offline[0].name : `${offline.length} devices`}</span> {offline.length === 1 ? 'is' : 'are'} offline</span><span class="text-sm text-muted-foreground">Check</span></a></li>
+					<li><a href="/devices" class="flex items-center gap-3 rounded-2xl bg-secondary px-4 py-3"><WifiOff class="size-5 shrink-0 text-muted-foreground" /><span class="flex-1 text-[0.9375rem]"><span class="font-medium">{only(offline)?.name ?? `${offline.length} devices`}</span> {offline.length === 1 ? 'is' : 'are'} offline</span><span class="text-sm text-muted-foreground">Check</span></a></li>
 				{/if}
 			</ul>
 		{/if}
@@ -226,8 +252,9 @@
 				<div class="flex items-start gap-3"><Lightbulb class="mt-0.5 size-5 shrink-0 text-primary" />
 					<div class="min-w-0 flex-1 space-y-1 text-sm leading-snug"><p class="font-semibold">Quick tips</p>
 						<p>Tap a device's <span class="font-medium">icon</span> to switch it. Tap <span class="font-medium">anywhere else</span> for details.</p>
-						<p>Press and hold a light, then slide sideways to dim it.</p>
-						<p>Press and hold a status chip to switch them all off, or lock every door.</p></div>
+						<p>Press and hold a tile and slide sideways to set a level. Let go without sliding for more actions.</p>
+						<p>Double-tap a tile to go to the level you usually pick. Hold a room's name to switch the whole room off.</p>
+						<p>Pull down to refresh. Shake your phone to undo.</p></div>
 					<Button size="sm" variant="secondary" onclick={dismissTips}>Got it</Button></div>
 			</section>
 		{/if}
@@ -245,6 +272,7 @@
 				</div>
 			</Section>
 		{:else}
+			<AdaptiveCard />
 			<ModeCard />
 
 			{#if home.loaded && quick.length}
@@ -309,12 +337,13 @@
 				{#if sections.includes('rooms')}
 					<Section title="Rooms">
 						{#if roomsWithDevices.length || unplaced.length}
+							<p id="room-hold-hint" class="sr-only">Press and hold to turn everything in this room off.</p>
 							<div class="space-y-2">
 								{#each roomsWithDevices as r, i (r.id)}
 									{@const open = isRoomOpen(r.id, i)}
 									{@const on = r.devices.filter((d) => d.state === 'on' && d.available).length}
 									<div class="overflow-hidden rounded-2xl border bg-card">
-										<button type="button" class="flex w-full items-center gap-3 px-4 py-3.5 text-left" aria-expanded={open} onclick={() => flip(r.id, i)}>
+										<button type="button" class="flex w-full items-center gap-3 px-4 py-3.5 text-left" aria-expanded={open} aria-describedby="room-hold-hint" use:longpress={{ ms: 560, onlong: () => roomOff(r) }} onclick={() => flip(r.id, i)}>
 											<span class="size-2.5 shrink-0 rounded-full {on ? 'bg-on' : 'bg-border'}" aria-hidden="true"></span>
 											<span class="min-w-0 flex-1"><span class="block truncate text-base font-semibold tracking-[-0.015em]">{r.name}</span><span class="text-sm text-muted-foreground">{on ? `${on} on · ` : ''}{r.devices.length} device{r.devices.length === 1 ? '' : 's'}</span></span>
 											<ChevronDown class="size-4 text-muted-foreground transition-transform duration-300 {open ? 'rotate-180' : ''}" />

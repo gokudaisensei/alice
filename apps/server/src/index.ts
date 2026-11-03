@@ -14,6 +14,9 @@ import { createBackups, parseDests } from "./backup";
 import { dirname } from "node:path";
 import { createUpdates } from "./updates";
 import { runRetention } from "./retention";
+import { all, scalar } from "./sql";
+
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 const db = openDb(config.dbPath);
 migrate(db);
@@ -35,20 +38,21 @@ startRules(db, ha, notifier, undefined, powerLimits);
 createSampler(db, ha).start();
 // Once a day: tell people about new insights (at most once per finding every three days) and apply retention.
 const insights = createInsights(db, ha, devices);
-setInterval(() => { insights.sweep(notifier).catch(() => {}); notifier.prune(); try { const r = runRetention(db); if (r.auditBlocked) console.warn("Audit retention skipped: system clock looks wrong"); } catch (e: any) { console.warn("Retention failed", e?.message); } }, 24 * 3600_000);
+setInterval(() => { insights.sweep(notifier).catch(() => {}); notifier.prune(); try { const r = runRetention(db); if (r.auditBlocked) console.warn("Audit retention skipped: system clock looks wrong"); } catch (e) { console.warn("Retention failed", errorMessage(e)); } }, 24 * 3600_000);
 
 // Nightly encrypted backup (once a key is set). On start-up, catch up if the last one is more than a day old.
 const backups = createBackups(db, parseDests(dirname(config.dbPath), config.backupDirs));
 const runBackup = async () => {
-  for (const h of db.query("SELECT id FROM households").all() as { id: string }[]) {
-    const last = (db.query("SELECT MAX(created_at) t FROM backups WHERE household_id = ?").get(h.id) as any)?.t ?? 0;
+  for (const h of all<{ id: string }>(db, "SELECT id FROM households")) {
+    const last = scalar(db, "SELECT MAX(created_at) FROM backups WHERE household_id = ?", 0, h.id);
     if (!backups.recipient(h.id) || Date.now() - last < 23 * 3600_000) continue;
     const r = await backups.create(h.id, "auto");
     if ("error" in r) console.warn("Backup did not run:", r.error); else console.log("Backup made");
   }
 };
-setTimeout(() => runBackup().catch((e) => console.warn("Backup failed", e?.message)), 30_000);
-setInterval(() => runBackup().catch((e) => console.warn("Backup failed", e?.message)), 3600_000);
+const backupFailed = (e: unknown) => console.warn("Backup failed", errorMessage(e));
+setTimeout(() => runBackup().catch(backupFailed), 30_000);
+setInterval(() => runBackup().catch(backupFailed), 3600_000);
 
 const updates = createUpdates(db, config.updatesOut ? { out: config.updatesOut, in: config.updatesIn } : null, config.version);
 setInterval(() => updates.ingest(notifier).catch(() => {}), 60_000); // turns the updater's events into notices, notifications and audit entries

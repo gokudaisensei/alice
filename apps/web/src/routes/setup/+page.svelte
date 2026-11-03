@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { startRegistration } from '@simplewebauthn/browser';
-	import { api, explain } from '#lib/api.js';
+	import { startRegistration, type PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser';
+	import { api, passkeyFailure } from '#lib/api.js';
 	import { session } from '#lib/session.svelte.js';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
@@ -18,15 +18,15 @@
 		e.preventDefault();
 		busy = true; error = '';
 		try {
-			const o = await api('POST', '/api/auth/enroll/options', { token: code.trim(), displayName: name.trim() });
-			if (!o.ok) throw o.data?.error;
+			const o = await api<{ challengeId: string; options: PublicKeyCredentialCreationOptionsJSON }>('POST', '/api/auth/enroll/options', { token: code.trim(), displayName: name.trim() });
+			if (!o.ok) throw o.data.error;
 			const response = await startRegistration({ optionsJSON: o.data.options });
 			const v = await api('POST', '/api/auth/enroll/verify', { challengeId: o.data.challengeId, response });
-			if (!v.ok) throw v.data?.error;
+			if (!v.ok) throw v.data.error;
 			await session.refresh();
 			goto('/');
-		} catch (e: any) {
-			error = typeof e === 'string' ? explain(e) : e?.name === 'NotAllowedError' ? 'Passkey creation was cancelled.' : explain();
+		} catch (e) {
+			error = passkeyFailure(e, 'Passkey creation was cancelled.');
 		} finally { busy = false; }
 	}
 </script>

@@ -19,19 +19,20 @@
 		automations: { id: string; name: string; visible: boolean; blockedBy: string[] }[];
 		abilities: { id: string; on: boolean; byDefault: boolean }[];
 	};
+	const abilityText = (id: string) => ABILITY[id] ?? [id, ''];
 	const uid = $derived(page.params.id);
 	let data = $state<Data | null>(null), error = $state(''), tab = $state('rooms'), q = $state(''), by = $state<'room' | 'type'>('room'), open = $state<Record<string, boolean>>({});
 
 	async function load() {
-		const r = await api('GET', `/api/admin/users/${uid}/access`);
-		if (!r.ok) { error = explain(r.data?.error); return; }
-		data = r.data; if (!data!.tabs.includes(tab)) tab = data!.tabs[0];
+		const r = await api<Data>('GET', `/api/admin/users/${uid}/access`);
+		if (!r.ok) { error = explain(r.data.error); return; }
+		data = r.data; if (!r.data.tabs.includes(tab)) tab = r.data.tabs[0] ?? tab;
 	}
 	onMount(load);
 
 	const LABEL: Record<string, string> = { rooms: 'Rooms', devices: 'Devices', scenes: 'Scenes', routines: 'Routines', automations: 'Automations', abilities: 'Abilities' };
 	const TYPE: Record<string, string> = { light: 'Lights', switch: 'Switches and plugs', fan: 'Fans', climate: 'Climate', lock: 'Locks', camera: 'Cameras', media: 'Media players', sensor: 'Sensors', energy: 'Energy meters' };
-	const ABILITY: Record<string, [string, string]> = {
+	const ABILITY: Record<string, readonly [title: string, hint: string]> = {
 		'device.control': ['Control devices', 'Switch, dim, lock and adjust the devices they can use'],
 		'scene.activate': ['Run scenes and routines', 'Start the ones they can use'],
 		'scenes.manage': ['Create scenes and routines', 'Make new ones and edit the ones they can use'],
@@ -162,8 +163,8 @@
 				<p class="px-1 text-sm text-muted-foreground">What {data.user.name} can do, beyond which things they can use.</p>
 				<Group>{#each data.abilities as a (a.id)}
 					<label class="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/60 active:bg-muted">
-						<span class="min-w-0 flex-1"><span class="block text-[0.9375rem] font-medium">{ABILITY[a.id][0]}</span><span class="block text-sm text-muted-foreground">{ABILITY[a.id][1]}</span></span>
-						<Switch checked={a.on} onCheckedChange={() => ability(a)} aria-label={ABILITY[a.id][0]} />
+						<span class="min-w-0 flex-1"><span class="block text-[0.9375rem] font-medium">{abilityText(a.id)[0]}</span><span class="block text-sm text-muted-foreground">{abilityText(a.id)[1]}</span></span>
+						<Switch checked={a.on} onCheckedChange={() => ability(a)} aria-label={abilityText(a.id)[0]} />
 					</label>
 				{/each}</Group>
 			{/if}

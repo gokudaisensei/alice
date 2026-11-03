@@ -22,12 +22,13 @@
 		const term = q.trim();
 		if (!term) { hits = null; return; }
 		timer = setTimeout(async () => {
-			const r = await api('GET', `/api/search?q=${encodeURIComponent(term)}`);
-			hits = r.ok ? r.data.devices.map((d: any) => d.id) : [];
+			const r = await api<{ devices: { id: string }[] }>('GET', `/api/search?q=${encodeURIComponent(term)}`);
+			hits = r.ok ? r.data.devices.map((d) => d.id) : [];
 		}, 200);
 	});
 
 	const cats = $derived([...new Set(home.devices.map((d) => d.category))]);
+	const filters = $derived([{ key: 'all', text: 'All' }, ...cats.map((c) => ({ key: c, text: labels[c] ?? c }))]);
 	let shown = $state(36);
 	$effect(() => { q; filter; shown = 36; });
 	const all = $derived<Device[]>(home.devices.filter((d) => (hits ? hits.includes(d.id) : true) && (filter === 'all' || d.category === filter)));
@@ -37,7 +38,7 @@
 	<div class="space-y-3">
 		<div class="relative"><Search class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" class="pl-9" placeholder="Search by name, room or type" bind:value={q} aria-label="Search devices" /></div>
 		<div class="-mx-5 flex gap-1.5 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:px-0" role="group" aria-label="Filter by type">
-			{#each [['all', 'All'], ...cats.map((c) => [c, labels[c] ?? c])] as [key, text]}
+			{#each filters as { key, text }}
 				<button type="button" aria-pressed={filter === key} onclick={() => (filter = key)} class="h-8 shrink-0 rounded-full px-3.5 text-sm font-medium transition-colors {filter === key ? 'bg-foreground text-background' : 'bg-secondary text-muted-foreground hover:text-foreground'}">{text}</button>
 			{/each}
 		</div>

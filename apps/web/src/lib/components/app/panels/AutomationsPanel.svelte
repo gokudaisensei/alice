@@ -17,7 +17,7 @@
 	let busy = $state<Record<string, boolean>>({});
 
 	async function load() {
-		const r = await api('GET', '/api/automations');
+		const r = await api<{ automations: AutomationView[]; suggested: Template[] }>('GET', '/api/automations');
 		if (r.ok) { list = r.data.automations; suggested = r.data.suggested; loadError = ''; } else loadError = r.data?.message ?? explain(r.data?.error);
 		loaded = true;
 	}

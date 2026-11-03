@@ -4,16 +4,17 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "tsc -p ."
   },
   "dependencies": {
     "@simplewebauthn/server": "^14.0.3",
     "age-encryption": "^0.3.1",
-    "elysia": "latest",
+    "elysia": "^1.4.30",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "^1.4.4",
     "@types/web-push": "^3.6.4",
     "typescript": "^7.0.2"
   }

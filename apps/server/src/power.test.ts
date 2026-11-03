@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
+import { scalar } from "./sql";
 import { createDeviceService } from "./devices";
 import { createNotifier } from "./notify";
 import { createPowerLimits, switchFor } from "./power";
 import { startRules } from "./rules";
-import { ent, setup } from "./testkit";
+import { ent, setup, type Body } from "./testkit";
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const FAST = { offlineMs: 40, lockMs: 40, hubMs: 40, powerMs: 60 };
@@ -13,13 +14,13 @@ async function home() {
   const t = setup(), admin = await t.bootstrapAdmin("a1");
   await t.reauth(admin.cookie!, "a1");
   const member = await t.addUser(admin.cookie!, "member", "m1"), guest = await t.addUser(admin.cookie!, "guest", "g1");
-  const j = (m: string, p: string, cookie: string, body?: any) => t.call(m, p, { cookie, body });
+  const j = (m: string, p: string, cookie: string, body?: unknown) => t.call(m, p, { cookie, body });
   t.ha.entities.set(KETTLE, ent(KETTLE, "50", { device_class: "power", unit_of_measurement: "W", friendly_name: "Kettle Power" }));
   t.ha.entities.set("switch.kettle", ent("switch.kettle", "on", { friendly_name: "Kettle" }));
   t.ha.set("switch.heater", "off");
   const svc = createDeviceService(t.db, t.ha), nf = createNotifier(t.db, svc, t.push, () => t.clock.t);
-  const limits = createPowerLimits(t.db), hid = (t.db.query("SELECT id FROM households LIMIT 1").get() as any).id as string;
-  const titles = async (cookie: string) => ((await j("GET", "/api/notifications", cookie)).json.notifications as any[]).filter((n) => n.kind === "power").map((n) => n.title);
+  const limits = createPowerLimits(t.db), hid = scalar(t.db, "SELECT id FROM households LIMIT 1", "");
+  const titles = async (cookie: string) => ((await j("GET", "/api/notifications", cookie)).json.notifications as Body[]).filter((n) => n.kind === "power").map((n) => n.title);
   return { t, admin: admin.cookie!, member, guest, j, nf, limits, hid, titles };
 }
 
@@ -35,7 +36,7 @@ test("limits are set by hand, validated, and only by people who may manage rules
   expect((await j("GET", "/api/power-limits", admin)).json.limits.length).toBe(1);
   expect((await j("DELETE", `/api/power-limits/${KETTLE}`, member.cookie)).status).toBe(200);
   expect((await j("GET", "/api/power-limits", member.cookie)).json.limits).toEqual([]);
-  expect((t.db.query("SELECT COUNT(*) n FROM security_audit WHERE action LIKE 'power.%'").get() as any).n).toBeGreaterThanOrEqual(2);
+  expect(scalar(t.db, "SELECT COUNT(*) n FROM security_audit WHERE action LIKE 'power.%'", 0)).toBeGreaterThanOrEqual(2);
 });
 
 test("a reading that stays over the limit is reported once, with a switch-off button; spikes and no limit are not", async () => {

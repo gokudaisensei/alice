@@ -13,6 +13,8 @@ cd apps/server && DB_PATH=/tmp/alice/app.db HA_URL=http://127.0.0.1:8123 HA_TOKE
 ```
 Open `http://localhost:3000/setup` and use the setup code the server prints. Use `localhost` (not `127.0.0.1`): passkeys need it.
 
+With a Home Assistant that runs elsewhere: `./alice.sh install http://ha.local:8123` then `./alice.sh start` (see `docs/INSTALL.md` section 13).
+
 For the real thing, use a real Home Assistant container instead of the mock (see `docs/CAVEATS.md` for the one-time configuration it needs).
 
 ## Tests
@@ -23,11 +25,12 @@ For the real thing, use a real Home Assistant container instead of the mock (see
 | Updater on real containers and a real registry | `deploy/updater/test.sh` |
 | Egress isolation on a real network | `deploy/egress/test.sh` |
 | Full topology next to a real HA | `deploy/test-topology.sh <ha-container> <token-file>` |
-| Web type-check | `cd apps/web && bunx svelte-check` |
+| Type-check everything (server, web, simulator, mock hub) | `bun run typecheck` |
 
 ## Documents
 | | |
 |---|---|
+| `docs/INSTALL.md` | Install and set up, from an empty box to a working household |
 | `docs/PLAN.md` | Architecture and decisions |
 | `docs/SECURITY.md` | How each security property is achieved, per feature |
 | `docs/THREAT-MODEL.md` | Threats, mitigations, residual risk |

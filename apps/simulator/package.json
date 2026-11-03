@@ -5,8 +5,15 @@
 	"scripts": {
 		"build": "bun build src/viewer/main.ts --outdir public --minify --target browser",
 		"start": "bun run build && bun src/server.ts",
-		"test": "bun test"
+		"test": "bun test",
+		"typecheck": "tsc -p ."
 	},
-	"dependencies": { "three": "^0.170.0" },
-	"devDependencies": { "@types/three": "^0.170.0", "@types/bun": "latest", "typescript": "^5" }
+	"dependencies": {
+		"three": "^0.170.0"
+	},
+	"devDependencies": {
+		"@types/three": "^0.170.0",
+		"@types/bun": "^1.4.4",
+		"typescript": "^7.0.2"
+	}
 }

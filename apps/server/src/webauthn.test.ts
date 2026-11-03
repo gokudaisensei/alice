@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { scalar } from "./sql";
 import { setup, realWa } from "./testkit";
 import { SoftAuthenticator } from "./softauth";
 import { ensureBootstrapCode } from "./auth";
@@ -7,7 +8,7 @@ const real = () => setup(undefined, realWa());
 
 async function enrollOpts(t: ReturnType<typeof real>, code: string) {
   const o = await t.call("POST", "/api/auth/enroll/options", { body: { token: code, displayName: "Alex" } });
-  return o.json as { challengeId: string; options: any };
+  return o.json as { challengeId: string; options: { challenge: string } };
 }
 async function register(t: ReturnType<typeof real>, a: SoftAuthenticator, code?: string, tweak = {}) {
   const o = await enrollOpts(t, code ?? ensureBootstrapCode(t.db)!);
@@ -27,8 +28,7 @@ test("real ceremony: register a passkey, then sign in with it", async () => {
   const login = await loginWith(t, a);
   expect(login.status).toBe(200);
   expect((await t.call("GET", "/api/me", { cookie: login.cookie })).status).toBe(200);
-  const row: any = t.db.query("SELECT counter FROM passkeys").get();
-  expect(row.counter).toBe(1); // signature counter persisted
+  expect(scalar(t.db, "SELECT counter FROM passkeys", 0)).toBe(1); // signature counter persisted
 });
 
 test("registration is rejected for wrong origin, wrong RP, or missing user verification", async () => {

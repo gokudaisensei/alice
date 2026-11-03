@@ -9,6 +9,11 @@
 
 	let { open = $bindable(false) }: { open: boolean } = $props();
 	let query = $state('');
+	// What you pick most often rises to the top when the box is empty. Kept on this phone.
+	const USE = 'palette-use';
+	let used = $state<Record<string, number>>({});
+	$effect(() => { try { used = JSON.parse(localStorage.getItem(USE) ?? '{}'); } catch { used = {}; } });
+	function note(id: string) { used[id] = (used[id] ?? 0) + 1; try { localStorage.setItem(USE, JSON.stringify(used)); } catch { /* not kept */ } }
 	$effect(() => { if (!open) query = ''; });
 
 	const pages = $derived(allPages(session.can, home.devices.some((d) => d.category === 'energy')));
@@ -25,7 +30,7 @@
 		if (home.scenes[0]) t.push(`Activate ${home.scenes[0].name}`);
 		return t.slice(0, 4);
 	});
-	const acts = $derived(home.devices.filter((d) => query.trim() || d.controls.length > 0).slice(0, query.trim() ? 200 : 40).map((d) => {
+	const acts = $derived(home.devices.filter((d) => query.trim() || d.controls.length > 0).sort((a, b) => query.trim() ? 0 : (used[b.id] ?? 0) - (used[a.id] ?? 0)).slice(0, query.trim() ? 200 : 40).map((d) => {
 		const power = d.available && d.controls.some((c) => c.type === 'power');
 		if (power) return { d, label: d.state === 'on' ? 'Turn off' : 'Turn on', run: () => home.command(d.id, d.state === 'on' ? 'turn_off' : 'turn_on') };
 		if (d.available && d.category === 'lock' && d.state === 'unlocked') return { d, label: 'Lock', run: () => home.command(d.id, 'lock') };
@@ -60,7 +65,7 @@
 		{#if acts.length}
 			<Command.Group heading="Devices">
 				{#each acts as a (a.d.id)}
-					<Command.Item value="{a.d.name} {a.d.category}" onSelect={() => run(a.run)}>
+					<Command.Item value="{a.d.name} {a.d.category}" onSelect={() => { note(a.d.id); run(a.run); }}>
 						<Lightbulb class="size-4" /><span class="flex-1 truncate">{a.d.name}</span><span class="text-xs text-muted-foreground">{a.label}</span>
 					</Command.Item>
 				{/each}

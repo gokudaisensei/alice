@@ -4,7 +4,7 @@
 	import { onMount } from 'svelte';
 	import { api } from '#lib/api.js';
 	let n = $state<{ version: string; emergency: boolean; reason: string; startsAt: string } | null>(null);
-	async function load() { const r = await api('GET', '/api/updates/notice'); if (r.ok) n = r.data.notice; }
+	async function load() { const r = await api<{ notice: typeof n }>('GET', '/api/updates/notice'); if (r.ok) n = r.data.notice; }
 	onMount(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); });
 	const at = $derived(n ? new Date(n.startsAt).toLocaleTimeString([], { timeStyle: 'short' }) : '');
 	const soon = $derived(n ? Date.parse(n.startsAt) > Date.now() : false);

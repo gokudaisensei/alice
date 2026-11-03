@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { setup } from "./testkit";
+import { all, scalar } from "./sql";
+import { setup, type Body } from "./testkit";
 import { SESSION } from "./session";
 
 async function household() {
@@ -27,7 +28,7 @@ test("members and guests cannot use any admin endpoint (server-side)", async () 
   for (const who of [member, guest]) {
     for (const [m, p, b] of [["GET", "/api/admin/users"], ["GET", "/api/admin/activity"], ["POST", "/api/admin/users", { displayName: "x", role: "guest" }],
       ["PATCH", `/api/admin/users/${guest.userId}`, { role: "admin" }], ["PUT", `/api/admin/users/${guest.userId}/permissions`, { overrides: { "users.manage": true } }],
-      ["POST", `/api/admin/users/${guest.userId}/recovery`], ["DELETE", `/api/admin/users/${guest.userId}`]] as any[]) {
+      ["POST", `/api/admin/users/${guest.userId}/recovery`], ["DELETE", `/api/admin/users/${guest.userId}`]] as Body[]) {
       expect((await t.call(m, p, { cookie: who.cookie, body: b })).status).toBe(403);
     }
   }
@@ -61,19 +62,19 @@ test("no privilege escalation via delegated users.manage", async () => {
   await t.call("PUT", `/api/admin/users/${member.userId}/permissions`, { cookie: admin, body: { overrides: { "users.manage": true, "admin.access": true } } });
   await t.reauth(member.cookie, "m1");
   expect((await t.call("GET", "/api/admin/users", { cookie: member.cookie })).status).toBe(200);
-  const call = (m: string, p: string, body?: any) => t.call(m, p, { cookie: member.cookie, body });
+  const call = (m: string, p: string, body?: unknown) => t.call(m, p, { cookie: member.cookie, body });
   expect((await call("POST", "/api/admin/users", { displayName: "x", role: "admin" })).status).toBe(403);
   expect((await call("PATCH", `/api/admin/users/${guest.userId}`, { role: "admin" })).status).toBe(403);
   expect((await call("PUT", `/api/admin/users/${guest.userId}/permissions`, { overrides: { "users.manage": true } })).status).toBe(403);
   expect((await call("PUT", `/api/admin/users/${guest.userId}/permissions`, { overrides: { "rooms.manage": true } })).status).toBe(403); // member lacks it, can't hand it out
-  const adminId = (t.db.query("SELECT id FROM users WHERE role='admin'").get() as any).id;
+  const adminId = scalar(t.db, "SELECT id FROM users WHERE role='admin'", "");
   expect((await call("POST", `/api/admin/users/${adminId}/recovery`)).status).toBe(403);
   expect((await call("DELETE", `/api/admin/users/${adminId}`)).status).toBe(403);
 });
 
 test("the last active admin cannot be demoted or removed", async () => {
   const { t, admin } = await household();
-  const adminId = (t.db.query("SELECT id FROM users WHERE role='admin'").get() as any).id;
+  const adminId = scalar(t.db, "SELECT id FROM users WHERE role='admin'", "");
   expect((await t.call("PATCH", `/api/admin/users/${adminId}`, { cookie: admin, body: { role: "member" } })).status).toBe(409);
   expect((await t.call("DELETE", `/api/admin/users/${adminId}`, { cookie: admin })).status).toBe(409);
 });
@@ -93,7 +94,7 @@ test("household privacy: admin APIs never reveal who did what; audit is append-o
   const dump = JSON.stringify([act.json, (await t.call("GET", "/api/admin/users", { cookie: admin })).json]).toLowerCase();
   expect(dump).not.toContain("actor");
   expect(Object.keys(act.json.events[0]).sort()).toEqual(["kind", "summary", "ts"]);
-  const cols = (t.db.query("PRAGMA table_info(activity_events)").all() as any[]).map((c) => c.name);
+  const cols = all<{ name: string }>(t.db, "PRAGMA table_info(activity_events)").map((c) => c.name);
   expect(cols.some((c) => c.includes("actor") || c.includes("user"))).toBe(false);
   // No route exposes security_audit at all.
   for (const p of ["/api/admin/audit", "/api/audit", "/api/admin/security-audit"]) expect((await t.call("GET", p, { cookie: admin })).status).toBe(404);
@@ -107,5 +108,5 @@ test("users in other households are not reachable", async () => {
   t.db.query("INSERT INTO users (id, household_id, display_name, role, status, created_at) VALUES ('u2','h2','Eve','member','active',1)").run();
   expect((await t.call("PATCH", "/api/admin/users/u2", { cookie: admin, body: { role: "admin" } })).status).toBe(404);
   expect((await t.call("DELETE", "/api/admin/users/u2", { cookie: admin })).status).toBe(404);
-  expect((await t.call("GET", "/api/admin/users", { cookie: admin })).json.users.some((u: any) => u.id === "u2")).toBe(false);
+  expect((await t.call("GET", "/api/admin/users", { cookie: admin })).json.users.some((u: Body) => u.id === "u2")).toBe(false);
 });

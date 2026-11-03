@@ -5,6 +5,7 @@
 	import { home } from '#lib/home.svelte.js';
 	import { session } from '#lib/session.svelte.js';
 	import { haptics } from '#lib/haptics.js';
+	import { longpress } from '#lib/gestures.svelte.js';
 	import { tileClass } from '#lib/tiles.js';
 	import DeviceCard from '#lib/components/app/DeviceCard.svelte';
 	import Page from '#lib/components/app/Page.svelte';
@@ -23,10 +24,11 @@
 	const lightsOn = $derived(list.filter((d) => d.category === 'light' && d.state === 'on' && d.available));
 
 	function go(i: number) {
-		if (i < 0 || i >= pages.length || i === cur) return;
+		const target = pages[i];
+		if (!target || i === cur) return;
 		dir = i > cur ? 1 : -1; cur = i; haptics.tap();
-		const u = new URL(location.href); u.searchParams.set('room', pages[i].id); replaceState(u, {});
-		document.querySelector(`[data-room-chip="${pages[i].id}"]`)?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+		const u = new URL(location.href); u.searchParams.set('room', target.id); replaceState(u, {});
+		document.querySelector(`[data-room-chip="${target.id}"]`)?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
 	}
 
 	// Swipe the room sideways to go to the next one. Mostly-vertical movement is just scrolling and is left alone.
@@ -36,7 +38,13 @@
 		const dx = e.clientX - sx, dy = e.clientY - sy;
 		if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6 && Date.now() - st < 700) go(cur + (dx < 0 ? 1 : -1));
 	}
-	async function lightsOff() { haptics.grab(); for (const d of lightsOn) await home.command(d.id, 'turn_off'); haptics.success(); }
+	async function lightsOff() { haptics.grab(); await home.batch(`Turned off ${lightsOn.length} light${lightsOn.length === 1 ? '' : 's'}`, async () => { for (const d of lightsOn) await home.command(d.id, 'turn_off'); }); haptics.success(); }
+	/** Hold the room's name to switch off everything that's on in it, not only the lights. */
+	async function roomOff() {
+		const on = list.filter((d) => d.available && d.state === 'on' && d.controls.some((c) => c.type === 'power'));
+		if (!on.length) { home.say('info', `Everything in ${room?.name} is already off.`); return; }
+		await home.batch(`Turned off ${room?.name}`, async () => { await Promise.all(on.map((d) => home.command(d.id, 'turn_off'))); }); haptics.success();
+	}
 </script>
 
 <Page title="Rooms" width="xl">
@@ -57,7 +65,7 @@
 			{#key room?.id}
 				<div in:fly={{ x: dir * 40, duration: 240 }} class="space-y-4">
 					<div class="flex items-end justify-between gap-3">
-						<div><h2 class="title">{room?.name}</h2><p class="mt-1 text-sm text-muted-foreground">{list.length} device{list.length === 1 ? '' : 's'}{#if lightsOn.length}&nbsp;· {lightsOn.length} light{lightsOn.length === 1 ? '' : 's'} on{/if}</p></div>
+						<div use:longpress={{ ms: 560, onlong: roomOff }} class="select-none" style="-webkit-touch-callout:none"><h2 class="title">{room?.name}</h2><p class="mt-1 text-sm text-muted-foreground">{list.length} device{list.length === 1 ? '' : 's'}{#if lightsOn.length}&nbsp;· {lightsOn.length} light{lightsOn.length === 1 ? '' : 's'} on{/if}</p></div>
 						{#if lightsOn.length}<Button variant="secondary" size="sm" onclick={lightsOff}>Lights off</Button>{/if}
 					</div>
 					{#if list.length}<div class="tile-grid">{#each list as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div>
@@ -65,7 +73,7 @@
 				</div>
 			{/key}
 		</div>
-		<p class="text-center text-xs text-muted-foreground md:hidden">Swipe sideways to change room</p>
+		<p class="text-center text-xs text-muted-foreground md:hidden">Swipe sideways to change room. Hold the room's name to turn it all off.</p>
 	{:else if home.loaded}
 		<Empty title="No rooms yet" description="Rooms group your devices so they're easy to find.">{#if session.can('rooms.manage')}<Button href="/admin/rooms">Set up rooms</Button>{/if}</Empty>
 	{/if}

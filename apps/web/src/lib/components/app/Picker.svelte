@@ -1,18 +1,18 @@
-<script lang="ts">
+<script lang="ts" generics="T extends string | number">
 	import * as Drawer from '#lib/components/ui/drawer';
 	import * as DropdownMenu from '#lib/components/ui/dropdown-menu';
 	import { viewport } from '#lib/viewport.svelte.js';
 	import { haptics } from '#lib/haptics.js';
 	import { Check, ChevronsUpDown } from '@lucide/svelte';
 
-	type Opt = { value: string | number; label: string };
+	type Opt = { value: T; label: string };
 	/** Replaces the browser's own dropdown: a menu under the field on a computer, a bottom list with big rows on a phone. */
 	let { value = $bindable(), options, label, class: cls = '', placeholder = 'Choose', capitalize = false, onchange }: {
-		value: string | number | undefined; options: Opt[]; label: string; class?: string; placeholder?: string; capitalize?: boolean; onchange?: (v: any) => void;
+		value: T | undefined; options: Opt[]; label: string; class?: string; placeholder?: string; capitalize?: boolean; onchange?: (v: T) => void;
 	} = $props();
 	let open = $state(false);
 	const current = $derived(options.find((o) => String(o.value) === String(value)));
-	function pick(v: string | number) { haptics.tap(); value = v; open = false; onchange?.(v); }
+	function pick(v: T) { haptics.tap(); value = v; open = false; onchange?.(v); }
 </script>
 
 {#snippet trigger()}

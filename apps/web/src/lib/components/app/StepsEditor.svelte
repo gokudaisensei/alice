@@ -13,18 +13,18 @@
 
 	function addDevice() {
 		const d = controllable[0]; if (!d) return;
-		const a = actionsFor(d)[0];
+		const a = actionsFor(d)[0]; if (!a) return;
 		steps.push({ type: 'device', entityId: d.id, action: a.action, ...(a.input ? { value: a.input.kind === 'number' ? a.input.start : a.input.options[0] } : {}) });
 	}
 	function onDevice(s: Extract<Step, { type: 'device' }>, eid: string) {
-		s.entityId = eid; const a = optsOf(eid)[0];
+		s.entityId = eid; const a = optsOf(eid)[0]; if (!a) return;
 		s.action = a.action; if (a.input) s.value = a.input.kind === 'number' ? a.input.start : a.input.options[0]; else delete s.value;
 	}
 	function onAction(s: Extract<Step, { type: 'device' }>, action: string) {
 		s.action = action; const a = optsOf(s.entityId).find((x) => x.action === action);
 		if (a?.input) s.value = a.input.kind === 'number' ? a.input.start : a.input.options[0]; else delete s.value;
 	}
-	const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= steps.length) return; [steps[i], steps[j]] = [steps[j], steps[i]]; };
+	const move = (i: number, d: number) => { const j = i + d; if (j < 0 || j >= steps.length) return; steps.splice(j, 0, ...steps.splice(i, 1)); };
 </script>
 
 <ol class="space-y-2">

@@ -27,18 +27,18 @@
 	const roles = $derived((isAdmin ? ['admin', 'member', 'guest'] : ['member', 'guest']) as ('admin' | 'member' | 'guest')[]);
 	const link = (code: string) => `${location.origin}/setup?code=${encodeURIComponent(code)}`;
 
-	async function load() { const r = await api('GET', '/api/admin/users'); if (r.ok) users = r.data.users; else error = explain(r.data?.error); loaded = true; }
+	async function load() { const r = await api<{ users: User[] }>('GET', '/api/admin/users'); if (r.ok) users = r.data.users; else error = explain(r.data?.error); loaded = true; }
 	onMount(load);
 
 	async function invite() {
 		busy = true; error = '';
-		const r = await sensitive('POST', '/api/admin/users', { displayName: name.trim(), role });
+		const r = await sensitive<{ enrollmentCode: string }>('POST', '/api/admin/users', { displayName: name.trim(), role });
 		busy = false;
 		if (!r.ok) { error = r.data?.message ?? explain(r.data?.error); return; }
 		inviteOpen = false; result = { title: `Invite ${name.trim()}`, code: r.data.enrollmentCode, hours: 24 }; name = ''; await load();
 	}
 	async function recovery(u: User) {
-		const r = await sensitive('POST', `/api/admin/users/${u.id}/recovery`);
+		const r = await sensitive<{ enrollmentCode: string }>('POST', `/api/admin/users/${u.id}/recovery`);
 		if (!r.ok) { error = r.data?.message ?? explain(r.data?.error); return; }
 		result = { title: `New passkey for ${u.displayName}`, code: r.data.enrollmentCode, hours: 1 };
 	}

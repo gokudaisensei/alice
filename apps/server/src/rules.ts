@@ -1,11 +1,12 @@
 import type { Database } from "bun:sqlite";
 import { describe } from "./capabilities";
-import type { HaApi } from "./ha";
+import { friendlyName, type HaApi } from "./ha";
+import { one } from "./sql";
 import type { Notifier } from "./notify";
 import { createPowerLimits, switchFor, wattsOf, type PowerLimits } from "./power";
 
 export type Delays = { offlineMs: number; lockMs: number; hubMs: number; powerMs?: number };
-export const DEFAULT_DELAYS: Delays = { offlineMs: 5 * 60_000, lockMs: 10 * 60_000, hubMs: 2 * 60_000, powerMs: 5 * 60_000 };
+export const DEFAULT_DELAYS: Required<Delays> = { offlineMs: 5 * 60_000, lockMs: 10 * 60_000, hubMs: 2 * 60_000, powerMs: 5 * 60_000 };
 const mins = (ms: number) => { const m = Math.round(ms / 60_000); return m >= 1 ? `${m} minute${m === 1 ? "" : "s"}` : "a short while"; };
 
 /**
@@ -13,12 +14,12 @@ const mins = (ms: number) => { const m = Math.round(ms / 60_000); return m >= 1 
  * so a flaky bulb doesn't buzz a phone. Nothing here ever acts on a device.
  */
 export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays = DEFAULT_DELAYS, limits: PowerLimits = createPowerLimits(db)) {
-  const powerMs = delays.powerMs ?? DEFAULT_DELAYS.powerMs!;
+  const powerMs = delays.powerMs ?? DEFAULT_DELAYS.powerMs;
   const fmtW = (w: number) => (w >= 1000 ? `${Math.round(w / 100) / 10} kW` : `${Math.round(w)} W`);
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   let hubAlerted = false;
-  const household = () => (db.query("SELECT id FROM households LIMIT 1").get() as any)?.id as string | undefined;
-  const nameOf = (id: string) => (db.query("SELECT name FROM device_meta WHERE entity_id = ? AND name != ''").get(id) as any)?.name ?? String(ha.entities.get(id)?.attributes?.friendly_name ?? id);
+  const household = () => one<{ id: string }>(db, "SELECT id FROM households LIMIT 1")?.id;
+  const nameOf = (id: string) => one<{ name: string }>(db, "SELECT name FROM device_meta WHERE entity_id = ? AND name != ''", id)?.name ?? friendlyName(ha.entities.get(id), id);
   const arm = (key: string, ms: number, still: () => boolean, fire: () => void) => {
     if (timers.has(key)) return;
     timers.set(key, setTimeout(() => { timers.delete(key); if (still()) fire(); }, ms));

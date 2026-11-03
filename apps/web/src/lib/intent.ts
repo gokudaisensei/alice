@@ -12,6 +12,8 @@ export type Intent =
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9% ]+/g, ' ').replace(/\s+/g, ' ').trim();
 const STOP = new Set(['the', 'a', 'an', 'my', 'please', 'all', 'every', 'in', 'of', 'to', 'at', 'light', 'lights', 'lamp', 'lamps']);
 const words = (s: string) => norm(s).split(' ').filter((w) => w && !STOP.has(w));
+/** Capture group `i` of a match, or '' when that group didn't take part. */
+const at = (m: RegExpMatchArray, i: number) => m[i] ?? '';
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 const CATEGORY_WORDS: Record<string, string> = { light: 'light', lights: 'light', lamp: 'light', lamps: 'light', fan: 'fan', fans: 'fan', plug: 'switch', plugs: 'switch', switch: 'switch', switches: 'switch', lock: 'lock', locks: 'lock', door: 'lock', doors: 'lock' };
@@ -23,14 +25,14 @@ export function parseIntent(raw: string, c: Ctx): Intent | null {
 	// What to do
 	let action: 'turn_on' | 'turn_off' | 'lock' | 'unlock' | 'set_brightness' | 'run' | null = null, value: number | undefined, rest = t;
 	let m: RegExpMatchArray | null;
-	if ((m = t.match(/^(?:set|dim|brighten)\s+(.+?)\s+(?:to\s+)?(\d{1,3})\s*%?$/))) { action = 'set_brightness'; rest = m[1]; value = Math.min(100, Math.max(1, Number(m[2]))); }
-	else if ((m = t.match(/^(?:turn|switch)\s+(on|off)\s+(.+)$/))) { action = m[1] === 'on' ? 'turn_on' : 'turn_off'; rest = m[2]; }
-	else if ((m = t.match(/^(?:turn|switch)\s+(.+?)\s+(on|off)$/))) { action = m[2] === 'on' ? 'turn_on' : 'turn_off'; rest = m[1]; }
-	else if ((m = t.match(/^(on|off)\s+(.+)$/))) { action = m[1] === 'on' ? 'turn_on' : 'turn_off'; rest = m[2]; }
-	else if ((m = t.match(/^(.+?)\s+(on|off)$/))) { action = m[2] === 'on' ? 'turn_on' : 'turn_off'; rest = m[1]; }
-	else if ((m = t.match(/^lock\s+(.+)$/))) { action = 'lock'; rest = m[1]; }
-	else if ((m = t.match(/^unlock\s+(.+)$/))) { action = 'unlock'; rest = m[1]; }
-	else if ((m = t.match(/^(?:activate|run|start|play|good|set the scene)\s*(.+)$/))) { action = 'run'; rest = /^good\b/.test(t) ? t : m[1]; }
+	if ((m = t.match(/^(?:set|dim|brighten)\s+(.+?)\s+(?:to\s+)?(\d{1,3})\s*%?$/))) { action = 'set_brightness'; rest = at(m, 1); value = Math.min(100, Math.max(1, Number(at(m, 2)))); }
+	else if ((m = t.match(/^(?:turn|switch)\s+(on|off)\s+(.+)$/))) { action = at(m, 1) === 'on' ? 'turn_on' : 'turn_off'; rest = at(m, 2); }
+	else if ((m = t.match(/^(?:turn|switch)\s+(.+?)\s+(on|off)$/))) { action = at(m, 2) === 'on' ? 'turn_on' : 'turn_off'; rest = at(m, 1); }
+	else if ((m = t.match(/^(on|off)\s+(.+)$/))) { action = at(m, 1) === 'on' ? 'turn_on' : 'turn_off'; rest = at(m, 2); }
+	else if ((m = t.match(/^(.+?)\s+(on|off)$/))) { action = at(m, 2) === 'on' ? 'turn_on' : 'turn_off'; rest = at(m, 1); }
+	else if ((m = t.match(/^lock\s+(.+)$/))) { action = 'lock'; rest = at(m, 1); }
+	else if ((m = t.match(/^unlock\s+(.+)$/))) { action = 'unlock'; rest = at(m, 1); }
+	else if ((m = t.match(/^(?:activate|run|start|play|good|set the scene)\s*(.+)$/))) { action = 'run'; rest = /^good\b/.test(t) ? t : at(m, 1); }
 	if (!action) return null;
 
 	if (action === 'unlock') return { kind: 'refused', label: 'Doors can only be unlocked from the door’s own tile, after a passkey check.' };
@@ -38,8 +40,9 @@ export function parseIntent(raw: string, c: Ctx): Intent | null {
 	if (action === 'run') {
 		const q = words(rest);
 		const hits = [...c.scenes.map((s) => ({ ...s, kind: 'scene' as const })), ...c.routines.map((s) => ({ ...s, kind: 'routine' as const }))].filter((x) => q.length && q.every((w) => norm(x.name).includes(w)));
-		if (hits.length !== 1) return null; // zero or ambiguous: say nothing rather than guess
-		return { kind: hits[0].kind, id: hits[0].id, label: `${hits[0].kind === 'scene' ? 'Activate' : 'Run'} ${hits[0].name}` };
+		const [hit] = hits;
+		if (!hit || hits.length !== 1) return null; // zero or ambiguous: say nothing rather than guess
+		return { kind: hit.kind, id: hit.id, label: `${hit.kind === 'scene' ? 'Activate' : 'Run'} ${hit.name}` };
 	}
 
 	// Which devices
@@ -59,6 +62,7 @@ export function parseIntent(raw: string, c: Ctx): Intent | null {
 	if (!pool.length) return null;
 	if (!wantsAll && !room && pool.length > 1 && nameWords.length && !cat) return null; // "kitchen" matched several different things: don't guess
 	const verb = action === 'turn_on' ? 'Turn on' : action === 'turn_off' ? 'Turn off' : action === 'lock' ? 'Lock' : `Set to ${value}%:`;
-	const what = pool.length === 1 ? pool[0].name : room && cat ? `${room.name} ${cat === 'light' ? 'lights' : cat + 's'} (${pool.length})` : `${plural(pool.length, cat === 'light' ? 'light' : 'device')}`;
+	const [only] = pool;
+	const what = only && pool.length === 1 ? only.name : room && cat ? `${room.name} ${cat === 'light' ? 'lights' : cat + 's'} (${pool.length})` : `${plural(pool.length, cat === 'light' ? 'light' : 'device')}`;
 	return { kind: 'devices', action: action as 'turn_on' | 'turn_off' | 'lock' | 'set_brightness', value, ids: pool.map((d) => d.id), label: `${verb} ${what}` };
 }

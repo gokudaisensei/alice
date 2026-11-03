@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { home, type Device } from '#lib/home.svelte.js';
+	import { home, type Control, type Device } from '#lib/home.svelte.js';
+	import type { IconComponent } from '#lib/icons.js';
 	import { session } from '#lib/session.svelte.js';
 	import PowerLimit from '#lib/components/app/PowerLimit.svelte';
 	import { Switch } from '#lib/components/ui/switch';
@@ -11,17 +12,25 @@
 	import { isWide } from '#lib/tiles.js';
 	import { scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
-	import { dur } from '#lib/motion.js';
+	import { dur, reduced } from '#lib/motion.js';
+	import { tick } from 'svelte';
 	import { viewport } from '#lib/viewport.svelte.js';
 	import { haptics } from '#lib/haptics.js';
-	import { Lightbulb, Plug, Fan, Thermometer, Lock, LockOpen, Camera, Tv, Gauge, Zap, Star, Workflow, Minus, Plus, Play, Pause } from '@lucide/svelte';
+	import { selection } from '#lib/select.svelte.js';
+	import { usual } from '#lib/usual.js';
+	import { scrubbed, crossed } from '#lib/scrub.js';
+	import HoldButton from '#lib/components/app/HoldButton.svelte';
+	import TileMenu from '#lib/components/app/TileMenu.svelte';
+	import { Lightbulb, Plug, Fan, Thermometer, Lock, LockOpen, Camera, Tv, Gauge, Zap, Star, Workflow, Minus, Plus, Play, Pause, Check } from '@lucide/svelte';
 
 	let { device, compact = false }: { device: Device; compact?: boolean } = $props();
 
-	const icons: Record<string, any> = { light: Lightbulb, switch: Plug, fan: Fan, climate: Thermometer, lock: Lock, camera: Camera, media: Tv, sensor: Gauge, energy: Zap };
+	const icons: Record<string, IconComponent> = { light: Lightbulb, switch: Plug, fan: Fan, climate: Thermometer, lock: Lock, camera: Camera, media: Tv, sensor: Gauge, energy: Zap };
 	const Icon = $derived(device.category === 'lock' && device.state === 'unlocked' ? LockOpen : (icons[device.category] ?? Gauge));
-	const has = <T extends string>(t: T) => device.controls.find((c) => c.type === t) as any;
-	const off = $derived(!device.available || !!home.busy[device.id]);
+	/** The device's control of type `t`, narrowed to that kind of control. */
+	const has = <const T extends Control['type']>(t: T) => device.controls.find((c): c is Extract<Control, { type: T }> => c.type === t);
+	const fanSpeed = $derived(has('fan_speed')), thermostat = $derived(has('thermostat')), colorTemp = $derived(has('color_temp')), media = $derived(has('media'));
+	const off = $derived(!device.available || !home.online || !!home.busy[device.id]);
 	let more = $state(false), detail = $state(false);
 	const phoneTile = $derived(viewport.phone && !compact);
 	const wide = $derived(isWide(device));
@@ -35,13 +44,14 @@
 	const sliderTone = $derived(tone === 'on' ? '[&_[data-slot=slider-track]]:bg-on/25 [&_[data-slot=slider-range]]:bg-on' : '[&_[data-slot=slider-range]]:bg-primary');
 
 	/** Pressing the icon does the obvious thing: switch it, lock it, play it. Pressing anywhere else opens the details. */
-	const toggleable = $derived(device.available && !!(has('power') || has('lock') || has('media')?.power || has('media')?.playback));
+	const toggleable = $derived(device.available && !!(has('power') || has('lock') || media?.power || media?.playback));
 	function toggle() {
 		haptics.tap();
+		if (selection.active) { selection.toggle(device.id); return; } // while choosing several, the icon chooses too
 		if (has('power')) home.command(device.id, device.state === 'on' ? 'turn_off' : 'turn_on');
 		else if (has('lock')) home.command(device.id, device.state === 'locked' ? 'unlock' : 'lock');
-		else if (has('media')?.power) home.command(device.id, device.state === 'off' ? 'turn_on' : 'turn_off');
-		else if (has('media')?.playback) home.command(device.id, device.state === 'playing' ? 'media_pause' : 'media_play');
+		else if (media?.power) home.command(device.id, device.state === 'off' ? 'turn_on' : 'turn_off');
+		else if (media?.playback) home.command(device.id, device.state === 'playing' ? 'media_pause' : 'media_play');
 	}
 	const toggleLabel = $derived(has('lock') ? (device.state === 'locked' ? `Unlock ${device.name}` : `Lock ${device.name}`) : has('power') ? `Turn ${device.name} ${device.state === 'on' ? 'off' : 'on'}` : `Play or pause ${device.name}`);
 
@@ -58,6 +68,7 @@
 	});
 	const plain = (s: string) => (['unknown', 'unavailable'].includes(s) ? 'No reading' : s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()));
 	const short = $derived.by(() => {
+		if (!home.online) return 'Paused';
 		if (device.reason === 'device_offline') return 'Offline';
 		if (device.reason === 'home_assistant_unavailable') return 'Hub unreachable';
 		const a = device.attrs;
@@ -86,50 +97,92 @@
 	});
 	const hasSecondary = $derived(!!(has('color_temp') || has('color') || has('thermostat') || has('media')));
 
-	// Dimming is a deliberate gesture: press and hold, then slide sideways. A quick tap opens details; scrolling never dims.
+	// Press and hold lifts the tile. Slide sideways to set a level (brightness, fan speed, temperature, volume); let go without
+	// sliding for the quick-actions menu. A quick tap opens details, and a double tap goes to the level you usually pick.
+	type Scrub = { min: number; max: number; step: number; cur: number; cmd: string; unit: string; every: number };
+	const scrub = $derived.by<Scrub | null>(() => {
+		if (!device.available || !home.online) return null;
+		if (dimmable) return { min: 1, max: 100, step: 1, cur: device.attrs.brightnessPct ?? 100, cmd: 'set_brightness', unit: '%', every: 10 };
+		if (fanSpeed && device.state === 'on') return { min: 0, max: 100, step: fanSpeed.step || 1, cur: device.attrs.speedPct ?? 0, cmd: 'set_speed', unit: '%', every: 10 };
+		if (thermostat && numeric(device.attrs.target)) return { min: thermostat.min, max: thermostat.max, step: thermostat.step, cur: Number(device.attrs.target), cmd: 'set_temperature', unit: '°', every: 1 };
+		if (media?.volume && device.state !== 'off') return { min: 0, max: 100, step: 1, cur: device.attrs.volumePct ?? 0, cmd: 'set_volume', unit: '%', every: 10 };
+		return null;
+	});
+	const usualCmd = $derived(has('brightness') ? 'set_brightness' : fanSpeed ? 'set_speed' : thermostat ? 'set_temperature' : null);
+
 	let tileEl: HTMLElement | undefined = $state();
-	let drag = $state(false), dragPct = $state(0);
-	const shownPct = $derived(drag ? dragPct : (device.attrs.brightnessPct ?? 100));
-	let timer: ReturnType<typeof setTimeout> | undefined, startX = 0, startY = 0, startPct = 0, moved = false, armed = false, lastTick = -1;
+	let drag = $state(false), dragVal = $state(0), lift = $state(false), menu = $state(false);
+	const fill = $derived(drag && scrub ? ((dragVal - scrub.min) / (scrub.max - scrub.min)) * 100 : (device.attrs.brightnessPct ?? 100));
+	const shown = $derived(drag && scrub ? `${Number.isInteger(dragVal) ? dragVal : dragVal.toFixed(1)}${scrub.unit}` : '');
+	let timer: ReturnType<typeof setTimeout> | undefined, tapTimer: ReturnType<typeof setTimeout> | undefined, startX = 0, startY = 0, startVal = 0, moved = false, armed = false, lastVal = 0, lastTap = 0;
+
 	function down(e: PointerEvent) {
-		moved = false; armed = false; startX = e.clientX; startY = e.clientY; startPct = device.attrs.brightnessPct ?? 100;
-		if (dimmable) timer = setTimeout(() => { armed = true; drag = true; dragPct = startPct; lastTick = startPct; (e.target as HTMLElement).setPointerCapture?.(e.pointerId); haptics.grab(); }, 360);
+		moved = false; armed = false; startX = e.clientX; startY = e.clientY; startVal = scrub?.cur ?? 0;
+		if (selection.active) return;
+		timer = setTimeout(() => { armed = true; lift = true; lastVal = startVal; (e.target as HTMLElement).setPointerCapture?.(e.pointerId); haptics.grab(); }, 360);
 	}
 	function move(e: PointerEvent) {
 		const dx = e.clientX - startX, dy = e.clientY - startY;
 		if (!armed) { if (Math.abs(dx) > 8 || Math.abs(dy) > 8) { moved = true; clearTimeout(timer); } return; }
 		e.preventDefault();
-		const w = tileEl?.getBoundingClientRect().width ?? 160;
-		dragPct = Math.round(Math.min(100, Math.max(1, startPct + (dx / w) * 100)));
-		if (Math.abs(dragPct - lastTick) >= 10) { lastTick = dragPct; haptics.tap(); } // a tick every ten percent, like a dial
+		if (!scrub) return;
+		if (!drag) { if (Math.abs(dx) < 8) return; drag = true; dragVal = startVal; }
+		dragVal = scrubbed(startVal, dx, tileEl?.getBoundingClientRect().width ?? 160, scrub.min, scrub.max, scrub.step);
+		if (crossed(lastVal, dragVal, scrub.every)) { lastVal = dragVal; haptics.detent(); } // a tick at every notch, like a dial
 	}
 	function up() {
 		clearTimeout(timer);
-		if (armed) { const v = dragPct; armed = false; drag = false; if (v !== startPct) home.command(device.id, 'set_brightness', v); return; }
-		if (!moved) detail = true;
+		if (selection.active) { if (!moved) { selection.toggle(device.id); haptics.tap(); } return; }
+		if (armed) {
+			const v = dragVal, sc = scrub, was = drag;
+			armed = false; lift = false; drag = false;
+			if (was && sc) { if (v !== startVal) home.command(device.id, sc.cmd, v); } else menu = true;
+			return;
+		}
+		if (moved) return;
+		tap();
 	}
-	function cancel() { clearTimeout(timer); armed = false; drag = false; }
+	function cancel() { clearTimeout(timer); armed = false; lift = false; drag = false; }
+	/** Opening details: the tile's icon glides up into the sheet's header (where the browser supports it). Everything else just opens. */
+	function openDetail() {
+		const doc = document as unknown as { startViewTransition?: (cb: () => Promise<void>) => { finished: Promise<unknown> } };
+		const chipEl = tileEl?.querySelector<HTMLElement>('[data-chip]');
+		if (!doc.startViewTransition || reduced() || !chipEl) { detail = true; return; }
+		chipEl.style.viewTransitionName = 'dev-chip';
+		const t = doc.startViewTransition(async () => { chipEl.style.viewTransitionName = ''; detail = true; await tick(); });
+		void t.finished.catch(() => {}).finally(() => { chipEl.style.viewTransitionName = ''; });
+	}
+	function tap() {
+		const u = usual(device.id);
+		if (usualCmd && u !== null && device.available) {
+			const now = Date.now();
+			if (now - lastTap < 300) { clearTimeout(tapTimer); lastTap = 0; haptics.success(); home.command(device.id, usualCmd, u); return; }
+			lastTap = now; tapTimer = setTimeout(() => { lastTap = 0; openDetail(); }, 260); // wait a moment in case it's a double tap
+			return;
+		}
+		openDetail();
+	}
 </script>
 
 {#snippet controls()}
 			{#if has('brightness') && device.state === 'on'}
 				<Slider type="single" class={sliderTone} value={device.attrs.brightnessPct ?? 100} min={1} max={100} step={1} disabled={off} aria-label="{device.name} brightness" onValueCommit={(v) => home.command(device.id, 'set_brightness', v)} />
 			{/if}
-			{#if has('fan_speed') && device.state === 'on'}
-				<Slider type="single" class={sliderTone} value={device.attrs.speedPct ?? 0} min={0} max={100} step={has('fan_speed').step || 1} disabled={off} aria-label="{device.name} speed" onValueCommit={(v) => home.command(device.id, 'set_speed', v)} />
+			{#if fanSpeed && device.state === 'on'}
+				<Slider type="single" class={sliderTone} value={device.attrs.speedPct ?? 0} min={0} max={100} step={fanSpeed.step || 1} disabled={off} aria-label="{device.name} speed" onValueCommit={(v) => home.command(device.id, 'set_speed', v)} />
 			{/if}
-			{#if has('thermostat')}
-				{@const t = has('thermostat')}
+			{#if thermostat}
+				{@const t = thermostat}
 				<div class="flex items-center justify-between gap-2">
 					<Button variant="secondary" size="icon" aria-label="Lower temperature" disabled={off} onclick={() => home.command(device.id, 'set_temperature', Math.max(t.min, (device.attrs.target ?? t.min) - t.step))}><Minus /></Button>
 					<span class="figure text-3xl">{device.attrs.target ?? '—'}<span class="text-xl text-muted-foreground">{t.unit}</span></span>
 					<Button variant="secondary" size="icon" aria-label="Raise temperature" disabled={off} onclick={() => home.command(device.id, 'set_temperature', Math.min(t.max, (device.attrs.target ?? t.min) + t.step))}><Plus /></Button>
 				</div>
 			{/if}
-			{#if has('media')?.volume}
+			{#if media?.volume}
 				<Slider type="single" class={sliderTone} value={device.attrs.volumePct ?? 0} min={0} max={100} step={1} disabled={off} aria-label="{device.name} volume" onValueCommit={(v) => home.command(device.id, 'set_volume', v)} />
 			{/if}
-			{#if has('media')?.playback}
+			{#if media?.playback}
 				<div class="flex gap-2">
 					<Button variant="secondary" size="sm" disabled={off} onclick={() => home.command(device.id, 'media_play')}><Play />Play</Button>
 					<Button variant="secondary" size="sm" disabled={off} onclick={() => home.command(device.id, 'media_pause')}><Pause />Pause</Button>
@@ -142,8 +195,8 @@
 				<button type="button" class="text-sm font-medium text-primary underline-offset-4 hover:underline {tone === 'on' ? 'text-on-foreground' : ''}" onclick={() => (more = !more)} aria-expanded={more}>{more ? 'Fewer settings' : 'More settings'}</button>
 				{#if more}
 					<div class="space-y-3.5">
-						{#if has('color_temp') && device.state === 'on'}
-							{@const c = has('color_temp')}
+						{#if colorTemp && device.state === 'on'}
+							{@const c = colorTemp}
 							<label class="block space-y-1.5 text-sm">Warmth
 								<Slider type="single" class={sliderTone} value={device.attrs.colorTempK ?? c.minK} min={c.minK} max={c.maxK} step={100} disabled={off} aria-label="{device.name} color temperature" onValueCommit={(v) => home.command(device.id, 'set_color_temp', v)} />
 							</label>
@@ -153,9 +206,9 @@
 								<Slider type="single" class={sliderTone} value={device.attrs.hs?.[0] ?? 0} min={0} max={360} step={1} disabled={off} aria-label="{device.name} hue" onValueCommit={(v) => home.command(device.id, 'set_color', { h: v, s: device.attrs.hs?.[1] ?? 100 })} />
 							</label>
 						{/if}
-						{#if has('thermostat')?.modes.length}
+						{#if thermostat?.modes.length}
 							<div class="flex flex-wrap gap-2" role="group" aria-label="Mode">
-								{#each has('thermostat').modes as m}
+								{#each thermostat.modes as m}
 									<Button size="sm" variant={device.state === m ? 'default' : 'secondary'} class="capitalize" disabled={off} onclick={() => home.command(device.id, 'set_hvac_mode', m)}>{m.replace('_', ' ')}</Button>
 								{/each}
 							</div>
@@ -175,15 +228,19 @@
 {#snippet control()}
 	{#if has('power')}
 		<Switch checked={device.state === 'on'} disabled={off} aria-label="{device.name} power" onCheckedChange={(v) => { haptics.tap(); home.command(device.id, v ? 'turn_on' : 'turn_off'); }} />
+	{:else if has('lock') && device.state === 'locked'}
+		<HoldButton onhold={() => home.command(device.id, 'unlock')} hint="Hold to unlock {device.name}" disabled={off} class="inline-flex h-8 items-center rounded-lg bg-secondary px-3 text-sm font-medium text-secondary-foreground disabled:opacity-50">Hold to unlock</HoldButton>
 	{:else if has('lock')}
-		<Button variant={device.state === 'locked' ? 'secondary' : 'default'} size="sm" disabled={off} onclick={toggle}>{device.state === 'locked' ? 'Unlock' : 'Lock'}</Button>
+		<Button variant="default" size="sm" disabled={off} onclick={toggle}>Lock</Button>
 	{/if}
 {/snippet}
 {#snippet icn(size: string)}
-	{#if toggleable}
-		<button type="button" onclick={toggle} disabled={off} aria-label={toggleLabel} aria-pressed={tone !== 'none'} class="pointer-events-auto relative z-20 flex {size} shrink-0 items-center justify-center rounded-full transition-[background-color,box-shadow,transform] duration-200 active:scale-90 disabled:opacity-60 {chip[tone]}">{#key tone}<span class="flex size-full items-center justify-center" in:scale={{ start: 0.7, duration: dur(220), easing: backOut }}><Icon class="size-[46%]" aria-hidden="true" /></span>{/key}</button>
+	{#if toggleable && has('lock') && device.state === 'locked'}
+		<HoldButton data-chip ring onhold={() => home.command(device.id, 'unlock')} hint="Hold to unlock {device.name}" disabled={off} aria-label="Hold to unlock {device.name}" class="pointer-events-auto z-20 flex {size} shrink-0 items-center justify-center rounded-full transition-colors duration-200 disabled:opacity-60 {chip[tone]}"><Icon class="size-[46%]" aria-hidden="true" /></HoldButton>
+	{:else if toggleable}
+		<button type="button" data-chip onclick={toggle} disabled={off} aria-label={toggleLabel} aria-pressed={tone !== 'none'} class="pointer-events-auto relative z-20 flex {size} shrink-0 items-center justify-center rounded-full transition-[background-color,box-shadow,transform] duration-200 active:scale-90 disabled:opacity-60 {chip[tone]}">{#key tone}<span class="flex size-full items-center justify-center" in:scale={{ start: 0.7, duration: dur(220), easing: backOut }}><Icon class="size-[46%]" aria-hidden="true" /></span>{/key}</button>
 	{:else}
-		<span class="flex {size} shrink-0 items-center justify-center rounded-full transition-colors duration-300 {chip[tone]}"><Icon class="size-[46%]" aria-hidden="true" /></span>
+		<span data-chip class="flex {size} shrink-0 items-center justify-center rounded-full transition-colors duration-300 {chip[tone]}"><Icon class="size-[46%]" aria-hidden="true" /></span>
 	{/if}
 {/snippet}
 {#snippet label()}
@@ -191,7 +248,7 @@
 	{#if short || !device.available}<p class="mt-0.5 truncate text-[0.8125rem] {sub[tone]}" aria-live="polite">{#if !device.available}<Badge variant="outline" class="-ml-0.5 h-5 px-2">{short}</Badge>{:else}{short}{/if}</p>{/if}
 {/snippet}
 {#snippet drawerBody()}
-	<Drawer.Header class="px-0 pb-1"><Drawer.Title class="flex items-center gap-3 text-left"><span class="flex size-10 shrink-0 items-center justify-center rounded-full {chip[tone]}"><Icon class="size-5" aria-hidden="true" /></span><span class="min-w-0"><span class="block truncate text-lg font-semibold tracking-[-0.02em]">{device.name}</span><span class="block text-sm font-normal text-muted-foreground">{status}</span></span></Drawer.Title><Drawer.Description class="sr-only">Controls for {device.name}</Drawer.Description></Drawer.Header>
+	<Drawer.Header class="px-0 pb-1"><Drawer.Title class="flex items-center gap-3 text-left"><span class="flex size-10 shrink-0 items-center justify-center rounded-full {chip[tone]}" style="view-transition-name: dev-chip"><Icon class="size-5" aria-hidden="true" /></span><span class="min-w-0"><span class="block truncate text-lg font-semibold tracking-[-0.02em]">{device.name}</span><span class="block text-sm font-normal text-muted-foreground">{status}</span></span></Drawer.Title><Drawer.Description class="sr-only">Controls for {device.name}</Drawer.Description></Drawer.Header>
 	<div class="space-y-5 pt-2">
 		{#if device.available}<div class="space-y-3.5">{@render controls()}</div>{:else}<p class="text-sm text-muted-foreground">{device.reason === 'device_offline' ? 'This device is offline. Check its power and Wi-Fi.' : 'The home hub can’t be reached, so it can’t be controlled right now.'}</p>{/if}
 		{#if detail}<DeviceHistory id={device.id} />{/if}
@@ -206,12 +263,12 @@
 {#if phoneTile}
 	{@const th = has('thermostat')}
 	{@const cam = has('camera') && device.available}
-	<div data-device={device.id} bind:this={tileEl} class="relative isolate h-full select-none overflow-hidden rounded-tile border transition-[background-color,transform] duration-300 active:scale-[0.985] {cam ? 'border-transparent bg-card' : surface[tone]} {device.available ? '' : 'opacity-65'}" style="touch-action: pan-y; -webkit-touch-callout: none">
+	<div data-device={device.id} bind:this={tileEl} class="relative isolate h-full select-none overflow-hidden rounded-tile border transition-[background-color,transform,box-shadow] duration-300 {lift ? 'lifted z-10' : 'active:scale-[0.985]'} {home.flash[device.id] === 'ok' ? 'flash-ok' : home.flash[device.id] === 'fail' ? 'flash-fail' : ''} {selection.has(device.id) ? 'ring-2 ring-primary' : ''} {cam ? 'border-transparent bg-card' : surface[tone]} {device.available && home.online ? '' : 'opacity-65'}" style="touch-action: pan-y; -webkit-touch-callout: none">
 		{#if cam}
 			<img src="/api/devices/{encodeURIComponent(device.id)}/snapshot" alt="" class="pointer-events-none absolute inset-0 -z-10 size-full object-cover" loading="lazy" />
 			<div class="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-t from-black/70 via-black/10 to-black/20"></div>
 		{/if}
-		{#if drag}<div class="pointer-events-none absolute inset-y-0 left-0 z-0 bg-on/45" style="width:{shownPct}%" aria-hidden="true"></div>{/if}
+		{#if drag}<div class="pointer-events-none absolute inset-y-0 left-0 z-0 bg-on/45" style="width:{fill}%" aria-hidden="true"></div>{/if}
 		<button type="button" class="absolute inset-0 z-0" aria-label="{device.name}: details" onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={cancel} oncontextmenu={(e) => e.preventDefault()}></button>
 
 		{#if th && device.available}
@@ -227,11 +284,11 @@
 				<span class="flex size-9 items-center justify-center rounded-full bg-black/35 backdrop-blur"><Icon class="size-4" aria-hidden="true" /></span>
 				<div class="min-w-0"><h3 class="truncate text-[0.9375rem] font-semibold">{device.name}</h3><p class="text-[0.8125rem] text-white/75">Tap to see live</p></div>
 			</div>
-		{:else if wide && has('media')}
+		{:else if wide && media}
 			<div class="pointer-events-none relative z-10 flex h-full items-center gap-3 p-3.5">
 				{@render icn('size-11')}
 				<div class="min-w-0 flex-1">{@render label()}</div>
-				{#if has('media').playback && device.available}<Button class="pointer-events-auto" variant="secondary" size="icon-lg" aria-label={device.state === 'playing' ? 'Pause' : 'Play'} disabled={off} onclick={toggle}>{#if device.state === 'playing'}<Pause />{:else}<Play />{/if}</Button>{/if}
+				{#if media.playback && device.available}<Button class="pointer-events-auto" variant="secondary" size="icon-lg" aria-label={device.state === 'playing' ? 'Pause' : 'Play'} disabled={off} onclick={toggle}>{#if device.state === 'playing'}<Pause />{:else}<Play />{/if}</Button>{/if}
 			</div>
 		{:else}
 			<div class="pointer-events-none relative z-10 flex h-full flex-col justify-between p-3">
@@ -241,15 +298,17 @@
 				</div>
 				<div class="min-w-0 pt-2">{@render label()}</div>
 			</div>
-			{#if dimmable && !drag}<div class="pointer-events-none absolute bottom-0 left-0 z-10 h-[3px] rounded-r-full bg-on transition-[width] duration-300" style="width:{shownPct}%" aria-hidden="true"></div>{/if}
+			{#if dimmable && !drag}<div class="pointer-events-none absolute bottom-0 left-0 z-10 h-[3px] rounded-r-full bg-on transition-[width] duration-300" style="width:{fill}%" aria-hidden="true"></div>{/if}
 		{/if}
-		{#if drag}<div class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"><span class="figure rounded-full bg-foreground/90 px-3 py-1 text-lg text-background">{shownPct}%</span></div>{/if}
+		{#if drag}<div class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"><span class="figure rounded-full bg-foreground/90 px-3 py-1 text-lg text-background">{shown}</span></div>{/if}
+		{#if selection.active}<span class="pointer-events-none absolute bottom-3 right-3 z-30 flex size-6 items-center justify-center rounded-full border-2 transition-colors {selection.has(device.id) ? 'border-primary bg-primary text-primary-foreground' : 'border-foreground/30 bg-background/70'}" aria-hidden="true">{#if selection.has(device.id)}<Check class="size-3.5" strokeWidth={3} />{/if}</span>{/if}
 	</div>
 	<Drawer.Root bind:open={detail}>
 		<Drawer.Content class="max-h-[88dvh] rounded-t-3xl"><div class="overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2">{@render drawerBody()}</div></Drawer.Content>
 	</Drawer.Root>
+	<TileMenu {device} bind:open={menu} ondetails={() => (detail = true)} />
 {:else}
-<div data-device={device.id} class="h-full rounded-tile border transition-colors duration-300 {surface[tone]} {device.available ? '' : 'opacity-65'}">
+<div data-device={device.id} class="relative h-full rounded-tile border transition-colors duration-300 {home.flash[device.id] === 'ok' ? 'flash-ok' : home.flash[device.id] === 'fail' ? 'flash-fail' : ''} {surface[tone]} {device.available ? '' : 'opacity-65'}">
 	{#if compact}
 		<div class="flex items-center gap-3 p-3">
 			{@render icn('size-10')}

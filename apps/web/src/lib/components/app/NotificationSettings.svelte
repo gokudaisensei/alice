@@ -13,11 +13,12 @@
 	let p = $state<NotePrefs | null>(null), here = $state(false), msg = $state(''), busy = $state(false);
 	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-	async function load() { const r = await api('GET', '/api/me/notifications'); if (r.ok) p = r.data; here = await notifications.thisDevice(); }
+	async function load() { const r = await api<NotePrefs>('GET', '/api/me/notifications'); if (r.ok) p = r.data; here = await notifications.thisDevice(); }
 	onMount(load);
 	async function save(patch: object) {
-		const r = await api('PUT', '/api/me/notifications', patch);
-		if (r.ok) p = { ...p!, ...r.data }; else msg = r.data?.message ?? explain(r.data?.error);
+		const r = await api<Pick<NotePrefs, 'muted' | 'quiet'>>('PUT', '/api/me/notifications', patch);
+		if (r.ok && p) p = { ...p, ...r.data };
+		else if (r.ok) p = null; else msg = r.data?.message ?? explain(r.data?.error);
 	}
 	const toggleKind = (k: string) => p && save({ muted: p.muted.includes(k) ? p.muted.filter((x) => x !== k) : [...p.muted, k] });
 	const quiet = (patch: object) => save({ quiet: { ...p!.quiet, tz, ...patch } });
@@ -27,7 +28,7 @@
 		await load(); busy = false;
 	}
 	async function test() {
-		busy = true; const r = await api('POST', '/api/push/test'); busy = false;
+		busy = true; const r = await api<{ sent: number }>('POST', '/api/push/test'); busy = false;
 		msg = !r.ok ? (r.status === 429 ? 'Please wait a moment before testing again.' : (r.data?.message ?? explain(r.data?.error))) : r.data.sent ? 'Sent. It should arrive in a few seconds.' : 'Nothing was sent: no device is set up for push yet.';
 	}
 </script>

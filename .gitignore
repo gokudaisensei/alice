@@ -10,3 +10,5 @@ deploy/backups/
 deploy/updates/
 *.bak
 apps/simulator/public/main.js
+
+.alice/

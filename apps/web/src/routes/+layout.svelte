@@ -4,8 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { onMount, untrack } from 'svelte';
-	import { session, forget } from '#lib/session.svelte.js';
-	import { api } from '#lib/api.js';
+	import { session } from '#lib/session.svelte.js';
 	import { home } from '#lib/home.svelte.js';
 	import { chrome } from '#lib/chrome.svelte.js';
 	import { fly } from 'svelte/transition';
@@ -20,7 +19,11 @@
 	import CommandPalette from '#lib/components/app/CommandPalette.svelte';
 	import * as DropdownMenu from '#lib/components/ui/dropdown-menu';
 	import { Button } from '#lib/components/ui/button';
-	import { LogOut, Moon, Search, Settings, Sun, SunMoon } from '@lucide/svelte';
+	import { ArrowDown, ChevronLeft, Loader2, LogOut, Moon, Search, Settings, Sun, SunMoon } from '@lucide/svelte';
+	import SelectBar from '#lib/components/app/SelectBar.svelte';
+	import { ui } from '#lib/ui.svelte.js';
+	import { pull, edge, pullToRefresh, edgeBack } from '#lib/gestures.svelte.js';
+	import { startShake, stopShake } from '#lib/shake.js';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
@@ -37,7 +40,14 @@
 		document.getElementById('boot')?.remove();
 		if (!session.me && !publicPaths.includes(page.url.pathname) && !page.url.pathname.startsWith('/ops')) goto('/login');
 	});
-	const signedIn = $derived(!!session.me); // not the object itself: refreshing it must not restart everything
+	// Phone gestures: pull down to refresh, swipe in from the left edge to go back (installed app only), shake to undo.
+	onMount(() => {
+		if (!matchMedia('(pointer: coarse)').matches) return;
+		const stops = [pullToRefresh(() => home.load()), edgeBack(() => page.url.pathname !== '/')];
+		return () => stops.forEach((f) => f());
+	});
+	const signedIn = $derived(!!session.me);
+	$effect(() => { if (signedIn && ui.shake) startShake(); else stopShake(); }); // not the object itself: refreshing it must not restart everything
 	$effect(() => { if (signedIn) { untrack(() => { home.load().then(() => { home.connect(); notifications.start(); }); }); } else { untrack(() => { home.disconnect(); notifications.stop(); }); } });
 
 	// Light/dark: the person's own choice, defaulting to the device setting.
@@ -56,7 +66,7 @@
 	const initial = $derived((session.me?.displayName ?? '?').trim().charAt(0).toUpperCase());
 	const roleLabel = $derived(session.me?.role === 'admin' ? 'Admin' : session.me?.role === 'member' ? 'Member' : 'Guest');
 
-	async function logout() { await api('POST', '/api/auth/logout'); forget(); session.me = null; goto('/login'); }
+	async function logout() { await session.signOut(); goto('/login'); }
 	function onKey(e: KeyboardEvent) { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && session.me) { e.preventDefault(); chrome.search = !chrome.search; } }
 	const setAppearance = (a: 'system' | 'light' | 'dark') => home.savePrefs({ appearance: a });
 </script>
@@ -79,8 +89,22 @@
 	</a>
 {/snippet}
 
+{#if pull.y > 0}
+	<div class="pointer-events-none fixed inset-x-0 top-0 z-[60] flex justify-center" style="transform: translateY({pull.y / 2 - 20}px)" aria-hidden="true">
+		<span class="flex size-10 items-center justify-center rounded-full border bg-card shadow-lg {pull.armed || pull.busy ? 'text-primary' : 'text-muted-foreground'}">
+			{#if pull.busy}<Loader2 class="size-5 animate-spin" />{:else}<ArrowDown class="size-5 transition-transform duration-200 {pull.armed ? 'rotate-180' : ''}" />{/if}
+		</span>
+	</div>
+{/if}
+{#if edge.p > 0}
+	<div class="pointer-events-none fixed left-0 top-1/2 z-[60] -translate-y-1/2" style="opacity:{edge.p}; transform: translate({-24 + edge.p * 30}px, -50%)" aria-hidden="true"><span class="flex size-11 items-center justify-center rounded-full border bg-card shadow-lg"><ChevronLeft class="size-5" /></span></div>
+{/if}
+
 {#if page.url.pathname.startsWith('/ops')}
 	{@render children()}
+{:else if session.me && path === '/panel'}
+	{@render children()}
+	<Notice />
 {:else if session.me}
 	<div class="min-h-dvh md:grid md:grid-cols-[15.5rem_1fr]">
 		<aside class="sticky top-0 hidden h-dvh flex-col gap-1 border-r bg-raised px-3 py-4 md:flex">
@@ -126,7 +150,7 @@
 				<span class="text-[0.9375rem] font-semibold tracking-[-0.01em]">{chrome.title}</span>
 			</div>
 			<HubBanner /><SupportBanner /><UpdateBanner />
-			<div class="pb-[4.5rem] md:pb-0">{#key path}<div in:fly={{ y: 10, duration: dur(240), easing: cubicOut }}>{@render children()}</div>{/key}</div>
+			<div class="pb-[4.5rem] md:pb-0 {pull.y > 0 && !pull.busy ? '' : 'transition-transform duration-200'}" style={pull.y > 0 || pull.busy ? `transform: translateY(${pull.y}px)` : ''}>{#key path}<div in:fly={{ y: 10, duration: dur(240), easing: cubicOut }}>{@render children()}</div>{/key}</div>
 		</div>
 
 		<nav class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t bg-background/90 px-1 pb-[max(0.125rem,env(safe-area-inset-bottom))] pt-0.5 backdrop-blur-xl md:hidden" aria-label="Main">
@@ -138,7 +162,11 @@
 			{/each}
 		</nav>
 
+		{#if ui.oneHand}
+			<button type="button" onclick={() => (chrome.search = true)} aria-label="Search" class="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-4 z-30 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl transition-transform active:scale-95 md:hidden"><Search class="size-5" /></button>
+		{/if}
 		<CommandPalette bind:open={chrome.search} />
+		<SelectBar />
 		<Notice />
 	</div>
 {:else if session.loaded || publicPaths.includes(page.url.pathname)}

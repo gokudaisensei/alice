@@ -14,10 +14,10 @@
 	let list = $state<Note[]>([]);
 	let loaded = $state(false);
 
-	async function load() { const r = await api('GET', '/api/notifications'); if (r.ok) { list = r.data.notifications; notifications.unread = r.data.unread; } loaded = true; }
+	async function load() { const r = await api<{ notifications: Note[]; unread: number }>('GET', '/api/notifications'); if (r.ok) { list = r.data.notifications; notifications.unread = r.data.unread; } loaded = true; }
 	onMount(load);
 	async function markAll() { const r = await api('POST', '/api/notifications/read'); if (r.ok) { list = list.map((n) => ({ ...n, read: true })); notifications.unread = 0; } }
-	async function markOne(n: Note) { if (n.read) return; const r = await api('POST', '/api/notifications/read', { ids: [n.id] }); if (r.ok) { n.read = true; notifications.unread = r.data.unread; } }
+	async function markOne(n: Note) { if (n.read) return; const r = await api<{ unread: number }>('POST', '/api/notifications/read', { ids: [n.id] }); if (r.ok) { n.read = true; notifications.unread = r.data.unread; } }
 	const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 	const dayKey = (ts: number) => new Date(ts).toDateString();
 	function dayLabel(ts: number) {

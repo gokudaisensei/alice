@@ -4,7 +4,7 @@
 	import { onMount } from 'svelte';
 	import { api, explain } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
-	import { DAYS, isSensor, statesFor, type AutomationView, type Condition, type Template, type Trigger } from '#lib/automations.js';
+	import { DAYS, firstState, isSensor, statesFor, statesOf, type AutomationView, type Condition, type Template, type Trigger } from '#lib/automations.js';
 	import type { Step } from '#lib/steps.js';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
@@ -36,18 +36,19 @@
 		if (!home.loaded) await home.load();
 		if (id === 'new') {
 			const q = page.url.searchParams, key = q.get('template'), dev = q.get('device');
-			const t = key ? ((await api('GET', '/api/automations')).data?.suggested as Template[] | undefined)?.find((x) => x.key === key) : undefined;
+			const listed = key ? await api<{ suggested: Template[] }>('GET', '/api/automations') : null;
+			const t = listed?.ok ? listed.data.suggested.find((x) => x.key === key) : undefined;
 			if (t) { name = t.name; triggers = structuredClone(t.triggers); conditions = structuredClone(t.conditions); }
 			const d = dev ? home.byId(dev) : undefined;
 			if (d && !t) { // started from a device: begin with "when this device changes"
 				if (isSensor(d)) triggers = [{ type: 'sensor', entityId: d.id, above: Number(d.reading?.value) || 0 }];
-				else if (statesFor(d).length) triggers = [{ type: 'device_state', entityId: d.id, to: statesFor(d)[0] }];
+				else if (statesFor(d).length) triggers = [{ type: 'device_state', entityId: d.id, to: firstState(d) }];
 				name = `When ${d.name} changes`;
 			}
 		} else {
-			const r = await api('GET', `/api/automations/${id}`);
-			if (!r.ok) { error = r.data?.message ?? explain(r.data?.error); return; }
-			const a: AutomationView = r.data;
+			const r = await api<AutomationView>('GET', `/api/automations/${id}`);
+			if (!r.ok) { error = r.data.message ?? explain(r.data.error); return; }
+			const a = r.data;
 			name = a.name;
 			triggers = a.triggers.map(({ text, ...t }) => t as Trigger); conditions = a.conditions.map(({ text, ...c }) => c as Condition); actions = a.actions.map(({ text, ...s }) => s as Step);
 		}
@@ -61,9 +62,9 @@
 		if (!ready) return;
 		const t = setTimeout(async () => {
 			if (!body.triggers.length || !body.actions.length) { preview = ''; problem = null; return; }
-			const r = await api('POST', '/api/automations/preview', body);
+			const r = await api<{ summary: string }>('POST', '/api/automations/preview', body);
 			if (r.ok) { preview = r.data.summary; problem = null; }
-			else { preview = ''; problem = r.data?.where ? { where: r.data.where, index: r.data.index } : null; error = ''; previewError = r.data?.message ?? explain(r.data?.error); }
+			else { preview = ''; problem = r.data.where ? { where: r.data.where, index: r.data.index ?? 0 } : null; error = ''; previewError = r.data?.message ?? explain(r.data?.error); }
 			if (r.ok) previewError = '';
 		}, 300);
 		return () => clearTimeout(t);
@@ -75,7 +76,11 @@
 
 	const addTrigger = (t: Trigger) => triggers.push(t);
 	const addCondition = (c: Condition) => conditions.push(c);
-	const firstWith = () => withState[0];
+	/** "+ A device changes" / "+ A device is": start from the first device that has states. */
+	function addDeviceTrigger() { const d = withState[0]; if (d) addTrigger({ type: 'device_state', entityId: d.id, to: firstState(d) }); }
+	function addDeviceCondition() { const d = withState[0]; if (d) addCondition({ type: 'device_state', entityId: d.id, is: firstState(d) }); }
+	function addSensorTrigger() { const s = sensors[0]; if (s) addTrigger({ type: 'sensor', entityId: s.id, above: 0 }); }
+	function addSensorCondition() { const s = sensors[0]; if (s) addCondition({ type: 'sensor', entityId: s.id, above: 0 }); }
 	const dayOn = (c: Extract<Condition, { type: 'days' }>, d: string) => c.days.includes(d);
 	const flip = (c: Extract<Condition, { type: 'days' }>, d: string) => { c.days = dayOn(c, d) ? c.days.filter((x) => x !== d) : [...c.days, d]; };
 	const bad = (where: string, i: number) => problem?.where === where && problem.index === i;
@@ -84,7 +89,7 @@
 		saving = true; error = '';
 		const r = id === 'new' ? await api('POST', '/api/automations', payload) : await api('PUT', `/api/automations/${id}`, payload);
 		saving = false;
-		if (!r.ok) { problem = r.data?.where ? { where: r.data.where, index: r.data.index } : null; error = r.data?.message ?? explain(r.data?.error); return; }
+		if (!r.ok) { problem = r.data.where ? { where: r.data.where, index: r.data.index ?? 0 } : null; error = r.data?.message ?? explain(r.data?.error); return; }
 		goto('/routines?tab=automations');
 	}
 	async function remove() {
@@ -108,9 +113,9 @@
 		{#each triggers as t, i}
 			<div class="rounded-2xl border bg-card {bad('trigger', i) ? 'border-signal ring-2 ring-signal/20' : ''}"><div class="flex flex-wrap items-center gap-2 p-3">
 				{#if t.type === 'device_state'}
-					<Picker class="min-w-36 flex-1" label="Device for trigger {i + 1}" value={t.entityId} options={withState.map((d) => ({ value: d.id, label: d.name }))} onchange={(v) => { t.entityId = v; t.to = statesFor(home.byId(v)!)[0]; }} />
+					<Picker class="min-w-36 flex-1" label="Device for trigger {i + 1}" value={t.entityId} options={withState.map((d) => ({ value: d.id, label: d.name }))} onchange={(v) => { t.entityId = v; t.to = firstState(home.byId(v)); }} />
 					<span class="text-sm">turns</span>
-					<Picker capitalize label="State for trigger {i + 1}" bind:value={t.to} options={statesFor(home.byId(t.entityId) ?? withState[0]).map((x) => ({ value: x, label: x }))} />
+					<Picker capitalize label="State for trigger {i + 1}" bind:value={t.to} options={statesOf(home.byId(t.entityId) ?? withState[0]).map((x) => ({ value: x, label: x }))} />
 					<Picker label="How long for trigger {i + 1}" value={t.forSeconds ?? 0} options={FOR.map(([v, l]) => ({ value: v, label: l }))} onchange={(v) => { if (Number(v)) t.forSeconds = Number(v); else delete t.forSeconds; }} />
 				{:else if t.type === 'sensor'}
 					<Picker class="min-w-36 flex-1" label="Sensor for trigger {i + 1}" bind:value={t.entityId} options={sensors.map((d) => ({ value: d.id, label: d.name }))} />
@@ -131,8 +136,8 @@
 			<p class="rounded-2xl border border-dashed p-5 text-center text-sm text-muted-foreground">Choose what should start it.</p>
 		{/each}
 		<div class="flex flex-wrap gap-2" role="group" aria-label="Add a trigger">
-			<Button size="sm" variant="secondary" disabled={!withState.length} onclick={() => firstWith() && addTrigger({ type: 'device_state', entityId: firstWith().id, to: statesFor(firstWith())[0] })}>+ A device changes</Button>
-			<Button size="sm" variant="secondary" disabled={!sensors.length} onclick={() => addTrigger({ type: 'sensor', entityId: sensors[0].id, above: 0 })}>+ A sensor reading</Button>
+			<Button size="sm" variant="secondary" disabled={!withState.length} onclick={addDeviceTrigger}>+ A device changes</Button>
+			<Button size="sm" variant="secondary" disabled={!sensors.length} onclick={addSensorTrigger}>+ A sensor reading</Button>
 			<Button size="sm" variant="secondary" onclick={() => addTrigger({ type: 'time', at: '07:00' })}>+ A time</Button>
 			<Button size="sm" variant="secondary" onclick={() => addTrigger({ type: 'sun', event: 'sunset' })}>+ Sunrise or sunset</Button>
 			<Button size="sm" variant="secondary" onclick={() => addTrigger({ type: 'mode', mode: 'away' })}>+ A household mode</Button>
@@ -148,9 +153,9 @@
 		{#each conditions as c, i}
 			<div class="rounded-2xl border bg-card {bad('condition', i) ? 'border-signal ring-2 ring-signal/20' : ''}"><div class="flex flex-wrap items-center gap-2 p-3">
 				{#if c.type === 'device_state'}
-					<Picker class="min-w-36 flex-1" label="Device for condition {i + 1}" value={c.entityId} options={withState.map((d) => ({ value: d.id, label: d.name }))} onchange={(v) => { c.entityId = v; c.is = statesFor(home.byId(v)!)[0]; }} />
+					<Picker class="min-w-36 flex-1" label="Device for condition {i + 1}" value={c.entityId} options={withState.map((d) => ({ value: d.id, label: d.name }))} onchange={(v) => { c.entityId = v; c.is = firstState(home.byId(v)); }} />
 					<span class="text-sm">is</span>
-					<Picker capitalize label="State for condition {i + 1}" bind:value={c.is} options={statesFor(home.byId(c.entityId) ?? withState[0]).map((x) => ({ value: x, label: x }))} />
+					<Picker capitalize label="State for condition {i + 1}" bind:value={c.is} options={statesOf(home.byId(c.entityId) ?? withState[0]).map((x) => ({ value: x, label: x }))} />
 				{:else if c.type === 'sensor'}
 					<Picker class="min-w-36 flex-1" label="Sensor for condition {i + 1}" bind:value={c.entityId} options={sensors.map((d) => ({ value: d.id, label: d.name }))} />
 					<span class="flex items-center gap-1 text-sm">is above <Input type="number" class="w-20" value={c.above ?? ''} oninput={(e) => (c.above = num(e.currentTarget.value))} aria-label="Above for condition {i + 1}" /></span>
@@ -168,8 +173,8 @@
 			</div></div>
 		{/each}
 		<div class="flex flex-wrap gap-2" role="group" aria-label="Add a condition">
-			<Button size="sm" variant="secondary" disabled={!withState.length} onclick={() => firstWith() && addCondition({ type: 'device_state', entityId: firstWith().id, is: statesFor(firstWith())[0] })}>+ A device is</Button>
-			<Button size="sm" variant="secondary" disabled={!sensors.length} onclick={() => addCondition({ type: 'sensor', entityId: sensors[0].id, above: 0 })}>+ A sensor reading</Button>
+			<Button size="sm" variant="secondary" disabled={!withState.length} onclick={addDeviceCondition}>+ A device is</Button>
+			<Button size="sm" variant="secondary" disabled={!sensors.length} onclick={addSensorCondition}>+ A sensor reading</Button>
 			<Button size="sm" variant="secondary" onclick={() => addCondition({ type: 'time', after: '18:00', before: '23:00' })}>+ Time of day</Button>
 			<Button size="sm" variant="secondary" onclick={() => addCondition({ type: 'mode', mode: 'home' })}>+ Household mode</Button>
 			<Button size="sm" variant="secondary" disabled={conditions.some((c) => c.type === 'days')} onclick={() => addCondition({ type: 'days', days: ['mon', 'tue', 'wed', 'thu', 'fri'] })}>+ Days of the week</Button>

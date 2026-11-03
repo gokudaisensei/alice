@@ -7,8 +7,7 @@
 	import Row from '#lib/components/app/Row.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
 	import { Button } from '#lib/components/ui/button';
-	import { Badge } from '#lib/components/ui/badge';
-	import { Play, Sparkles, Workflow, Plus } from '@lucide/svelte';
+	import { Play, Sparkles, Plus } from '@lucide/svelte';
 </script>
 
 	<Section>

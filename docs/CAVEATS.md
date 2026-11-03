@@ -109,6 +109,21 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | Simulator | The residents' light and plug actions go through normal Home Assistant calls, so your app shows them as they happen; a person using the app is not overridden (the residents only act on arrivals, departures and schedules) | ✅ |
 | Simulator | Reachable from outside only with an access key (`SIM_KEY`, cookie after the first visit, same-origin check on actions). Opened through its own quick tunnel and loaded in the embedded browser; the 3D scene on a real phone is untried | 🟡 |
 
+## Phone gestures and comfort
+| Area | Caveat | Status |
+|---|---|---|
+| Tiles | Press and hold lifts a tile. Slide sideways to set brightness, fan speed, thermostat target or volume (a tick at each notch); let go without sliding for a menu (select several, favorite, details and history, automate, rename, move to a room). Double tap goes to the level you last chose. Arithmetic is tested (`scrub.test.ts`) | ✅ tried on a Motorola Edge 50 Pro (Chrome, Android 16): hold, slide, menu, select several, double tap |
+| Unlocking | Unlocking a door needs a hold that fills (about 0.7 s); locking is a plain tap. Keyboard and screen readers confirm directly | ✅ tried on the same phone; a quick tap only explains, a full hold unlocks (it asked for no passkey because the sign-in was recent) |
+| Undo | Switching, dimming, fan and temperature changes can be undone: shake the phone (Settings, Comfort) or press Undo in the toast shown after bulk actions. Locking is never undone into unlocking. The mapping is tested (`undo.test.ts`) | 🟡 the Undo button and the undo logic are tried on the phone (this found and fixed a bug where Undo did nothing); the physical shake itself is not |
+| Screen | Pull down to refresh, swipe in from the left edge to go back (installed app only; browsers already do this), hold a room's name to switch the whole room off, hold-to-confirm for risky actions, a "Ready for bed?" / morning card, a warning when a heater, oven or garage is on or open | ✅ pull to refresh, room hold and the kettle warning tried on the phone; 🟡 the edge swipe and the night and morning cards are not |
+| Offline | Offline phone: banner, tiles read "Paused", controls refuse with a message. Hub unreachable keeps its own banner | 🟡 |
+| Comfort | Reduce motion, one-handed search button, larger text and buttons; kept on the phone. A wall panel (`/panel`: clock, big tiles, screen kept awake where supported, dims after 2 minutes) and a shareable status picture (`/glance`) | 🟡 wall-lock needs a browser that supports it |
+| Feedback | After a command the icon gives a small spring (success) or wobbles under a soft red wash (failure); the tile itself no longer moves | 🟡 untried on a real phone |
+| Transition | Opening a tile's details glides its icon up into the sheet header using the browser's view-transition support; browsers without it, and people who reduce motion, just see the sheet open | ✅ seen in a screen recording from the phone |
+| Energy | "Share this week" on the Energy page makes a picture of the weekly chart for the share sheet (or a download). The drawing was checked with sample data; the Android share sheet opened with the picture on the phone | ✅ |
+| Not built | Blinds scrubbing (the app has no cover devices yet) | ➖ |
+| Already there before this round | Bottom sheets, sideways room swiping, "often used" strip, icon shortcuts (lock all, good night, lights off), "Automate this" on alerts | ✅ |
+
 ## Re-running the real-world checks
 ```
 # Real Home Assistant (container already seeded; token in the scratchpad)

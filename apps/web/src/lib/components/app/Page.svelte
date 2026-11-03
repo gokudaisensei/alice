@@ -14,7 +14,7 @@
 	// The large title collapses into the slim bar on phones once it scrolls out of view.
 	onMount(() => {
 		chrome.compact = false;
-		const io = new IntersectionObserver(([e]) => (chrome.compact = !e.isIntersecting && e.boundingClientRect.top < 0), { rootMargin: '-8px 0px 0px 0px' });
+		const io = new IntersectionObserver(([e]) => { if (e) chrome.compact = !e.isIntersecting && e.boundingClientRect.top < 0; }, { rootMargin: '-8px 0px 0px 0px' });
 		if (h1) io.observe(h1);
 		return () => { io.disconnect(); chrome.compact = false; };
 	});

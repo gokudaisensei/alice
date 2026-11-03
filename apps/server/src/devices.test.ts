@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 import { describe } from "./capabilities";
-import { ent, setup } from "./testkit";
+import { ent, setup, type Body } from "./testkit";
 
-const kinds = (e: any) => describe(e).controls.map((c) => c.type);
+const kinds = (e: Body) => describe(e).controls.map((c) => c.type);
 
 test("controls follow the device's real capabilities, not its category", () => {
   expect(kinds(ent("light.a", "on", { supported_color_modes: ["onoff"] }))).toEqual(["power"]);
@@ -28,8 +28,8 @@ async function home() {
   const member = await t.addUser(admin.cookie!, "member", "m1");
   const guest = await t.addUser(admin.cookie!, "guest", "g1");
   const devices = async (cookie: string) => (await t.call("GET", "/api/devices", { cookie })).json;
-  const ids = async (cookie: string) => (await devices(cookie)).devices.map((d: any) => d.id as string);
-  const cmd = (cookie: string, id: string, action: string, value?: any) => t.call("POST", `/api/devices/${id}/command`, { cookie, body: { action, value } });
+  const ids = async (cookie: string) => (await devices(cookie)).devices.map((d: Body) => d.id as string);
+  const cmd = (cookie: string, id: string, action: string, value?: unknown) => t.call("POST", `/api/devices/${id}/command`, { cookie, body: { action, value } });
   return { t, admin: admin.cookie!, member, guest, devices, ids, cmd };
 }
 
@@ -40,7 +40,7 @@ test("members see household devices; unsupported ones stay out of the household 
   expect(list).not.toContain("cover.blind");
   const { admin, t } = await home();
   const all = (await t.call("GET", "/api/admin/devices?all=1", { cookie: admin })).json.devices;
-  expect(all.find((d: any) => d.id === "cover.blind")).toMatchObject({ ordinary: false });
+  expect(all.find((d: Body) => d.id === "cover.blind")).toMatchObject({ ordinary: false });
 });
 
 test("guests see and control only devices explicitly granted; revocable; per-user denies for members", async () => {
@@ -106,14 +106,14 @@ test("accepted-but-unconfirmed and failed commands are never reported as success
 
 test("offline devices stay visible, are flagged, and refuse commands without queueing", async () => {
   const { t, member, devices, cmd } = await home();
-  const heater = (await devices(member.cookie)).devices.find((d: any) => d.id === "switch.heater");
+  const heater = (await devices(member.cookie)).devices.find((d: Body) => d.id === "switch.heater");
   expect(heater).toMatchObject({ available: false, reason: "device_offline" });
   const r = await cmd(member.cookie, "switch.heater", "turn_on");
   expect(r.status).toBe(409);
   expect(r.json.message).toContain("offline");
   t.ha.set("switch.heater", "off"); // device reconnects
   expect(t.ha.calls.length).toBe(0); // the earlier failed command was NOT replayed
-  expect((await devices(member.cookie)).devices.find((d: any) => d.id === "switch.heater").available).toBe(true);
+  expect((await devices(member.cookie)).devices.find((d: Body) => d.id === "switch.heater").available).toBe(true);
 });
 
 test("when Home Assistant is down this is distinct from a device being offline", async () => {
@@ -121,7 +121,7 @@ test("when Home Assistant is down this is distinct from a device being offline",
   t.ha.setStale(true);
   const d = await devices(member.cookie);
   expect(d.haHealth).toBe("unreachable");
-  expect(d.devices.every((x: any) => !x.available && x.reason === "home_assistant_unavailable")).toBe(true);
+  expect(d.devices.every((x: Body) => !x.available && x.reason === "home_assistant_unavailable")).toBe(true);
   const r = await cmd(member.cookie, "light.kitchen", "turn_off");
   expect(r.status).toBe(503);
   expect(r.json.error).toBe("ha_unavailable");
@@ -143,7 +143,7 @@ test("unlocking needs recent re-authentication and both directions are audited",
 async function withGroup() {
   const h = await home();
   const g = await h.t.call("POST", "/api/admin/groups", { cookie: h.admin, body: { name: "Downstairs", entityIds: ["light.kitchen", "light.hall", "light.desk"] } });
-  return { ...h, gid: g.json.id as string, gcmd: (cookie: string, action: string, value?: any) => h.t.call("POST", `/api/groups/${g.json.id}/command`, { cookie, body: { action, value } }) };
+  return { ...h, gid: g.json.id as string, gcmd: (cookie: string, action: string, value?: unknown) => h.t.call("POST", `/api/groups/${g.json.id}/command`, { cookie, body: { action, value } }) };
 }
 
 test("group commands report every outcome honestly, including partial failure", async () => {
@@ -153,15 +153,15 @@ test("group commands report every outcome honestly, including partial failure", 
   t.ha.failing.add("light.hall");
   const partial = await gcmd(member.cookie, "turn_on");
   expect(partial.json.summary).toBe("partial");
-  expect(partial.json.results.find((r: any) => r.id === "light.hall")).toMatchObject({ ok: false });
-  expect(partial.json.results.filter((r: any) => r.ok).length).toBe(2);
+  expect(partial.json.results.find((r: Body) => r.id === "light.hall")).toMatchObject({ ok: false });
+  expect(partial.json.results.filter((r: Body) => r.ok).length).toBe(2);
   t.ha.failing.add("light.kitchen"); t.ha.failing.add("light.desk");
   expect((await gcmd(member.cookie, "turn_on")).json.summary).toBe("none");
   // an action some members can't do is a per-device failure, not a fake success
   t.ha.failing.clear();
   const mixed = await gcmd(member.cookie, "set_brightness", 30);
   expect(mixed.json.summary).toBe("partial");
-  expect(mixed.json.results.find((r: any) => r.id === "light.hall")).toMatchObject({ ok: false, error: "unsupported" });
+  expect(mixed.json.results.find((r: Body) => r.id === "light.hall")).toMatchObject({ ok: false, error: "unsupported" });
 });
 
 test("group commands never touch devices the caller may not control, and never name them", async () => {
@@ -171,7 +171,7 @@ test("group commands never touch devices the caller may not control, and never n
   const r = await gcmd(guest.cookie, "turn_off");
   expect(r.json.summary).toBe("partial");
   expect(r.json.notPermitted).toBe(1);
-  expect(r.json.results.map((x: any) => x.id).sort()).toEqual(["light.hall", "light.kitchen"]);
+  expect(r.json.results.map((x: Body) => x.id).sort()).toEqual(["light.hall", "light.kitchen"]);
   expect(t.ha.calls.map((c) => c.entityId).sort()).toEqual(["light.hall", "light.kitchen"]);
   expect(JSON.stringify(r.json)).not.toContain("desk");
   expect((await t.call("GET", "/api/groups", { cookie: guest.cookie })).json.groups[0].deviceIds).not.toContain("light.desk");
@@ -191,7 +191,7 @@ test("rooms and device organisation are admin-only and household-scoped", async 
   expect((await t.call("PUT", "/api/admin/devices/light.kitchen", { cookie: member.cookie, body: { name: "x" } })).status).toBe(403);
   const room = (await t.call("POST", "/api/admin/rooms", { cookie: admin, body: { name: "Kitchen" } })).json;
   expect((await t.call("PUT", "/api/admin/devices/light.kitchen", { cookie: admin, body: { roomId: room.id, name: "Ceiling light" } })).status).toBe(200);
-  const k = (await devices(member.cookie)).devices.find((d: any) => d.id === "light.kitchen");
+  const k = (await devices(member.cookie)).devices.find((d: Body) => d.id === "light.kitchen");
   expect(k).toMatchObject({ name: "Ceiling light", roomId: room.id });
   expect((await t.call("PUT", "/api/admin/devices/light.kitchen", { cookie: admin, body: { roomId: "not-a-room" } })).status).toBe(400);
   expect((await t.call("PUT", "/api/admin/devices/nope.nope", { cookie: admin, body: { name: "x" } })).status).toBe(404);
@@ -203,7 +203,7 @@ test("rooms and device organisation are admin-only and household-scoped", async 
 test("personal preferences and favourites are per user and validated", async () => {
   const { t, admin, member, guest } = await home();
   await t.call("PUT", `/api/admin/users/${guest.userId}/devices`, { cookie: admin, body: { allow: ["light.kitchen"] } });
-  const put = (cookie: string, body: any) => t.call("PUT", "/api/me/prefs", { cookie, body });
+  const put = (cookie: string, body: unknown) => t.call("PUT", "/api/me/prefs", { cookie, body });
   expect((await put(member.cookie, { template: "minimal", appearance: "dark", sections: ["favorites", "sensors"] })).status).toBe(200);
   await t.call("PUT", "/api/me/favorites", { cookie: member.cookie, body: { devices: ["light.desk", "light.kitchen", "lock.front"], rooms: [] } });
   const mine = (await t.call("GET", "/api/me/prefs", { cookie: member.cookie })).json;
@@ -226,11 +226,11 @@ test("search matches name, room and type, and respects permissions", async () =>
   const room = (await t.call("POST", "/api/admin/rooms", { cookie: admin, body: { name: "Bedroom" } })).json;
   await t.call("PUT", "/api/admin/devices/fan.bedroom", { cookie: admin, body: { roomId: room.id } });
   const q = async (cookie: string, s: string) => (await t.call("GET", `/api/search?q=${encodeURIComponent(s)}`, { cookie })).json;
-  expect((await q(member.cookie, "kitch")).devices.map((d: any) => d.id)).toEqual(["light.kitchen"]);
-  expect((await q(member.cookie, "bedroom")).devices.map((d: any) => d.id)).toContain("fan.bedroom"); // by room
+  expect((await q(member.cookie, "kitch")).devices.map((d: Body) => d.id)).toEqual(["light.kitchen"]);
+  expect((await q(member.cookie, "bedroom")).devices.map((d: Body) => d.id)).toContain("fan.bedroom"); // by room
   expect((await q(member.cookie, "bedroom")).rooms.length).toBe(1);
   expect((await q(member.cookie, "light")).devices.length).toBeGreaterThanOrEqual(3); // by type
-  expect((await q(member.cookie, "door")).devices.map((d: any) => d.id)).toContain("lock.front");
+  expect((await q(member.cookie, "door")).devices.map((d: Body) => d.id)).toContain("lock.front");
   expect((await q(member.cookie, "blind")).devices).toEqual([]); // unsupported device is not discoverable
   expect((await q(guest.cookie, "light")).devices).toEqual([]); // nothing granted
   expect((await q(guest.cookie, "kitchen")).devices).toEqual([]);
@@ -282,7 +282,7 @@ test("rooms are only revealed to people who can use something in them", async ()
   await t.call("PUT", "/api/admin/devices/light.kitchen", { cookie: admin, body: { roomId: a.id } });
   await t.call("PUT", "/api/admin/devices/light.hall", { cookie: admin, body: { roomId: b.id } });
   await t.call("PUT", `/api/admin/users/${guest.userId}/devices`, { cookie: admin, body: { allow: ["light.kitchen"] } });
-  const names = async (c: string) => (await t.call("GET", "/api/rooms", { cookie: c })).json.rooms.map((r: any) => r.name).sort();
+  const names = async (c: string) => (await t.call("GET", "/api/rooms", { cookie: c })).json.rooms.map((r: Body) => r.name).sort();
   expect(await names(guest.cookie)).toEqual(["Study"]); // not "Nursery"
   expect(await names(member.cookie)).toEqual(["Nursery", "Study"]);
   expect(await names(admin)).toEqual(["Nursery", "Study"]); // managers see empty rooms too
@@ -328,7 +328,7 @@ test("the hub's housekeeping sensors are not devices, but real readings are", as
   t.ha.entities.set("sensor.backup_backup_manager_state", ent("sensor.backup_backup_manager_state", "idle", { device_class: "enum" }));
   t.ha.entities.set("sensor.mystery_text", ent("sensor.mystery_text", "hello"));
   t.ha.entities.set("sensor.offline_temp", ent("sensor.offline_temp", "unavailable", { device_class: "temperature", unit_of_measurement: "°C" }));
-  const ids = ((await t.call("GET", "/api/devices", { cookie: a.cookie! })).json.devices as any[]).map((d) => d.id);
+  const ids = ((await t.call("GET", "/api/devices", { cookie: a.cookie! })).json.devices as Body[]).map((d) => d.id);
   expect(ids).toContain("sensor.temp");
   expect(ids).toContain("sensor.offline_temp"); // a real sensor that is offline is still a device
   for (const hidden of ["sensor.backup_last_attempted_automatic_backup", "sensor.backup_backup_manager_state", "sensor.mystery_text"]) expect(ids).not.toContain(hidden);
@@ -340,17 +340,17 @@ test("the admin device list is searchable and paged, so a huge home is never one
   const get = async (q: string) => (await t.call("GET", `/api/admin/devices${q}`, { cookie: a.cookie! })).json;
   const first = await get("?limit=50");
   expect([first.devices.length, first.total > 150]).toEqual([50, true]);
-  expect((await get("?q=bulk 14&limit=100")).devices.map((d: any) => d.name)).toEqual(Array.from({ length: 10 }, (_, i) => `Bulk 14${i}`));
+  expect((await get("?q=bulk 14&limit=100")).devices.map((d: Body) => d.name)).toEqual(Array.from({ length: 10 }, (_, i) => `Bulk 14${i}`));
   expect((await get("?offset=100&limit=100")).devices.length).toBeGreaterThan(0);
-  expect((await get("?q=kitchen")).devices.some((d: any) => d.id === "light.kitchen")).toBe(true);
+  expect((await get("?q=kitchen")).devices.some((d: Body) => d.id === "light.kitchen")).toBe(true);
 });
 
 test("devices move in and out of a room in bulk, and a group can be edited", async () => {
   const t = setup(); const a = await t.bootstrapAdmin("a1"); const m = await t.addUser(a.cookie!, "member", "m1");
-  const call = (method: string, path: string, body?: any, cookie = a.cookie!) => t.call(method, path, { cookie, body });
+  const call = (method: string, path: string, body?: unknown, cookie = a.cookie!) => t.call(method, path, { cookie, body });
   const room = (await call("POST", "/api/admin/rooms", { name: "Study" })).json.id;
   expect((await call("PUT", `/api/admin/rooms/${room}/devices`, { add: ["light.kitchen", "light.desk"] })).status).toBe(200);
-  const inRoom = async () => ((await call("GET", "/api/admin/devices?room=" + room)).json.devices as any[]).map((d) => d.id).sort();
+  const inRoom = async () => ((await call("GET", "/api/admin/devices?room=" + room)).json.devices as Body[]).map((d) => d.id).sort();
   expect(await inRoom()).toEqual(["light.desk", "light.kitchen"]);
   await call("PUT", `/api/admin/rooms/${room}/devices`, { remove: ["light.kitchen"] });
   expect(await inRoom()).toEqual(["light.desk"]);
