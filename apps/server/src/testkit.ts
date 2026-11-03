@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { migrate, openDb } from "./db";
 import { ensureBootstrapCode, issueEnrollmentToken } from "./auth";
 import { realWebAuthn, type WebAuthnService } from "./webauthn";
-import type { CallResult, HaApi, HaArea, HaAttributes, HaEntity, HaEvent, HaFloor, HaReply, Parent } from "./ha";
+import type { CallResult, HaApi, HaArea, HaAttributes, HaEntity, HaDeviceInfo, HaEvent, HaFloor, HaReply, Parent } from "./ha";
 import { asObject } from "./http";
 
 /**
@@ -57,6 +57,10 @@ export class FakeHa implements HaApi {
   areas = new Map<string, HaArea>();
   floors = new Map<string, HaFloor>();
   areaOf = new Map<string, string>();
+  labels = new Map<string, string>();
+  labelsOf = new Map<string, string[]>();
+  deviceInfo = new Map<string, HaDeviceInfo>();
+  platformOf = new Map<string, string>();
   stale = false;
   calls: { domain: string; service: string; data: Record<string, unknown>; entityId?: string }[] = [];
   failing = new Set<string>();
@@ -77,6 +81,7 @@ export class FakeHa implements HaApi {
   configFails: string | null = null;
   wsCalls: Body[] = [];
   exposeFails = false;
+  areaFails = false; // the hub refuses area changes
   private slug = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
   async config(method: "POST" | "DELETE", path: string, body?: unknown) {
     if (this.stale) return { ok: false, error: "ha_unavailable" };
@@ -96,6 +101,9 @@ export class FakeHa implements HaApi {
       this.emit({ type: "entity", entityId: id });
       return { success: true, result: {} };
     }
+    if (msg.type === "config/area_registry/create") { if (this.areaFails) return { success: false, error: { code: "failed" } }; const name = String(msg.name), id = this.slug(name); this.areas.set(id, { id, name, floorId: null }); return { success: true, result: { area_id: id, name } }; }
+    if (msg.type === "config/area_registry/update") { const a = this.areas.get(String(msg.area_id)); if (!a || this.areaFails) return { success: false, error: { code: "failed" } }; this.areas.set(a.id, { ...a, name: String(msg.name ?? a.name) }); return { success: true, result: {} }; }
+    if (msg.type === "config/entity_registry/update") { if (this.areaFails) return { success: false, error: { code: "failed" } }; if (msg.area_id) this.areaOf.set(String(msg.entity_id), String(msg.area_id)); else this.areaOf.delete(String(msg.entity_id)); return { success: true, result: {} }; }
     if (msg.type === "cloud/status") return { success: true, result: { logged_in: true } };
     if (msg.type === "homeassistant/expose_entity") return this.exposeFails ? { success: false, error: { code: "failed" } } : { success: true, result: {} };
     return { success: false, error: { code: "unknown_command" } };

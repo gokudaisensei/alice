@@ -164,11 +164,13 @@ export function createDeviceService(db: Database, ha: HaApi) {
 
   function groupsFor(u: SessionUser) {
     const ok = accessor(u);
-    const groups = all<{ id: string; name: string }>(db, "SELECT id, name FROM device_groups WHERE household_id = ? ORDER BY name", u.householdId);
+    const groups = all<{ id: string; name: string; ha_label_id: string | null }>(db, "SELECT id, name, ha_label_id FROM device_groups WHERE household_id = ? ORDER BY name", u.householdId);
     return groups.map((g) => {
-      const members = all<{ entity_id: string }>(db, "SELECT entity_id FROM group_members WHERE group_id = ?", g.id).map((r) => r.entity_id);
+      // A group that mirrors a hub label has whatever carries the label there, besides anything added by hand.
+      const labelled = g.ha_label_id ? [...(ha.labelsOf ?? [])].filter(([, l]) => l.includes(g.ha_label_id as string)).map(([id]) => id) : [];
+      const members = [...new Set([...all<{ entity_id: string }>(db, "SELECT entity_id FROM group_members WHERE group_id = ?", g.id).map((r) => r.entity_id), ...labelled])];
       const mine = members.filter((id) => ok(id) && ha.entities.has(id));
-      return { id: g.id, name: g.name, deviceIds: mine, hidden: members.length - mine.length };
+      return { id: g.id, name: (g.ha_label_id && ha.labels?.get(g.ha_label_id)) || g.name, deviceIds: mine, hidden: members.length - mine.length };
     }).filter((g) => g.deviceIds.length > 0);
   }
 
@@ -189,6 +191,22 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
       const input = asObject(body);
       const r = await svc.run(g.user, params.id, { action: text(input.action), value: input.value });
       set.status = r.status; return r.body;
+    })
+    // What the hub's registry knows about the thing behind a card.
+    .get("/api/devices/:id/about", ({ request, params, set }) => {
+      const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
+      const dev = svc.deviceFor(g.user, params.id);
+      if (!dev) return deny(set, 404, "not_found");
+      const p = ha.parents?.get(params.id), info = p ? ha.deviceInfo?.get(p.deviceId) : undefined;
+      const area = ha.areaOf?.get(params.id), a = area ? ha.areas?.get(area) : undefined;
+      const mates = p ? [...ha.entities.values()].filter((x) => ha.parents?.get(x.entity_id)?.deviceId === p.deviceId) : [dev.entity];
+      const bat = mates.find((x) => x.attributes.device_class === "battery" && Number.isFinite(Number(x.state)) && x.attributes.unit_of_measurement === "%");
+      const level = bat ? Number(bat.state) : typeof dev.entity.attributes.battery_level === "number" ? dev.entity.attributes.battery_level : null;
+      return {
+        device: p?.deviceName ?? null, manufacturer: info?.manufacturer ?? null, model: info?.model ?? null, firmware: info?.firmware ?? null,
+        integration: ha.platformOf?.get(params.id) ?? null, room: a?.name ?? null, floor: (a?.floorId && ha.floors?.get(a.floorId)?.name) || null,
+        battery: level === null ? null : Math.round(level), labels: (ha.labelsOf?.get(params.id) ?? []).map((l) => ha.labels?.get(l)).filter(Boolean),
+      };
     })
     .get("/api/devices/:id/snapshot", async ({ request, params, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);

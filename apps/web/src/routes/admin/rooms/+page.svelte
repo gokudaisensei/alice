@@ -11,6 +11,7 @@
 	import Empty from '#lib/components/app/Empty.svelte';
 	import RoomSuggestions from '#lib/components/app/RoomSuggestions.svelte';
 	import HaAreas from '#lib/components/app/HaAreas.svelte';
+	import HaLabels from '#lib/components/app/HaLabels.svelte';
 	import { roomLook } from '#lib/roomLook.js';
 	import DevicePicker from '#lib/components/app/DevicePicker.svelte';
 	import * as Drawer from '#lib/components/ui/drawer';
@@ -57,7 +58,7 @@
 	<Section title="Rooms">
 		{#if home.orderedRooms.length}
 			<Group>{#each home.orderedRooms as r (r.id)}
-				<Row href="/admin/rooms/{r.id}" title={r.name} description="{home.inRoom(r.id).length} device{home.inRoom(r.id).length === 1 ? '' : 's'}">{#snippet icon()}{@const look = roomLook(r)}<look.icon class="size-[18px]" style="color: {look.color}" />{/snippet}</Row>
+				<Row href="/admin/rooms/{r.id}" title={r.name} description="{r.floor ? r.floor + ' · ' : ''}{home.inRoom(r.id).length} device{home.inRoom(r.id).length === 1 ? '' : 's'}">{#snippet icon()}{@const look = roomLook(r)}<look.icon class="size-[18px]" style="color: {look.color}" />{/snippet}</Row>
 			{/each}</Group>
 			{#if unplaced}<p class="text-sm text-muted-foreground">{unplaced} device{unplaced === 1 ? '' : 's'} {unplaced === 1 ? "isn't" : "aren't"} in a room yet. Open a room and tap Add to place {unplaced === 1 ? 'it' : 'them'}.</p>{/if}
 		{:else}
@@ -65,6 +66,7 @@
 		{/if}
 	</Section>
 
+	<HaLabels />
 	<Section title="Groups" hint="Control several devices together from Home.">
 		{#snippet actions()}<Button size="sm" variant="secondary" onclick={newGroup}><Plus />New group</Button>{/snippet}
 		{#if groups.length}

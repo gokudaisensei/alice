@@ -40,6 +40,22 @@ export function withAreaRooms(db: Database, ha: HaApi, household: string, own: M
 
 const norm = (s: string) => s.trim().toLowerCase();
 
+/** Writing back to the hub is best effort and never blocks the household's own organising; each helper says whether the hub took it. */
+export async function createAreaInHa(ha: HaApi, name: string): Promise<string | null> {
+  if (!ha.areas || ha.isStale()) return null;
+  const same = [...ha.areas.values()].find((a) => norm(a.name) === norm(name));
+  if (same) return same.id;
+  const r = await ha.ws({ type: "config/area_registry/create", name });
+  const id = r.success && r.result && typeof r.result === "object" ? (r.result as { area_id?: unknown }).area_id : null;
+  return typeof id === "string" ? id : null;
+}
+export async function renameAreaInHa(ha: HaApi, areaId: string, name: string): Promise<boolean> {
+  return !ha.isStale() && (await ha.ws({ type: "config/area_registry/update", area_id: areaId, name })).success;
+}
+export async function placeEntityInHa(ha: HaApi, entityId: string, areaId: string | null): Promise<boolean> {
+  return !ha.isStale() && (await ha.ws({ type: "config/entity_registry/update", entity_id: entityId, area_id: areaId })).success;
+}
+
 /** Bringing the hub's areas in as rooms: shown first, applied only when an admin says so, and never deleting anything. */
 export function haRoomRoutes(db: Database, ha: HaApi, secure: boolean) {
   const org = (req: Request) => authorize(db, req, secure, ["admin.access", "rooms.manage"]);
@@ -57,6 +73,18 @@ export function haRoomRoutes(db: Database, ha: HaApi, secure: boolean) {
         state: l ? ("linked" as const) : m ? ("match" as const) : ("new" as const), roomId: (l ?? m)?.id ?? null,
       };
     }).sort((x, y) => Number(x.floor === null) - Number(y.floor === null) || (x.floor ?? "").localeCompare(y.floor ?? "") || x.name.localeCompare(y.name)); // rooms on a floor first
+  }
+
+  function labelPlan(household: string) {
+    const groups = all<{ id: string; name: string; ha_label_id: string | null }>(db, "SELECT id, name, ha_label_id FROM device_groups WHERE household_id = ?", household);
+    const linked = new Map(groups.filter((x) => x.ha_label_id).map((x) => [x.ha_label_id as string, x]));
+    const byName = new Map(groups.filter((x) => !x.ha_label_id).map((x) => [norm(x.name), x]));
+    const count = new Map<string, number>();
+    for (const ls of ha.labelsOf?.values() ?? []) for (const l of ls) count.set(l, (count.get(l) ?? 0) + 1);
+    return [...(ha.labels ?? [])].map(([id, name]) => {
+      const l = linked.get(id), m = l ? undefined : byName.get(norm(name));
+      return { id, name, devices: count.get(id) ?? 0, state: l ? ("linked" as const) : m ? ("match" as const) : ("new" as const), groupId: (l ?? m)?.id ?? null };
+    }).sort((x, y) => x.name.localeCompare(y.name));
   }
 
   return new Elysia({ name: "ha-rooms" })
@@ -83,6 +111,28 @@ export function haRoomRoutes(db: Database, ha: HaApi, secure: boolean) {
       })();
       audit(db, { householdId: h, actorType: "user", actorId: g.user.id, action: "room.ha_import", target: "home_assistant", outcome: "success", reason: `created=${created} linked=${linked}` });
       if (created + linked) activity(db, h, "rooms", `Rooms were brought in from Home Assistant (${created} new, ${linked} matched)`);
+      return { ok: true, created, linked };
+    })
+    // Hub labels work the same way, as groups.
+    .get("/api/admin/groups/ha-labels", ({ request, set }) => {
+      const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
+      return { available: !ha.isStale() && !!ha.labels?.size, labels: labelPlan(g.user.householdId) };
+    })
+    .post("/api/admin/groups/ha-import", ({ request, body, set }) => {
+      const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
+      if (ha.isStale()) return deny(set, 503, "ha_unavailable");
+      const h = g.user.householdId, want = asObject(body).labelIds;
+      if (want !== undefined && !(Array.isArray(want) && want.every((x) => typeof x === "string"))) return deny(set, 400, "invalid_input");
+      const pick = new Set<string>(want as string[] | undefined);
+      let created = 0, linked = 0;
+      db.transaction(() => {
+        for (const l of labelPlan(h)) {
+          if (l.state === "linked" || (want && !pick.has(l.id))) continue;
+          if (l.state === "match" && l.groupId) { db.query("UPDATE device_groups SET ha_label_id = ? WHERE id = ? AND household_id = ?").run(l.id, l.groupId, h); linked++; }
+          else { db.query("INSERT INTO device_groups (id, household_id, name, ha_label_id) VALUES (?,?,?,?)").run(randomUUID(), h, l.name, l.id); created++; }
+        }
+      })();
+      audit(db, { householdId: h, actorType: "user", actorId: g.user.id, action: "group.ha_import", target: "home_assistant", outcome: "success", reason: `created=${created} linked=${linked}` });
       return { ok: true, created, linked };
     });
 }

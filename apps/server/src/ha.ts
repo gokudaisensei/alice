@@ -21,6 +21,8 @@ export type HaReply = { type?: "result"; id?: number; success: boolean; error?: 
 /** An area (room) and floor as the hub's registry has them. */
 export type HaArea = { id: string; name: string; floorId: string | null };
 export type HaFloor = { id: string; name: string; level: number | null };
+/** What the registry knows about a physical device, for an "about this device" view. */
+export type HaDeviceInfo = { manufacturer: string | null; model: string | null; firmware: string | null; hardware: string | null };
 export type Parent = { deviceId: string; deviceName: string; label: string | null; cls: string | null };
 
 export interface HaHealth { health(): "ok" | "unreachable" | "auth_failed" }
@@ -45,6 +47,12 @@ export interface HaApi extends HaHealth {
   areas?: ReadonlyMap<string, HaArea>;
   floors?: ReadonlyMap<string, HaFloor>;
   areaOf?: ReadonlyMap<string, string>;
+  /** The hub's labels (id to name), and the labels each entity carries (its own and its device's). */
+  labels?: ReadonlyMap<string, string>;
+  labelsOf?: ReadonlyMap<string, readonly string[]>;
+  /** Registry details per physical device (keyed as {@link Parent.deviceId}), and the integration each entity comes from. */
+  deviceInfo?: ReadonlyMap<string, HaDeviceInfo>;
+  platformOf?: ReadonlyMap<string, string>;
   /** Which physical device an entity belongs to, from the hub's registries (name as the person sees it, and the entity's own label). */
   parents?: ReadonlyMap<string, Parent>;
   isStale(): boolean;
@@ -74,6 +82,10 @@ export class HaClient implements HaApi {
   areas = new Map<string, HaArea>();
   floors = new Map<string, HaFloor>();
   areaOf = new Map<string, string>();
+  labels = new Map<string, string>();
+  labelsOf = new Map<string, string[]>();
+  deviceInfo = new Map<string, HaDeviceInfo>();
+  platformOf = new Map<string, string>();
   info: HaInfo = { version: null, timeZone: null, locationName: null, metric: null };
   lastMessageAt = 0;
   private pinger: ReturnType<typeof setInterval> | null = null;
@@ -199,17 +211,21 @@ export class HaClient implements HaApi {
     const gen = ++this.registryGen;
     const reg = await this.send({ type: "config/entity_registry/list" });
     if (!reg.success || !Array.isArray(reg.result)) return; // without the registry every entity is shown, as before
-    type Row = { entity_id?: string; device_id?: string | null; name?: string | null; original_name?: string | null; device_class?: string | null; original_device_class?: string | null; area_id?: string | null; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null };
-    type Dev = { id?: string; area_id?: string | null; name?: string | null; name_by_user?: string | null; via_device_id?: string | null; connections?: [string, string][] };
+    type Row = { entity_id?: string; device_id?: string | null; name?: string | null; original_name?: string | null; device_class?: string | null; original_device_class?: string | null; area_id?: string | null; labels?: string[] | null; platform?: string | null; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null };
+    type Dev = { id?: string; area_id?: string | null; labels?: string[] | null; manufacturer?: string | null; model?: string | null; sw_version?: string | null; hw_version?: string | null; name?: string | null; name_by_user?: string | null; via_device_id?: string | null; connections?: [string, string][] };
     const rows = reg.result as Row[];
     const dev = await this.send({ type: "config/device_registry/list" });
     if (gen !== this.registryGen) return; // a newer read has started; it has the last word
     const devices = dev.success && Array.isArray(dev.result) ? (dev.result as Dev[]) : [];
     // Areas and floors are optional: an older hub lacks floors, and a failed read leaves what we had.
-    const [ar, fl] = [await this.send({ type: "config/area_registry/list" }), await this.send({ type: "config/floor_registry/list" })];
+    const [ar, fl, lb] = [await this.send({ type: "config/area_registry/list" }), await this.send({ type: "config/floor_registry/list" }), await this.send({ type: "config/label_registry/list" })];
     if (gen !== this.registryGen) return;
     if (ar.success && Array.isArray(ar.result)) this.areas = new Map((ar.result as { area_id?: string; name?: string; floor_id?: string | null }[]).flatMap((a) => (a.area_id && a.name ? [[a.area_id, { id: a.area_id, name: a.name, floorId: a.floor_id ?? null }] as const] : [])));
     if (fl.success && Array.isArray(fl.result)) this.floors = new Map((fl.result as { floor_id?: string; name?: string; level?: number | null }[]).flatMap((f) => (f.floor_id && f.name ? [[f.floor_id, { id: f.floor_id, name: f.name, level: f.level ?? null }] as const] : [])));
+    if (lb.success && Array.isArray(lb.result)) this.labels = new Map((lb.result as { label_id?: string; name?: string }[]).flatMap((l) => (l.label_id && l.name ? [[l.label_id, l.name] as const] : [])));
+    const deviceLabels = new Map(devices.flatMap((d) => (d.id && d.labels?.length ? [[d.id, d.labels] as const] : [])));
+    this.labelsOf = new Map(rows.flatMap((x) => { const l = [...new Set([...(x.labels ?? []), ...(x.device_id ? deviceLabels.get(x.device_id) ?? [] : [])])].filter((id) => this.labels.has(id)); return x.entity_id && l.length ? [[x.entity_id, l] as const] : []; }));
+    this.platformOf = new Map(rows.flatMap((x) => (x.entity_id && x.platform ? [[x.entity_id, x.platform] as const] : [])));
     const deviceArea = new Map(devices.flatMap((d) => (d.id && d.area_id ? [[d.id, d.area_id] as const] : [])));
     this.areaOf = new Map(rows.flatMap((x) => { const a = x.area_id || (x.device_id ? deviceArea.get(x.device_id) : undefined); return x.entity_id && a && this.areas.has(a) ? [[x.entity_id, a] as const] : []; }));
     // A bulb's "do not disturb" switch is a part of the bulb, not a device of its own.
@@ -219,6 +235,7 @@ export class HaClient implements HaApi {
     // The same hardware can be registered twice by different integrations (an ESPHome device that is also an AirPlay receiver); they share a MAC address.
     const macs = new Map<string, string[]>();
     for (const d of devices) for (const [k, v] of d.connections ?? []) if (k === "mac" && d.id && !d.via_device_id) macs.set(v.toLowerCase(), [...(macs.get(v.toLowerCase()) ?? []), d.id]);
+    this.deviceInfo = new Map(devices.flatMap((d) => (d.id ? [[d.id, { manufacturer: d.manufacturer || null, model: d.model || null, firmware: d.sw_version || null, hardware: d.hw_version || null }] as const] : [])));
     const parentsOf = new Set(via.values()), sameAs = new Map<string, string>();
     for (const ids of macs.values()) { const main = ids.find((i) => parentsOf.has(i)) ?? ids[0]!; for (const i of ids) sameAs.set(i, main); }
     // A device that is part of another (an ESPHome device's camera or microphone) belongs to the one at the top.

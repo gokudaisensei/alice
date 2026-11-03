@@ -34,7 +34,7 @@ export type Device = {
 	/** "Spaceship · Speaker": set only when a physical device shows as several cards */
 	subtitle?: string | null;
 };
-export type Room = { id: string; name: string; color?: string | null; icon?: string | null };
+export type Room = { id: string; name: string; color?: string | null; icon?: string | null; floor?: string | null };
 export type Group = { id: string; name: string; deviceIds: string[] };
 export type Prefs = {
 	template: 'comfort' | 'minimal'; appearance: 'light' | 'dark' | 'system'; sections: string[]; roomOrder: string[];

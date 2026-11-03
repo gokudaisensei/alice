@@ -8,6 +8,7 @@
 	import { Badge } from '#lib/components/ui/badge';
 	import * as Drawer from '#lib/components/ui/drawer';
 	import DeviceHistory from '#lib/components/app/DeviceHistory.svelte';
+	import DeviceAbout from '#lib/components/app/DeviceAbout.svelte';
 	import { isWide } from '#lib/tiles.js';
 	import { scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
@@ -277,7 +278,7 @@
 			</div>
 		{/if}
 		{#if device.available}<div class="space-y-3.5">{@render controls()}</div>{:else}<p class="text-sm text-muted-foreground">{device.reason === 'device_offline' ? 'This device is offline. Check its power and Wi-Fi.' : 'The home hub can’t be reached, so it can’t be controlled right now.'}</p>{/if}
-		{#if detail}<DeviceHistory id={device.id} />{/if}
+		{#if detail}<DeviceHistory id={device.id} /><DeviceAbout id={device.id} />{/if}
 		{#if since && device.available}<p class="text-sm text-muted-foreground">Last changed {since}{#if changedBy}, by {changedBy}{:else if changedBy === null}, in Home Assistant or at the device{/if}.</p>{/if}
 		{#if device.category === 'energy' && ['W', 'kW'].includes(device.reading?.unit ?? '') && session.can('automation.manage')}<PowerLimit {device} />{/if}
 		<div class="flex flex-wrap gap-2 border-t pt-4">

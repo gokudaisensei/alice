@@ -7,7 +7,7 @@ import type { DeviceMeta } from "./devices";
 import { authorize } from "./guard";
 import type { HaApi } from "./ha";
 import { friendlyName } from "./ha";
-import { roomRows, withAreaRooms } from "./haRooms";
+import { createAreaInHa, placeEntityInHa, renameAreaInHa, roomRows, withAreaRooms } from "./haRooms";
 import { asObject, cleanName, deny, oneOf, text } from "./http";
 import { effectivePermissions, type Permission, type Role } from "./policy";
 import { all, exists, one, scalar } from "./sql";
@@ -62,29 +62,34 @@ export function manageRoutes(db: Database, ha: HaApi, secure: boolean) {
       audit(db, { householdId: h, actorType: "user", actorId: g.user.id, action: "device.organise", target: params.id, outcome: "success" });
       return { ok: true };
     })
-    .post("/api/admin/rooms", ({ request, body, set }) => {
+    .post("/api/admin/rooms", async ({ request, body, set }) => {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      const n = cleanName(asObject(body).name); if (!n) return deny(set, 400, "invalid_input");
+      const b = asObject(body), n = cleanName(b.name); if (!n) return deny(set, 400, "invalid_input");
+      // A new room is also made in Home Assistant, so both agree. If the hub won't take it the room still exists here.
+      const area = b.inHa === false ? null : await createAreaInHa(ha, n);
+      const taken = area !== null && exists(db, "SELECT 1 FROM rooms WHERE household_id = ? AND ha_area_id = ?", g.user.householdId, area);
       const id = randomUUID(), pos = scalar(db, "SELECT COALESCE(MAX(position),0)+1 FROM rooms WHERE household_id = ?", 1, g.user.householdId);
-      db.query("INSERT INTO rooms (id, household_id, name, position) VALUES (?,?,?,?)").run(id, g.user.householdId, n, pos);
+      db.query("INSERT INTO rooms (id, household_id, name, position, ha_area_id) VALUES (?,?,?,?,?)").run(id, g.user.householdId, n, pos, taken ? null : area);
       audit(db, { householdId: g.user.householdId, actorType: "user", actorId: g.user.id, action: "room.create", target: id, outcome: "success" });
       activity(db, g.user.householdId, "rooms", `Room "${n}" was added`);
-      return { id, name: n };
+      return { id, name: n, inHa: area !== null && !taken };
     })
-    .patch("/api/admin/rooms/:id", ({ request, params, body, set }) => {
+    .patch("/api/admin/rooms/:id", async ({ request, params, body, set }) => {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const b = asObject(body), h = g.user.householdId;
-      const cur = one<{ name: string; color: string | null; icon: string | null }>(db, "SELECT name, color, icon FROM rooms WHERE id = ? AND household_id = ?", params.id, h);
+      const cur = one<{ name: string; color: string | null; icon: string | null; ha_area_id: string | null }>(db, "SELECT name, color, icon, ha_area_id FROM rooms WHERE id = ? AND household_id = ?", params.id, h);
       if (!cur) return deny(set, 404, "not_found");
       let name = cur.name, color = cur.color, icon = cur.icon;
       if ("name" in b) { const n = cleanName(b.name); if (!n) return deny(set, 400, "invalid_input"); name = n; }
       if ("color" in b) { if (b.color !== null && !oneOf(ROOM_COLORS, b.color)) return deny(set, 400, "invalid_input"); color = b.color as string | null; }
       if ("icon" in b) { if (b.icon !== null && !oneOf(ROOM_ICONS, b.icon)) return deny(set, 400, "invalid_input"); icon = b.icon as string | null; }
+      // A room that mirrors a hub area takes its name from there, so the hub must accept the new one first.
+      if (cur.ha_area_id && name !== cur.name && !(await renameAreaInHa(ha, cur.ha_area_id, name))) return deny(set, 502, "ha_rejected");
       db.query("UPDATE rooms SET name = ?, color = ?, icon = ? WHERE id = ? AND household_id = ?").run(name, color, icon, params.id, h);
       return { ok: true };
     })
     // Put devices into a room or take them out, in one go.
-    .put("/api/admin/rooms/:id/devices", ({ request, params, body, set }) => {
+    .put("/api/admin/rooms/:id/devices", async ({ request, params, body, set }) => {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const h = g.user.householdId, b = asObject(body), add = entityIds(b.add ?? [], 200), remove = entityIds(b.remove ?? [], 200);
       if (!roomOk(h, params.id) || !add || !remove) return deny(set, 400, "invalid_input");
@@ -92,8 +97,15 @@ export function manageRoutes(db: Database, ha: HaApi, secure: boolean) {
         for (const e of add) db.query("INSERT INTO device_meta (household_id, entity_id, room_id, hidden) VALUES (?,?,?,0) ON CONFLICT(household_id, entity_id) DO UPDATE SET room_id = excluded.room_id").run(h, e, params.id);
         for (const e of remove) db.query("UPDATE device_meta SET room_id = NULL WHERE household_id = ? AND entity_id = ? AND room_id = ?").run(h, e, params.id);
       })();
+      // In a room that mirrors a hub area, the hub learns of it too. The household's placement holds either way.
+      const area = one<{ ha_area_id: string | null }>(db, "SELECT ha_area_id FROM rooms WHERE id = ?", params.id)?.ha_area_id ?? null;
+      let inHa = true;
+      if (area) {
+        for (const e of add) inHa = (await placeEntityInHa(ha, e, area)) && inHa;
+        for (const e of remove) inHa = (await placeEntityInHa(ha, e, null)) && inHa;
+      }
       audit(db, { householdId: h, actorType: "user", actorId: g.user.id, action: "room.devices", target: params.id, outcome: "success", reason: `add=${add.length} remove=${remove.length}` });
-      return { ok: true };
+      return { ok: true, inHa };
     })
     .delete("/api/admin/rooms/:id", ({ request, params, set }) => {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);

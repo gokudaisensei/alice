@@ -7,7 +7,7 @@ Status: proposal. Target: **Home Assistant Container** only (no Supervisor, no a
 | Phase | State |
 |---|---|
 | P1 transport | Heartbeat, safe parsing, live registry re-read, hub info (version, time zone, units) are in. **Still open:** split into transport and model, `subscribe_entities`, using `ha.info` for units. |
-| P2 areas | HA areas and floors are read live; admins preview and import them as rooms (`/api/admin/rooms/ha-areas`, `/ha-import`, `rooms.ha_area_id`); devices follow their area unless the household placed them; renames in HA show up. **Still open:** labels, write-back to HA (create/rename areas), device detail from the registry (manufacturer, firmware, battery), floor grouping on the home screen. |
+| P2 areas | Done: areas and floors read live; preview-and-import of areas as rooms and labels as groups; devices follow their area unless the household placed them; write-back (new rooms create an area, renaming a linked room renames the area, placing a device in a linked room updates the hub; best effort except rename); "About this device" from the registry (maker, model, firmware, integration, battery, labels); floor name on rooms. **Known limits:** removing a device from a linked room cannot clear an area it inherits from its physical device; floors are shown as a label, not as tabs on the home screen; not viewed in a browser or run on a real HA. |
 
 ## 1. Principle
 

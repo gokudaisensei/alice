@@ -102,3 +102,16 @@ test("areas and floors are read, and an entity is in its own area or else its de
   ha.stop();
   mock.registry.entities = []; mock.registry.devices = []; mock.registry.areas = []; mock.registry.floors = [];
 });
+
+test("labels, device details and the integration of each entity are read from the registries", async () => {
+  mock.registry.labels = [{ label_id: "evening", name: "Evening lights" }];
+  mock.registry.devices = [{ id: "d1", name: "Strip", manufacturer: "Acme", model: "S2", sw_version: "1.4", labels: ["evening"] }];
+  mock.registry.entities = [{ entity_id: "light.kitchen", device_id: "d1", platform: "zha", labels: ["gone"] }];
+  const ha = new HaClient("http://127.0.0.1:18123", "tok", { registryDebounceMs: 30 }); ha.start();
+  await until(() => ha.labels.size === 1);
+  expect(ha.labelsOf.get("light.kitchen")).toEqual(["evening"]); // its device's label; an unknown one is ignored
+  expect(ha.deviceInfo.get("d1")).toEqual({ manufacturer: "Acme", model: "S2", firmware: "1.4", hardware: null });
+  expect(ha.platformOf.get("light.kitchen")).toBe("zha");
+  ha.stop();
+  mock.registry.entities = []; mock.registry.devices = []; mock.registry.labels = [];
+});
