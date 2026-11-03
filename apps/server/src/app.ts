@@ -12,6 +12,7 @@ import { manageRoutes } from "./manage";
 import { haRoomRoutes } from "./haRooms";
 import { createHaEnergy, haEnergyRoutes } from "./haEnergy";
 import { logbookRoutes } from "./logbook";
+import { automationInsightRoutes } from "./automationInsight";
 import { createStatic } from "./static";
 import { createPowerLimits, powerRoutes, type PowerLimits } from "./power";
 import { createSync, syncRoutes } from "./sync";
@@ -98,6 +99,7 @@ export function createApp(deps: AppDeps) {
     .use(modeRoutes(deps.db, deps.ha, deps.cookieSecure, devices))
     .use(sceneRoutes(deps.db, deps.ha, deps.cookieSecure, devices, scenes))
     .use(routineRoutes(deps.db, deps.ha, deps.cookieSecure, devices, routines))
+    .use(automationInsightRoutes(deps.db, deps.ha, deps.cookieSecure, automations, devices))
     .use(automationRoutes(deps.db, deps.ha, deps.cookieSecure, automations))
     .use(backupRoutes(deps.db, deps.cookieSecure, backups, deps.now))
     .use(healthRoutes(deps.db, deps.cookieSecure, health))

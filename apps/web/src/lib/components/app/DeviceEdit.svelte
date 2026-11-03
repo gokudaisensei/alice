@@ -4,6 +4,7 @@
 	import { haptics } from '#lib/haptics.js';
 	import { ICON_CHOICES, iconFor } from '#lib/icons.js';
 	import { Button } from '#lib/components/ui/button';
+	import { onMount } from 'svelte';
 
 	/** Rename a device, move it to a room and choose its icon. Used by the device sheet and the hold menu. */
 	let { device, onsaved }: { device: Device; onsaved?: () => void } = $props();
@@ -19,10 +20,14 @@
 		if (!r.ok) { haptics.error(); home.say('error', 'That didn’t save. Please try again.'); return; }
 		await home.load(); haptics.success(); home.say('ok', 'Saved.'); onsaved?.();
 	}
+	// What else relies on this device, so changing it holds no surprise. Only for people who manage automations; quiet when there is nothing.
+	let usedBy = $state<{ kind: string; name: string; madeHere: boolean }[]>([]);
+	onMount(async () => { const r = await api<{ items: typeof usedBy }>('GET', `/api/devices/${encodeURIComponent(device.id)}/used-by`); if (r.ok) usedBy = r.data.items; });
 	const field = 'h-12 w-full rounded-xl border bg-card px-3.5 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring';
 </script>
 
 <div class="space-y-4">
+	{#if usedBy.length}<p class="rounded-xl bg-secondary/60 px-3.5 py-2.5 text-sm text-muted-foreground">Used by {usedBy.map((x) => `${x.kind === 'automation' ? 'the automation' : x.kind === 'script' ? 'the script' : 'the scene'} “${x.name}”`).join(', ')}. Renaming keeps these working.</p>{/if}
 	<label class="block space-y-1.5 text-sm font-medium">Name<input bind:value={name} maxlength="60" class={field} /></label>
 	<label class="block space-y-1.5 text-sm font-medium">Room<select bind:value={room} class={field}><option value="">No room</option>{#each home.orderedRooms as r (r.id)}<option value={r.id}>{r.name}</option>{/each}</select></label>
 	<div class="space-y-1.5">

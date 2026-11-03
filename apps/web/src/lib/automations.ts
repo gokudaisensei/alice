@@ -8,13 +8,15 @@ export type Trigger =
 	| { type: 'sensor'; entityId: string; above?: number; below?: number; forSeconds?: number }
 	| { type: 'time'; at: string }
 	| { type: 'sun'; event: 'sunrise' | 'sunset'; offsetMinutes?: number }
-	| { type: 'mode'; mode: string };
+	| { type: 'mode'; mode: string }
+	| { type: 'presence'; personId: string | null; to: 'home' | 'not_home' };
 export type Condition =
 	| { type: 'device_state'; entityId: string; is: string }
 	| { type: 'sensor'; entityId: string; above?: number; below?: number }
 	| { type: 'time'; after: string; before: string }
 	| { type: 'mode'; mode: string }
-	| { type: 'days'; days: string[] };
+	| { type: 'days'; days: string[] }
+	| { type: 'presence'; people: 'anyone' | 'nobody' };
 
 export type AutomationView = {
 	id: string; name: string; summary: string; enabled: boolean | null; lastTriggered: string | null; needsAttention: boolean;
@@ -75,6 +77,7 @@ function whenWords(t: Trigger[], days: string[] | undefined, w: Words): string {
 		const u = (id: string) => w.unitOf?.(id) ?? '';
 		const core = x.type === 'device_state' ? `${w.nameOf(x.entityId)} ${x.forSeconds ? `stays ${x.to} for ${span(x.forSeconds)}` : `turns ${x.to}`}`
 			: x.type === 'sensor' ? `${w.nameOf(x.entityId)} ${x.above !== undefined && x.below === undefined ? `goes above ${x.above}${u(x.entityId)}` : x.below !== undefined && x.above === undefined ? `goes below ${x.below}${u(x.entityId)}` : `is between ${x.above}${u(x.entityId)} and ${x.below}${u(x.entityId)}`}${x.forSeconds ? ` for ${span(x.forSeconds)}` : ''}`
+			: x.type === 'presence' ? `${x.personId ? capitalize(x.personId.replace(/^person\./, '').replace(/_/g, ' ')) : 'someone'} ${x.to === 'home' ? 'arrives home' : 'leaves home'}`
 			: `the house is set to ${capitalize(x.mode)}`;
 		return `When ${core}${every ? `, ${dayText}` : ''}`;
 	});
@@ -85,6 +88,7 @@ const condWords = (c: Condition, w: Words): string =>
 	: c.type === 'sensor' ? `${w.nameOf(c.entityId)} ${c.above !== undefined && c.below !== undefined ? `is between ${c.above} and ${c.below}` : c.above !== undefined ? `is above ${c.above}` : `is below ${c.below}`}${w.unitOf?.(c.entityId) ?? ''}`
 	: c.type === 'time' ? `it is between ${at(c.after)} and ${at(c.before)}`
 	: c.type === 'mode' ? `the house is in ${capitalize(c.mode)} mode`
+	: c.type === 'presence' ? (c.people === 'anyone' ? 'someone is home' : 'nobody is home')
 	: '';
 
 /**

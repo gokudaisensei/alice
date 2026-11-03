@@ -23,13 +23,15 @@ export type Trigger =
   | { type: "sensor"; entityId: string; above?: number; below?: number; forSeconds?: number }
   | { type: "time"; at: string }
   | { type: "sun"; event: "sunrise" | "sunset"; offsetMinutes?: number }
-  | { type: "mode"; mode: string };
+  | { type: "mode"; mode: string }
+  | { type: "presence"; personId: string | null; to: "home" | "not_home" };
 export type Condition =
   | { type: "device_state"; entityId: string; is: string }
   | { type: "sensor"; entityId: string; above?: number; below?: number }
   | { type: "time"; after: string; before: string }
   | { type: "mode"; mode: string }
-  | { type: "days"; days: string[] };
+  | { type: "days"; days: string[] }
+  | { type: "presence"; people: "anyone" | "nobody" };
 
 /** A starting point: when it runs, and which of the home's real devices it acts on. */
 type Recipe = { lights?: "turn_on" | "turn_off"; plugs?: "turn_off" };
@@ -76,16 +78,20 @@ export function createAutomationService(db: Database, ha: HaApi, svc: DeviceServ
     : t.type === "sensor" ? `${nameOf(t.entityId)} ${t.above !== undefined && t.below === undefined ? "goes above " + t.above + unitOf(t.entityId) : t.below !== undefined && t.above === undefined ? "goes below " + t.below + unitOf(t.entityId) : range(t.entityId, t.above, t.below)}${t.forSeconds ? ` for ${span(t.forSeconds)}` : ""}`
     : t.type === "time" ? `it is ${t.at}`
     : t.type === "sun" ? (t.offsetMinutes ? `${Math.abs(t.offsetMinutes)} minutes ${t.offsetMinutes < 0 ? "before" : "after"} ${t.event}` : t.event === "sunset" ? "the sun sets" : "the sun rises")
+    : t.type === "presence" ? `${t.personId ? friendlyName(ha.entities.get(t.personId), "someone") : "someone"} ${t.to === "home" ? "arrives home" : "leaves home"}`
     : `the household mode changes to ${cap(t.mode)}`;
   const conditionText = (c: Condition): string =>
     c.type === "device_state" ? `${nameOf(c.entityId)} is ${c.is}`
     : c.type === "sensor" ? `${nameOf(c.entityId)} ${range(c.entityId, c.above, c.below)}`
     : c.type === "time" ? `the time is between ${c.after} and ${c.before}`
     : c.type === "mode" ? `the household mode is ${cap(c.mode)}`
+    : c.type === "presence" ? (c.people === "anyone" ? "someone is home" : "nobody is home")
     : c.days.join() === "mon,tue,wed,thu,fri" ? "it is a weekday" : c.days.join() === "sat,sun" ? "it is a weekend day" : `it is ${c.days.map((d) => DAY_NAME[d]).join(", ")}`;
   const summarise = (t: Trigger[], c: Condition[], a: Step[]) =>
     `When ${t.map(triggerText).join(" or ")}${c.length ? `, and only if ${c.map(conditionText).join(" and ")}` : ""}: ${a.map((x, i) => (i ? rt.text(x).replace(/^./, (c) => c.toLowerCase()) : rt.text(x))).join(", then ")}`;
 
+  /** The people Home Assistant knows about, as saved when an automation is written. */
+  const persons = () => [...ha.entities.keys()].filter((id) => id.startsWith("person.")).sort();
   const usable = (u: SessionUser, id: unknown): HaEntity | null => {
     const e = typeof id === "string" ? ha.entities.get(id) : undefined;
     return e && svc.accessor(u)(e.entity_id) && svc.deviceFor(u, e.entity_id) ? e : null;
@@ -122,6 +128,12 @@ export function createAutomationService(db: Database, ha: HaApi, svc: DeviceServ
         triggers.push({ type: "sun", event, ...(off ? { offsetMinutes: off } : {}) });
         const m = Math.abs(off);
         hT.push({ trigger: "sun", event, offset: `${off < 0 ? "-" : ""}${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}:00` });
+      } else if (t.type === "presence") {
+        const to = t.to, people = persons();
+        const who = t.personId === null || t.personId === undefined ? null : typeof t.personId === "string" && people.includes(t.personId) ? t.personId : undefined;
+        if ((to !== "home" && to !== "not_home") || who === undefined || !people.length) return bad(who === undefined || !people.length ? "not_found" : "invalid_trigger", who === undefined || !people.length ? 404 : 400);
+        triggers.push({ type: "presence", personId: who, to });
+        hT.push({ trigger: "state", entity_id: who ? [who] : people, from: to === "home" ? "not_home" : "home", to });
       } else if (t.type === "mode") {
         const mode = t.mode;
         if (!isMode(mode)) return bad();
@@ -150,6 +162,11 @@ export function createAutomationService(db: Database, ha: HaApi, svc: DeviceServ
         const mode = c.mode;
         if (!isMode(mode)) return bad();
         conditions.push({ type: "mode", mode }); hC.push({ condition: "state", entity_id: MODE_ENTITY, state: mode });
+      } else if (c.type === "presence") {
+        const people = persons(), who = c.people;
+        if ((who !== "anyone" && who !== "nobody") || !people.length) return bad(people.length ? "invalid_condition" : "not_found", people.length ? 400 : 404);
+        const anyHome = { condition: "or", conditions: people.map((p) => ({ condition: "state", entity_id: p, state: "home" })) };
+        conditions.push({ type: "presence", people: who }); hC.push(who === "anyone" ? anyHome : { condition: "not", conditions: [anyHome] });
       } else if (c.type === "days") {
         const chosen = asList(c.days);
         if (!chosen || chosen.length < 1 || !chosen.every((d) => oneOf(DAYS, d))) return bad();
@@ -195,7 +212,7 @@ export function createAutomationService(db: Database, ha: HaApi, svc: DeviceServ
     const r = rt.resolve(u, { ...recipe, mode: undefined });
     return { ...t, actions: r.steps, complete: r.complete, missing: r.missing, summary: summarise(t.triggers, t.conditions, r.steps), configured: false };
   });
-  return { compile, summarise, suggest, rows, mine, view, visible, entityOf, parsed };
+  return { compile, summarise, suggest, rows, mine, view, visible, entityOf, parsed, persons, conditionText, triggerText };
 }
 export type AutomationService = ReturnType<typeof createAutomationService>;
 
@@ -204,6 +221,9 @@ export function automationRoutes(db: Database, ha: HaApi, secure: boolean, svc: 
 
   async function publish(haId: string, name: string, c: Compiled): Promise<Outcome> {
     if (ha.isStale()) return { status: 503, error: "ha_unavailable" };
+    // Ask the hub to check it first. A hub that can't (older, or no such command) simply doesn't object.
+    const v = await ha.ws({ type: "validate_config", triggers: c.ha.triggers, conditions: c.ha.conditions, actions: c.ha.actions });
+    if (v.success && v.result && typeof v.result === "object" && Object.values(v.result as Record<string, { valid?: boolean }>).some((x) => x?.valid === false)) return { status: 400, error: "ha_invalid" };
     const w = await ha.config("POST", cfgPath(haId), { alias: name, description: "Managed by Smart Home Companion", mode: "single", max_exceeded: "silent", triggers: c.ha.triggers, conditions: c.ha.conditions, actions: c.ha.actions });
     if (!w.ok) return { status: 502, error: w.error ?? "ha_rejected" };
     await ha.callService("automation", "reload");

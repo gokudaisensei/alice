@@ -20,7 +20,8 @@
 	import DeleteRow from '#lib/components/app/builder/DeleteRow.svelte';
 	import NameField from '#lib/components/app/builder/NameField.svelte';
 	import AddOptions from '#lib/components/app/builder/AddOptions.svelte';
-	import { ChevronDown, Clock, Gauge, House, Lightbulb, Sunrise, Timer, Trash2, Undo2 } from '@lucide/svelte';
+	import AutomationTrace from '#lib/components/app/AutomationTrace.svelte';
+	import { ChevronDown, Clock, Gauge, House, Lightbulb, Sunrise, Timer, Trash2, Undo2, Users } from '@lucide/svelte';
 
 	const id = $derived(page.params.id ?? 'new');
 	let name = $state('');
@@ -33,6 +34,7 @@
 	let note = $state<string | null>(null);
 	let dayMode = $state<DayMode>('every');
 
+	let people = $state<{ id: string; name: string }[]>([]);
 	const withState = $derived(home.devices.filter((d) => statesFor(d).length));
 	const sensors = $derived(home.devices.filter(isSensor));
 	const unitOf = (eid: string) => home.byId(eid)?.reading?.unit ?? '';
@@ -42,6 +44,7 @@
 	const optsOf = (eid: string) => { const d = home.byId(eid); return d ? actionsFor(d) : []; };
 
 	onMount(async () => {
+		void api<{ people: { id: string; name: string }[] }>('GET', '/api/automations/people').then((r) => { if (r.ok) people = r.data.people; });
 		if (!home.loaded) await home.load();
 		if (!behaviours.loaded) behaviours.load();
 		if (id === 'new') {
@@ -176,6 +179,9 @@
 				{:else if t.type === 'sun'}
 					<Picker label="Sun event for trigger {i + 1}" bind:value={t.event} options={[{ value: 'sunset', label: 'Sunset' }, { value: 'sunrise', label: 'Sunrise' }]} />
 					<Picker label="Offset for trigger {i + 1}" value={t.offsetMinutes ?? 0} options={OFFSETS} onchange={(v) => { if (Number(v)) t.offsetMinutes = Number(v); else delete t.offsetMinutes; }} />
+				{:else if t.type === 'presence'}
+					<Picker label="Who for trigger {i + 1}" value={t.personId ?? ''} options={[{ value: '', label: 'Someone' }, ...people.map((x) => ({ value: x.id, label: x.name }))]} onchange={(v) => (t.personId = v === '' ? null : String(v))} />
+					<Picker label="Arrives or leaves for trigger {i + 1}" bind:value={t.to} options={[{ value: 'home', label: 'arrives home' }, { value: 'not_home', label: 'leaves home' }]} />
 				{:else}
 					<span class="text-sm">The household mode changes to</span>
 					<Picker capitalize label="Mode for trigger {i + 1}" bind:value={t.mode} options={(home.mode?.modes ?? []).map((m) => ({ value: m, label: m }))} />
@@ -190,6 +196,7 @@
 			{ title: 'A sensor reading', desc: 'Temperature or power goes above or below a number.', icon: Gauge, disabled: !sensors.length, why: 'No sensors to watch yet.', onclick: addSensorTrigger },
 			{ title: 'A time', desc: 'At a set time, such as 23:00.', icon: Clock, onclick: () => addTrigger({ type: 'time', at: '07:00' }) },
 			{ title: 'Sunrise or sunset', desc: 'When it gets light or dark.', icon: Sunrise, onclick: () => addTrigger({ type: 'sun', event: 'sunset' }) },
+			{ title: 'Someone arrives or leaves', desc: 'A person gets home, or goes out.', icon: Users, disabled: !people.length, why: 'Home Assistant has no people set up.', onclick: () => addTrigger({ type: 'presence', personId: null, to: 'home' }) },
 			{ title: 'A household mode', desc: 'The house is set to Away, Night or Home.', icon: House, onclick: () => addTrigger({ type: 'mode', mode: 'away' }) }
 		]} />
 
@@ -224,6 +231,8 @@
 				{:else if c.type === 'mode'}
 					<span class="text-sm">The household mode is</span>
 					<Picker capitalize label="Mode for limit {i + 1}" bind:value={c.mode} options={(home.mode?.modes ?? []).map((m) => ({ value: m, label: m }))} />
+				{:else if c.type === 'presence'}
+					<Picker label="Who is home for limit {i + 1}" bind:value={c.people} options={[{ value: 'anyone', label: 'Someone is home' }, { value: 'nobody', label: 'Nobody is home' }]} />
 				{/if}
 				<Button size="icon-sm" variant="ghost" class="ml-auto text-signal" aria-label="Remove limit {i + 1}" onclick={() => removable(conditions, i, 'Limit removed.')}><Trash2 /></Button>
 			</div></div>
@@ -233,6 +242,7 @@
 			{ title: 'A device is', desc: 'Only if a device is on, off or locked.', icon: Lightbulb, disabled: !withState.length, why: 'No devices to check yet.', onclick: addDeviceCondition },
 			{ title: 'A sensor reading', desc: 'Only if a reading is above or below a number.', icon: Gauge, disabled: !sensors.length, why: 'No sensors to check yet.', onclick: addSensorCondition },
 			{ title: 'Time of day', desc: 'Only between two times, such as 18:00 and 23:00.', icon: Timer, onclick: () => addCondition({ type: 'time', after: '18:00', before: '23:00' }) },
+			{ title: 'Who is home', desc: 'Only if someone is home, or only if nobody is.', icon: Users, disabled: !people.length, why: 'Home Assistant has no people set up.', onclick: () => addCondition({ type: 'presence', people: 'anyone' }) },
 			{ title: 'Household mode', desc: 'Only while the house is in Home, Away or Night.', icon: House, onclick: () => addCondition({ type: 'mode', mode: 'home' }) }
 		]} />
 	</div></Collapse></section>
@@ -247,6 +257,8 @@
 	</div></Collapse></section>
 
 	{#if undoer}<p role="status" class="flex items-center justify-between gap-3 rounded-xl bg-secondary px-3.5 py-2 text-sm">{undoer.label}<Button size="sm" variant="ghost" onclick={() => undoer?.restore()}><Undo2 />Undo</Button></p>{/if}
+
+	{#if id !== 'new'}<AutomationTrace {id} />{/if}
 
 	{#if id !== 'new'}<DeleteRow what="automatic routine" ondelete={remove} />{/if}
 

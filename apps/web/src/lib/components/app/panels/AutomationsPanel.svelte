@@ -6,6 +6,7 @@
 	import { automationDoes, behaviours } from '#lib/behaviours.svelte.js';
 	import type { AutomationView } from '#lib/automations.js';
 	import BehaviourRow from '#lib/components/app/BehaviourRow.svelte';
+	import NativeAutomations from '#lib/components/app/NativeAutomations.svelte';
 	import { Button } from '#lib/components/ui/button';
 	import { Switch } from '#lib/components/ui/switch';
 	import { Copy } from '@lucide/svelte';
@@ -46,3 +47,4 @@
 		</BehaviourRow>
 	</Swipeable>
 {/each}
+<div class="px-4 pt-4"><NativeAutomations /></div>
