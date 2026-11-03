@@ -146,7 +146,7 @@ cmd_start() {
 
   say "Running"
   echo "  Open: $origin"
-  local sc; sc="$(grep -o 'setup code [A-Za-z0-9-]*' "$STATE/server.log" | tail -1 || true)"
+  local sc; sc="$(grep -o 'setup code [A-Za-z0-9_-]*' "$STATE/server.log" | tail -1 || true)"
   if [ -n "$sc" ]; then echo "  First time: open $origin/setup and use the ${sc} (valid 1 hour)"
   else
     echo "  No account yet?  ./alice.sh cli setup-code     (then open $origin/setup)"
