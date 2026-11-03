@@ -15,6 +15,7 @@
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
 	import { capitalize } from '#lib/utils.js';
+	import { ROOM_COLORS, ROOM_ICONS, roomLook } from '#lib/roomLook.js';
 	import type { IconComponent } from '#lib/icons.js';
 	import { Pencil, Plus, Lightbulb, Plug, Fan, Thermometer, Lock, Camera, Tv, Gauge, Zap } from '@lucide/svelte';
 
@@ -34,6 +35,7 @@
 		return undefined;
 	}
 	async function removeDevice(d: Device) { const r = await api('PUT', `/api/admin/rooms/${id}/devices`, { remove: [d.id] }); if (!r.ok) error = explain(r.data?.error); else haptics.tap(); await home.load(); edit = null; }
+	async function setLook(patch: { color?: string | null; icon?: string | null }) { haptics.tap(); const r = await api('PATCH', `/api/admin/rooms/${id}`, patch); if (!r.ok) { error = explain(r.data?.error); return; } await home.load(); }
 	async function renameRoom() { const r = await api('PATCH', `/api/admin/rooms/${id}`, { name: name.trim() }); if (!r.ok) { error = explain(r.data?.error); return; } renameOpen = false; await home.load(); }
 	async function deleteRoom() { if (!confirm(`Delete “${room?.name}”? Its devices stay, but won't be in a room.`)) return; const r = await api('DELETE', `/api/admin/rooms/${id}`); if (!r.ok) { error = explain(r.data?.error); return; } await home.load(); goto('/admin/rooms'); }
 	async function saveDevice() { if (!edit) return; const r = await api('PUT', `/api/admin/devices/${encodeURIComponent(edit.id)}`, { name: devName.trim() }); if (!r.ok) { error = explain(r.data?.error); return; } edit = null; await home.load(); }
@@ -41,11 +43,26 @@
 	void ready;
 </script>
 
-<Page title={room?.name ?? (home.loaded ? 'Room not found' : '')} back={{ href: '/admin/rooms', label: 'Rooms & devices' }} width="md">
+<Page title={room?.name ?? (home.loaded ? 'Room not found' : '')} back={{ href: '/admin/rooms', label: 'Edit rooms' }} width="md">
 	{#snippet actions()}{#if room}<Button variant="secondary" size="icon" aria-label="Rename room" onclick={() => (renameOpen = true)}><Pencil /></Button>{/if}{/snippet}
 	{#if room}
 		{#if error}<p role="alert" class="text-sm text-signal">{error}</p>{/if}
-		<Section title="Devices">
+		<Section title="Look">
+<div class="space-y-4 rounded-2xl border bg-card p-4">
+<div class="flex flex-wrap gap-2.5" role="radiogroup" aria-label="Colour">
+{#each Object.entries(ROOM_COLORS) as [key, hex] (key)}
+<button type="button" role="radio" aria-checked={(room.color ?? 'blue') === key} aria-label={capitalize(key)} class="size-9 rounded-full transition-transform active:scale-90 {(room.color ?? 'blue') === key ? 'ring-2 ring-offset-2 ring-offset-card' : ''}" style="background: {hex}; --tw-ring-color: {hex}" onclick={() => setLook({ color: key })}></button>
+{/each}
+</div>
+<div class="grid grid-cols-6 gap-2" role="radiogroup" aria-label="Icon">
+{#each ROOM_ICONS as ic (ic.key)}
+{@const on = room.icon === ic.key || (!room.icon && roomLook(room).icon === ic.icon)}
+<button type="button" role="radio" aria-checked={on} aria-label={ic.label} class="flex h-11 items-center justify-center rounded-xl transition-colors {on ? 'bg-primary/12 text-primary' : 'bg-secondary text-muted-foreground'}" onclick={() => setLook({ icon: ic.key })}><ic.icon class="size-5" aria-hidden="true" /></button>
+{/each}
+</div>
+</div>
+</Section>
+<Section title="Devices">
 			{#snippet actions()}<Button size="sm" onclick={() => (addOpen = true)}><Plus />Add</Button>{/snippet}
 			{#if devices.length}
 				<Group>{#each devices as d (d.id)}

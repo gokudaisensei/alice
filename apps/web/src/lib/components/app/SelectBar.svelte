@@ -24,7 +24,7 @@
 		haptics.tap();
 		const cur = home.prefs?.favorites.devices ?? [], add = selection.ids.filter((id) => !cur.includes(id));
 		await home.saveFavorites([...cur, ...add], home.prefs?.favorites.rooms ?? []);
-		home.say('ok', add.length ? `Added ${add.length} to favorites.` : 'Already in your favorites.'); selection.clear();
+		home.say('ok', add.length ? `Added ${add.length} to favourites.` : 'Already in your favourites.'); selection.clear();
 	}
 </script>
 

@@ -3,6 +3,6 @@
 	import NotificationSettings from '#lib/components/app/NotificationSettings.svelte';
 </script>
 
-<Page title="Notifications" subtitle="Only you see these choices." back={{ href: '/you', label: 'You' }} width="md">
+<Page title="Notifications" subtitle="Choose what is worth interrupting you for." back={{ href: '/you', label: 'You' }} width="md">
 	<NotificationSettings />
 </Page>

@@ -21,7 +21,7 @@
 		return [...m].map(([k, list]) => ({ k, label: labels[k] ?? 'Other', list }));
 	});
 	let open = $state<string | null>(null);
-	async function dismiss(i: Insight) { items = items.filter((x) => x !== i); await api('POST', '/api/insights/dismiss', { key: i.key }); }
+	async function dismiss(i: Insight) { if (!items.includes(i)) return; items = items.filter((x) => x !== i); await api('POST', '/api/insights/dismiss', { key: i.key }); }
 </script>
 
 {#if items.length && full}

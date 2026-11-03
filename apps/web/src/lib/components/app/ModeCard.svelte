@@ -31,10 +31,10 @@
 </script>
 
 {#if m}
-	<section aria-labelledby="mode-h" class="space-y-3">
-		<div class="hidden items-baseline justify-between gap-3 sm:flex">
-			<h2 id="mode-h" class="heading">Mode</h2>
-			{#if runs.length}<span class="truncate text-sm text-muted-foreground">Runs {runs.join(', ')}</span>{/if}
+	<section aria-labelledby="mode-h" class="flex flex-col gap-3 rounded-2xl border bg-card p-4">
+		<div class="flex items-baseline justify-between gap-3">
+			<h2 id="mode-h" class="heading">Household mode</h2>
+			{#if runs.length}<span class="truncate text-sm text-muted-foreground">Runs {runs.join(', ')}</span>{:else if m.current}<span class="text-sm text-muted-foreground">{capitalize(m.current)} now</span>{/if}
 		</div>
 		{#if m.available}
 			<Segmented stack label="Household mode" disabled={!m.canSet} value={m.current} options={m.modes.map((id) => ({ id, label: capitalize(id), icon: icons[id] }))} onselect={choose} />

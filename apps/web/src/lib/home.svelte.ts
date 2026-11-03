@@ -23,10 +23,14 @@ export type DeviceAttrs = {
 export type Device = {
 	id: string; name: string; category: string; roomId: string | null;
 	available: boolean; reason: 'device_offline' | 'home_assistant_unavailable' | null;
-	state: string; controls: Control[]; reading: { value: string; unit: string | null } | null;
+	state: string; controls: Control[]; reading: { value: string; unit: string | null; cls?: string | null } | null;
 	attrs: DeviceAttrs;
+	/** when the state last changed (ms since 1970), as the hub reports it */
+	changedAt?: number | null;
+	/** the icon a person chose for it; null lets the app pick one */
+	icon?: string | null;
 };
-export type Room = { id: string; name: string };
+export type Room = { id: string; name: string; color?: string | null; icon?: string | null };
 export type Group = { id: string; name: string; deviceIds: string[] };
 export type Prefs = {
 	template: 'comfort' | 'minimal'; appearance: 'light' | 'dark' | 'system'; sections: string[]; roomOrder: string[];
@@ -41,7 +45,7 @@ export type ModeInfo = {
 export type Scene = { id: string; name: string; managed: boolean; deviceIds: string[] };
 export type RoutineStep = { type: string; text: string; [k: string]: unknown };
 export type Routine = { id: string; name: string; template: string | null; steps: RoutineStep[]; summary: string; needsAttention: boolean };
-export type Suggested = { key: string; name: string; blurb: string; defaultSteps: { type: string; [k: string]: unknown }[] };
+export type Suggested = { key: string; name: string; blurb: string; defaultSteps: { type: string; [k: string]: unknown }[]; complete?: boolean; missing?: string[]; summary?: string };
 type HaHealth = 'ok' | 'unreachable' | 'auth_failed';
 
 /** Everything the first screen needs, in one response. A part is null when the server refused it for this person. */

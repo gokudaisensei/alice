@@ -3,12 +3,16 @@
 	import Picker from '#lib/components/app/Picker.svelte';
 	import { onMount } from 'svelte';
 	import { api, explain, sensitive, type ApiResult } from '#lib/api.js';
-	import type { Health, Support, UpdateStatus } from '#lib/dto.js';
+	import type { Check, Health, Support, UpdateStatus } from '#lib/dto.js';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
 	import { Badge } from '#lib/components/ui/badge';
 	import Page from '#lib/components/app/Page.svelte';
+	import SkeletonList from '#lib/components/app/SkeletonList.svelte';
 	import Section from '#lib/components/app/Section.svelte';
+	import Group from '#lib/components/app/Group.svelte';
+	import { clock, longDate, plural } from '#lib/fmt.js';
+	import { Activity, CircleCheck, TriangleAlert } from '@lucide/svelte';
 
 	type Backup = { id: string; createdAt: number; kind: string; size: number; level: 'failed' | 'integrity_checked' | 'restore_tested'; offDevice: boolean; copies: { name: string; local: boolean; state: string }[]; restoreTest: { at: number; ok: boolean; detail: string } | null };
 	type Backups = { recipientSet: boolean; recipient: string | null; destinations: { name: string; local: boolean; writable: boolean; freeBytes: number | null }[]; backups: Backup[] };
@@ -16,18 +20,34 @@
 	let bk = $state<Backups | null>(null);
 	let sup = $state<{ active: Support | null; canManage: boolean } | null>(null);
 	let msg = $state(''), busy = $state(false), newKey = $state(''), testing = $state<string | null>(null), identity = $state('');
-	let upd = $state<UpdateStatus | null>(null);
+	let upd = $state<UpdateStatus | null>(null), loaded = $state(false);
 	let scopes = $state<string[]>(['diagnostics']), hours = $state(4);
 
 	async function load() {
 		const [h, b, s, u] = await Promise.all([api<Health>('GET', '/api/admin/health'), api<Backups>('GET', '/api/admin/backups'), api<{ active: Support | null; canManage: boolean }>('GET', '/api/support'), api<UpdateStatus>('GET', '/api/admin/updates')]);
 		if (h.ok) health = h.data; if (b.ok) bk = b.data; if (s.ok) sup = s.data; if (u.ok) upd = u.data;
+		loaded = true;
 		window.dispatchEvent(new Event('support-changed'));
 	}
 	onMount(load);
+	const SEV = { fail: 0, warn: 1, ok: 2 } as const;
+	const issues = $derived((health?.checks ?? []).filter((c) => c.status !== 'ok').sort((a, b) => SEV[a.status] - SEV[b.status]));
+	const worst = $derived(issues[0]?.status ?? 'ok');
+	const headline = $derived(!health ? 'Checking your home' : !issues.length ? 'Everything is working' : worst === 'fail' ? (issues.length === 1 ? 'One thing needs attention now' : `${issues.length} things need attention, one of them now`) : issues.length === 1 ? 'One thing needs attention' : `${issues.length} things need attention`);
+	const chk = (id: string) => health?.checks.find((c) => c.id === id);
+	/** The questions a household actually asks, answered in plain words. */
+	const outcomes = $derived.by(() => {
+		const hub = chk('hub'), b = chk('backup'), u = chk('updates');
+		const ans = (c: Check | undefined, ok: string, bad: string) => ({ status: c?.status ?? 'ok', a: !c || c.status === 'ok' ? ok : bad });
+		return [
+			{ q: 'Is the home hub online?', ...ans(hub, 'Yes, and the app is talking to it.', hub?.detail ?? '') },
+			{ q: 'Are backups healthy?', ...ans(b, 'Yes, a recent backup is safely stored.', b?.detail ?? '') },
+			{ q: 'Is an update available?', ...ans(u, upd?.configured && upd.available ? `Yes, version ${upd.available.version}.` : 'No, you are up to date.', u?.detail ?? '') }
+		] as { q: string; status: 'ok' | 'warn' | 'fail'; a: string }[];
+	});
 	const fail = (r: Extract<ApiResult<unknown>, { ok: false }>) => (msg = r.data.message ?? explain(r.data.error));
 	const dot = { ok: 'bg-ok', warn: 'bg-on', fail: 'bg-signal' } as const;
-	const when = (ts: number) => new Date(ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+	const when = (ts: number) => `${longDate(ts)}, ${clock(ts)}`;
 	const mb = (n: number) => `${(n / 1048576).toFixed(1)} MB`;
 	const LEVEL = { failed: 'Failed its check', integrity_checked: 'Checked · not test-restored', restore_tested: 'Restore tested' } as const;
 
@@ -49,7 +69,7 @@
 	}
 	async function install() { if (!upd?.configured || !upd.available) return; if (!confirm(`Install version ${upd.available.version}? The app will be unavailable for a few minutes. Your devices and automations keep running.`)) return; busy = true; const r = await sensitive('POST', '/api/admin/updates/apply', { version: upd.available.version }); busy = false; if (!r.ok) fail(r); else msg = 'Update requested. The app will restart shortly; this page may go blank for a few minutes.'; await load(); }
 	async function grant() { busy = true; const r = await sensitive('POST', '/api/admin/support', { scopes, hours }); busy = false; if (!r.ok) fail(r); await load(); }
-	async function revoke() { if (!sup?.active) return; const r = await api('DELETE', `/api/admin/support/${sup.active.id}`); if (!r.ok) fail(r); await load(); }
+	async function revoke() { if (!sup?.active || busy) return; busy = true; const r = await api('DELETE', `/api/admin/support/${sup.active.id}`); busy = false; if (!r.ok) fail(r); await load(); }
 	/** What a support operator can be allowed to do, in the order they're offered. */
 	const SCOPES = [
 		{ key: 'diagnostics', title: 'See health checks', hint: 'No personal data' },
@@ -58,17 +78,43 @@
 	const toggle = (s: string) => (scopes = scopes.includes(s) ? scopes.filter((x) => x !== s) : [...scopes, s]);
 </script>
 
-<Page title="System" subtitle="Health, backups, updates and support access for your home." width="md">
+<Page title="System" subtitle="Is everything working, and does anything need you?" width="md">
 	{#if msg}<p role="status" class="rounded-2xl bg-accent px-4 py-3 text-sm">{msg}</p>{/if}
 
-	<Section title="Health" hint={health ? (health.overall === 'ok' ? 'Everything looks good.' : health.overall === 'warn' ? 'A few things need attention.' : 'Something needs attention now.') : undefined}><div class="space-y-4 rounded-2xl border bg-card p-4">
-			{#each health?.checks ?? [] as c}
-				<div class="flex gap-3"><span class="mt-1.5 size-2.5 shrink-0 rounded-full {dot[c.status]}" aria-hidden="true"></span>
-					<div><p class="font-medium">{c.label} <span class="sr-only">{c.status}</span></p><p class="text-sm text-muted-foreground">{c.detail}</p>{#if c.advice}<p class="text-sm">{c.advice}</p>{/if}</div></div>
-			{/each}
-			{#if health}<p class="text-xs text-muted-foreground">Version {health.facts.version} · running {Math.round(health.facts.uptimeSeconds / 3600)} h · {health.facts.memoryMb} MB memory</p>{/if}
-		</div></Section>
+	<section class="space-y-3" aria-labelledby="sys-status">
+		<div class="flex items-start gap-3 rounded-2xl p-5 {!health ? 'bg-secondary/60' : worst === 'ok' ? 'bg-ok/10' : worst === 'warn' ? 'bg-on-soft' : 'bg-signal-soft'}">
+			<span class="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl bg-background/60 {!health ? 'text-muted-foreground' : worst === 'ok' ? 'text-ok' : worst === 'warn' ? 'text-on-foreground' : 'text-signal'}">{#if worst === 'ok'}<CircleCheck class="size-5" />{:else if health}<TriangleAlert class="size-5" />{:else}<Activity class="size-5" />{/if}</span>
+			<div><h2 id="sys-status" class="text-lg font-semibold tracking-[-0.02em]">{headline}</h2>
+				<p class="mt-0.5 text-sm text-muted-foreground">{health ? (issues.length ? 'Start with the first item below.' : 'The connection, backups and updates are all fine.') : 'Checking your home…'}</p></div>
+		</div>
+		{#if !loaded}<SkeletonList kind="rows" count={3} />{/if}
+		{#if issues.length}
+			<Group>{#each issues as c (c.id)}
+				<div class="flex gap-3 px-4 py-3"><span class="mt-1.5 size-2.5 shrink-0 rounded-full {dot[c.status]}" aria-hidden="true"></span>
+					<div><p class="font-medium">{c.label}<span class="sr-only">: {c.status === 'fail' ? 'needs attention now' : 'needs a look'}</span></p><p class="text-sm text-muted-foreground">{c.detail}</p>{#if c.advice}<p class="text-sm">{c.advice}</p>{/if}</div></div>
+			{/each}</Group>
+		{/if}
+		{#if health}
+			<Group>
+				{#each outcomes as o}<div class="flex items-center gap-3 px-4 py-3"><span class="size-2.5 shrink-0 rounded-full {dot[o.status]}" aria-hidden="true"></span><div class="min-w-0 flex-1"><p class="text-[0.9375rem] font-medium leading-tight">{o.q}</p><p class="text-sm text-muted-foreground">{o.a}</p></div></div>{/each}
+			</Group>
+			<details class="rounded-2xl bg-secondary/60 px-4 py-3 text-sm"><summary class="cursor-pointer font-medium">Advanced details</summary>
+				<dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5">
+					<dt class="text-muted-foreground">Version</dt><dd>{health.facts.version}</dd>
+					<dt class="text-muted-foreground">Running for</dt><dd>{plural(Math.round(health.facts.uptimeSeconds / 3600), 'hour')}</dd>
+					<dt class="text-muted-foreground">Memory in use</dt><dd>{health.facts.memoryMb} MB</dd>
+					<dt class="text-muted-foreground">Data size</dt><dd>{mb(health.facts.dbBytes)}</dd>
+					<dt class="text-muted-foreground">Data format</dt><dd>{health.facts.schema}</dd>
+					<dt class="text-muted-foreground">Devices with notifications</dt><dd>{health.facts.pushDevices}</dd>
+				</dl>
+				{#each health.checks.filter((c) => c.status === 'ok') as c}<p class="mt-3 text-muted-foreground"><span class="font-medium text-foreground">{c.label}:</span> {c.detail}</p>{/each}
+			</details>
+		{/if}
+	</section>
 
+	{#if !loaded}
+	<SkeletonList kind="rows" count={2} />
+{:else}
 	<Section title="Backups" hint="Encrypted copies of the app's data. The home hub's own settings are backed up separately."><div class="space-y-4 rounded-2xl border bg-card p-4">
 			{#if bk && !bk.recipientSet}
 				<p class="text-sm">First, create a backup key. You'll download a file that is the only way to open a backup. <strong>Keep it somewhere other than this home device</strong>, such as a password manager or a printout.</p>
@@ -90,12 +136,12 @@
 						{#if b.restoreTest}<p class="text-xs {b.restoreTest.ok ? '' : 'text-signal'}">{b.restoreTest.detail}</p>{/if}
 						<div class="flex gap-1"><Button size="sm" variant="secondary" onclick={() => (testing = testing === b.id ? null : b.id)}>Test restore</Button><Button size="sm" variant="ghost" onclick={() => download(b)}>Download</Button></div>
 						{#if testing === b.id}<div class="space-y-2 pt-1"><label class="text-sm" for="id-{b.id}">Paste your backup key. It's used once, here, and never stored.</label><Input id="id-{b.id}" type="password" autocomplete="off" bind:value={identity} placeholder="AGE-SECRET-KEY-…" /><Button size="sm" disabled={busy || !identity.trim()} onclick={() => restoreTest(b)}>Run test</Button></div>{/if}
-					</li>{:else}<li class="text-sm text-muted-foreground">No backups yet.</li>{/each}</ul>
+					</li>{:else}<li class="text-sm text-muted-foreground">No backups yet. Use “Back up now” to make the first one.</li>{/each}</ul>
 				<p class="text-xs text-muted-foreground">To restore for real after a failure, use the offline restore command in the recovery guide; it needs your key.</p>
 			{/if}
 		</div></Section>
 
-	<Section title="Updates" hint="Updates are checked for the home device's signature before they are installed, and undone automatically if they don't start properly."><div class="space-y-4 rounded-2xl border bg-card p-4">
+	<Section title="Updates" hint="Keep your home up to date."><div class="space-y-4 rounded-2xl border bg-card p-4">
 			{#if upd && !upd.configured}<p class="text-sm text-muted-foreground">Updates on this device are installed by your support team.</p>
 			{:else if upd}
 				<p class="text-sm">You have version <strong>{upd.current}</strong>.{#if upd.state === 'applying'} An update is being installed right now.{/if}</p>
@@ -104,15 +150,15 @@
 					<div class="space-y-2 rounded-xl border p-3"><p class="font-medium">Version {upd.available.version} is ready</p>{#if upd.available.notes}<p class="text-sm text-muted-foreground">{upd.available.notes}</p>{/if}
 						<p class="text-xs text-muted-foreground">Takes a few minutes. The app is unavailable meanwhile; your devices and automations keep running on the home hub. A safety copy of your data is made first.</p>
 						<Button disabled={busy || upd.state === 'applying'} onclick={install}>Install now</Button></div>
-				{:else if upd.state !== 'applying'}<p class="text-sm text-muted-foreground">You're up to date.{#if upd.lastCheckAt} Last checked {new Date(upd.lastCheckAt).toLocaleString()}.{/if}</p>{/if}
-				<p class="text-xs text-muted-foreground">Rarely, an urgent security fix may be installed without waiting for you. You'll always be told before it starts and after it finishes.</p>
+				{:else if upd.state !== 'applying'}<p class="text-sm text-muted-foreground">You're up to date.{#if upd.lastCheckAt} Last checked {longDate(upd.lastCheckAt)}, {clock(upd.lastCheckAt)}.{/if}</p>{/if}
+				<details class="text-xs text-muted-foreground"><summary class="cursor-pointer">Why can I trust updates?</summary><p class="mt-1">Each update is checked for the right signature before it is installed, and undone automatically if it doesn't start properly. Rarely, an urgent security fix may be installed without waiting for you; you'll always be told before it starts and after it finishes.</p></details>
 			{/if}
 		</div></Section>
 
 	<Section title="Support access" hint="Our support team can only look at your home while you allow it. You can end it at any time."><div class="space-y-4 rounded-2xl border bg-card p-4">
 			{#if sup?.active}
 				<p class="text-sm">Allowed until <strong>{when(sup.active.expiresAt)}</strong> for: {sup.active.scopes.map((s) => (s === 'diagnostics' ? 'health checks' : 'a read-only look at your setup')).join(' and ')}. {sup.active.connected ? `${sup.active.operatorName} is connected.` : 'Nobody has connected yet.'}</p>
-				<Button variant="destructive" onclick={revoke}>End support access now</Button>
+				<Button variant="destructive" disabled={busy} onclick={revoke}>End support access now</Button>
 			{:else}
 				<div class="space-y-2">
 					<p class="text-sm font-medium">They may</p>
@@ -122,8 +168,9 @@
 						{/each}
 					</div>
 				</div>
-				<div class="flex items-center gap-3 text-sm">For <Picker class="w-36" label="How long" bind:value={hours} options={[1, 4, 24, 72].map((h) => ({ value: h, label: `${h} hour${h === 1 ? '' : 's'}` }))} /></div>
+				<div class="flex items-center gap-3 text-sm">For <Picker class="w-36" label="How long" bind:value={hours} options={[1, 4, 24, 72].map((h) => ({ value: h, label: plural(h, 'hour') }))} /></div>
 				<Button disabled={busy || !scopes.length} onclick={grant}>Allow support access</Button>
 			{/if}
 		</div></Section>
+{/if}
 </Page>

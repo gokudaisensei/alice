@@ -8,8 +8,17 @@
 	import Group from '#lib/components/app/Group.svelte';
 	import Row from '#lib/components/app/Row.svelte';
 	import { Switch } from '#lib/components/ui/switch';
+	import { plural } from '#lib/fmt.js';
+	import { BellRing, ShieldAlert } from '@lucide/svelte';
 
 	const LABEL: Record<string, string> = { device_offline: 'A device stays offline', lock_open: 'A door stays unlocked', hub: 'The home hub is unreachable', insight: 'Suggestions about energy and devices left on', power: 'A plug stays above its power limit' };
+	const GROUPS = [
+		{ title: 'Security and safety', hint: 'Worth hearing about straight away. We suggest keeping these on.', kinds: ['lock_open', 'hub'], essential: true },
+		{ title: 'Home activity', hint: 'Things that need a look when you are able.', kinds: ['device_offline', 'power'], essential: false },
+		{ title: 'Updates and suggestions', hint: 'Helpful, never urgent.', kinds: ['insight'], essential: false }
+	];
+	const ABOUT: Record<string, string> = { lock_open: 'A door has been left unlocked for a while.', hub: 'The app has lost contact with your home hub.', device_offline: 'Something has been unreachable for a while.', power: 'A plug is using more power than the limit you set.', insight: 'Ideas for saving energy.' };
+	let why = $state(false);
 	let p = $state<NotePrefs | null>(null), here = $state(false), msg = $state(''), busy = $state(false);
 	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -35,29 +44,49 @@
 
 <div id="notifications" class="scroll-mt-20 space-y-9">
 	{#if p}
-		<Section title="Alerts" hint="Everything still appears under Alerts. These choices only decide what is worth a notification.">
-			<Group>{#each p.kinds as k}
-				<Row title={LABEL[k] ?? k}>{#snippet trailing()}<Switch checked={!(p?.muted ?? []).includes(k)} aria-label={LABEL[k] ?? k} onCheckedChange={() => toggleKind(k)} />{/snippet}</Row>
-			{/each}</Group>
-		</Section>
+		{#if p.pushAvailable}
+			<Section title="Notifications on this device">
+				<div class="rounded-2xl p-5 {here ? 'bg-primary/10' : 'bg-secondary/60'}">
+					<div class="flex items-start gap-3">
+						<span class="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary"><BellRing class="size-5" /></span>
+						<div class="min-w-0 flex-1">
+							<p class="font-semibold">{here ? 'Notifications are on' : 'Notifications are off'}</p>
+							<p class="mt-0.5 text-sm text-muted-foreground">{here ? 'This device will be told when something needs you.' : 'Turn them on to be told about important things even when the app is closed.'}{#if p.pushDevices} {plural(p.pushDevices, 'device')} set up.{/if}</p>
+							<div class="mt-3 flex flex-wrap gap-2">
+								<Button disabled={busy} variant={here ? 'secondary' : 'default'} onclick={togglePush}>{here ? 'Turn off' : 'Turn on notifications'}</Button>
+								{#if here || p.pushDevices}<Button variant="secondary" disabled={busy} onclick={test}>Send a test notification</Button>{/if}
+							</div>
+							<button type="button" class="mt-3 text-sm text-muted-foreground underline" aria-expanded={why} onclick={() => (why = !why)}>Why might this not work?</button>
+							{#if why}<p class="mt-1 text-sm text-muted-foreground">Notifications are sent through your browser's push service, so they need an internet connection. On an iPhone, add the app to your Home Screen first.</p>{/if}
+						</div>
+					</div>
+				</div>
+				{#if msg}<p role="status" class="rounded-2xl bg-accent px-4 py-3 text-sm">{msg}</p>{/if}
+			</Section>
+		{:else}
+			<p class="rounded-2xl bg-secondary/60 px-4 py-3 text-sm text-muted-foreground">Phone notifications are not available on this home yet. Alerts still appear in the app.</p>
+		{/if}
 
-		<Section title="Quiet hours" hint="Push notifications wait until quiet hours end. Alerts stay in the app.">
+		{#each GROUPS as g}
+			{@const ks = g.kinds.filter((k) => p!.kinds.includes(k))}
+			{#if ks.length}
+				<Section title={g.title} hint={g.hint}>
+					<Group>{#each ks as k}
+						<Row title={LABEL[k] ?? k} description={ABOUT[k]}>{#snippet trailing()}{#if g.essential}<span class="inline-flex items-center gap-1 text-xs text-muted-foreground"><ShieldAlert class="size-3.5" />Essential</span>{/if}<Switch checked={!(p?.muted ?? []).includes(k)} aria-label={LABEL[k] ?? k} onCheckedChange={() => toggleKind(k)} />{/snippet}</Row>
+					{/each}</Group>
+				</Section>
+			{/if}
+		{/each}
+		<p class="-mt-5 text-sm text-muted-foreground">Everything still appears under Alerts. These choices only decide what is worth a notification.</p>
+
+		<Section title="Quiet hours" hint="Notifications wait until quiet hours end. Alerts stay in the app.">
 			<Group>
-				<Row title="Hold back push notifications" description={p.quiet.enabled ? `From ${p.quiet.start} until ${p.quiet.end} (${tz})` : undefined}>{#snippet trailing()}<Switch checked={!!p?.quiet.enabled} aria-label="Quiet hours" onCheckedChange={(v) => quiet({ enabled: v })} />{/snippet}</Row>
+				<Row title="Hold back notifications" description={p.quiet.enabled ? `From ${p.quiet.start} until ${p.quiet.end} (${tz})` : undefined}>{#snippet trailing()}<Switch checked={!!p?.quiet.enabled} aria-label="Quiet hours" onCheckedChange={(v) => quiet({ enabled: v })} />{/snippet}</Row>
 				{#if p.quiet.enabled}
 					<div class="flex flex-wrap items-center gap-2 px-4 py-3 text-sm">From <Input type="time" class="w-32" value={p.quiet.start} onchange={(e) => quiet({ start: e.currentTarget.value })} aria-label="Quiet hours start" /> until <Input type="time" class="w-32" value={p.quiet.end} onchange={(e) => quiet({ end: e.currentTarget.value })} aria-label="Quiet hours end" /></div>
 				{/if}
 			</Group>
 		</Section>
-
-		{#if p.pushAvailable}
-			<Section title="Push notifications" hint="Sent through your browser's push service, so they need an internet connection. On an iPhone, add the app to your Home Screen first.">
-				<Group>
-					<Row title="This device" description={here ? 'Notifications are on' : 'Notifications are off'}>{#snippet trailing()}<Button size="sm" variant={here ? 'secondary' : 'default'} disabled={busy} onclick={togglePush}>{here ? 'Turn off' : 'Turn on'}</Button>{/snippet}</Row>
-					{#if p.pushDevices}<Row title="Send a test" description="{p.pushDevices} device{p.pushDevices === 1 ? '' : 's'} set up">{#snippet trailing()}<Button size="sm" variant="secondary" disabled={busy} onclick={test}>Send</Button>{/snippet}</Row>{/if}
-				</Group>
-			</Section>
-		{/if}
-		{#if msg}<p role="status" class="rounded-2xl bg-accent px-4 py-3 text-sm">{msg}</p>{/if}
+		{#if msg && !p.pushAvailable}<p role="status" class="rounded-2xl bg-accent px-4 py-3 text-sm">{msg}</p>{/if}
 	{/if}
 </div>

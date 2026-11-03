@@ -20,13 +20,23 @@ export type Step =
   | { type: "mode"; mode: string }
   | { type: "delay"; seconds: number };
 
+/** What a starting point does to the home's real devices. Lights are required; plugs are an extra and never include heaters or fridges. */
+type Recipe = { lights?: "turn_on" | "turn_off"; plugs?: "turn_off"; mode?: string };
+export type Template = { key: string; name: string; blurb: string; recipe: Recipe };
+
 /** Starting points only. Nothing is configured, and nothing runs, until a person sets one up. */
-export const TEMPLATES = [
-  { key: "good_morning", name: "Good Morning", blurb: "Start the day: lights on, house set to Home.", defaultSteps: [{ type: "mode", mode: "home" }] },
-  { key: "good_night", name: "Good Night", blurb: "Wind down: switch things off and set the house to Night.", defaultSteps: [{ type: "mode", mode: "night" }] },
-  { key: "leaving_home", name: "Leaving Home", blurb: "Heading out: switch things off and set the house to Away.", defaultSteps: [{ type: "mode", mode: "away" }] },
-  { key: "arriving_home", name: "Arriving Home", blurb: "Welcome back: lights on and set the house to Home.", defaultSteps: [{ type: "mode", mode: "home" }] },
-] as const satisfies readonly { key: string; name: string; blurb: string; defaultSteps: readonly Step[] }[];
+export const TEMPLATES: readonly Template[] = [
+  { key: "good_morning", name: "Good Morning", blurb: "Start the day: turn on the lights and set the house to Home.", recipe: { lights: "turn_on", mode: "home" } },
+  { key: "good_night", name: "Good Night", blurb: "Wind down: turn off the lights and plugs, then set the house to Night.", recipe: { lights: "turn_off", plugs: "turn_off", mode: "night" } },
+  { key: "leaving_home", name: "Leaving Home", blurb: "Heading out: turn off the lights and plugs, then set the house to Away.", recipe: { lights: "turn_off", plugs: "turn_off", mode: "away" } },
+  { key: "arriving_home", name: "Arriving Home", blurb: "Welcome back: turn on the lights and set the house to Home.", recipe: { lights: "turn_on", mode: "home" } },
+];
+
+/** Plugs that are probably meant to stay on. A person can still add them by hand. */
+const KEEP_ON = /heat|radiator|boiler|fridge|freezer|router|modem|network|server|nas\b|charger|alarm|camera|pump|aquarium|medical/i;
+const MAX_PICKED = 20;
+
+export type Resolved = { steps: Step[]; complete: boolean; missing: string | null };
 
 /** How each action reads in a sentence. `unlock` is absent on purpose: a stored routine never unlocks a door. */
 const ACTION_TEXT: Partial<Record<Action, (v: unknown) => string>> = {
@@ -84,6 +94,28 @@ export function createRoutineService(db: Database, ha: HaApi, svc: DeviceService
     return { sequence, steps: clean };
   }
 
+  /** The devices this person may use that fit a recipe's wording, so a template only ever holds real actions. */
+  function pick(u: SessionUser, kind: "lights" | "plugs", action: "turn_on" | "turn_off"): Step[] {
+    const ok = svc.accessor(u), out: Step[] = [];
+    for (const e of [...ha.entities.values()].sort((x, y) => x.entity_id.localeCompare(y.entity_id))) {
+      if (out.length >= MAX_PICKED) break;
+      if (e.state === "unavailable" || !ok(e.entity_id) || !svc.deviceFor(u, e.entity_id)) continue;
+      const cat = describe(e).category;
+      if (kind === "lights" ? cat !== "light" : cat !== "switch" || KEEP_ON.test(friendlyName(e, ""))) continue;
+      out.push({ type: "device", entityId: e.entity_id, action });
+    }
+    return out;
+  }
+  /** Turn a recipe into actions from this home's own devices, and say plainly when something it needs isn't there. */
+  function resolve(u: SessionUser, r: Recipe): Resolved {
+    const lights = r.lights ? pick(u, "lights", r.lights) : [], plugs = r.plugs ? pick(u, "plugs", r.plugs) : [];
+    const steps: Step[] = [...lights, ...plugs, ...(r.mode ? [{ type: "mode" as const, mode: r.mode }] : [])];
+    const noLights = !!r.lights && !lights.length, noDevices = noLights && (!r.plugs || !plugs.length);
+    const missing = noDevices ? "No lights or plugs that you can use were found, so there is nothing to switch yet. Add the devices you want yourself."
+      : noLights ? "No lights that you can use were found, so there are no lights in this one yet. Add what you want yourself." : null;
+    return { steps, complete: !noLights, missing };
+  }
+
   const rows = (h: string) => all<RoutineRow>(db, "SELECT id, template, name, steps, script_id FROM routines WHERE household_id = ? ORDER BY created_at", h);
   function view(r: Pick<RoutineRow, "id" | "name" | "template" | "steps">) {
     const steps = JSON.parse(r.steps) as Step[];
@@ -92,7 +124,7 @@ export function createRoutineService(db: Database, ha: HaApi, svc: DeviceService
   }
   const visible = (u: SessionUser) => { const ok = svc.accessor(u); return rows(u.householdId).filter((r) => ok(`routine:${r.id}`)).map(view); };
 
-  return { compile, text, rows, view, visible, search: (u: SessionUser, q: string) => visible(u).filter((r) => r.name.toLowerCase().includes(q)).slice(0, 10).map(({ id, name }) => ({ id, name })) };
+  return { compile, text, pick, resolve, rows, view, visible, search: (u: SessionUser, q: string) => visible(u).filter((r) => r.name.toLowerCase().includes(q)).slice(0, 10).map(({ id, name }) => ({ id, name })) };
 }
 export type RoutineService = ReturnType<typeof createRoutineService>;
 
@@ -120,7 +152,7 @@ export function routineRoutes(db: Database, ha: HaApi, secure: boolean, svc: Dev
       return {
         canManage, routines: mine,
         // Suggestions are clearly separate from configured routines, and only offered to people who can set them up.
-        suggested: canManage ? TEMPLATES.filter((t) => !done.has(t.key)).map((t) => ({ ...t, configured: false })) : [],
+        suggested: canManage ? TEMPLATES.filter((t) => !done.has(t.key)).map(({ recipe, ...t }) => { const r = rt.resolve(g.user, recipe); return { ...t, defaultSteps: r.steps, complete: r.complete, missing: r.missing, summary: r.steps.map(rt.text).join(", then "), configured: false }; }) : [],
       };
     })
     .post("/api/routines", async ({ request, body, set }) => {

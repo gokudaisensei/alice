@@ -8,6 +8,8 @@
 	import Group from '#lib/components/app/Group.svelte';
 	import Collapse from '#lib/components/app/Collapse.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
+	import SkeletonList from '#lib/components/app/SkeletonList.svelte';
+	import { plural } from '#lib/fmt.js';
 	import { Switch } from '#lib/components/ui/switch';
 	import { Button } from '#lib/components/ui/button';
 
@@ -21,7 +23,7 @@
 	};
 	const abilityText = (id: string) => ABILITY[id] ?? [id, ''];
 	const uid = $derived(page.params.id);
-	let data = $state<Data | null>(null), error = $state(''), tab = $state('rooms'), q = $state(''), by = $state<'room' | 'type'>('room'), open = $state<Record<string, boolean>>({});
+	let data = $state<Data | null>(null), error = $state(''), tab = $state('rooms'), q = $state(''), by = $state<'room' | 'type'>('room'), open = $state<Record<string, boolean>>({}), saving = $state(false);
 
 	async function load() {
 		const r = await api<Data>('GET', `/api/admin/users/${uid}/access`);
@@ -56,21 +58,26 @@
 
 	/** One call for any number of items. The screen changes at once and goes back if the home says no. */
 	async function setAllowed(items: Item[], want: boolean) {
-		const todo = items.filter((i) => i.allowed !== want); if (!todo.length) return;
+		const todo = items.filter((i) => i.allowed !== want); if (!todo.length || saving) return;
+		saving = true;
 		for (const i of todo) i.allowed = want;
 		for (let n = 0; n < todo.length; n += 200) {
 			const ids = todo.slice(n, n + 200).map((i) => i.id);
 			const r = await sensitive('PUT', `/api/admin/users/${uid}/devices`, want ? { allow: ids } : { deny: ids });
-			if (!r.ok) { for (const i of todo) i.allowed = !want; home.say('error', explain(r.data?.error)); return; }
+			if (!r.ok) { for (const i of todo) i.allowed = !want; home.say('error', explain(r.data?.error)); saving = false; return; }
 		}
-		await load(); // automations depend on what was just changed
+		await load();
+		saving = false; // automations depend on what was just changed
 	}
 	const toggleAll = (items: Item[]) => setAllowed(items, count(items) !== items.length);
 
 	async function ability(a: { id: string; on: boolean; byDefault: boolean }) {
+		if (saving) return;
+		saving = true;
 		const want = !a.on;
 		const r = await sensitive('PUT', `/api/admin/users/${uid}/permissions`, { overrides: { [a.id]: want === a.byDefault ? null : want } });
 		if (r.ok) a.on = want; else home.say('error', explain(r.data?.error));
+		saving = false;
 	}
 	const total = $derived(data ? { all: data.devices.length, on: count(data.devices) } : { all: 0, on: 0 });
 	const badge = (t: string) => !data ? '' : t === 'rooms' ? `${roomRows.filter((r) => count(r.items) > 0).length}/${roomRows.length}` : t === 'devices' ? `${total.on}/${total.all}` : t === 'scenes' ? `${count(data.scenes)}/${data.scenes.length}` : t === 'routines' ? `${count(data.routines)}/${data.routines.length}` : t === 'automations' ? `${data.automations.filter((a) => a.visible).length}/${data.automations.length}` : '';
@@ -80,8 +87,8 @@
 	<div class="flex items-center justify-between gap-3 px-1">
 		<p class="text-sm text-muted-foreground">{count(items)} of {items.length} {noun} allowed</p>
 		<div class="flex gap-1.5">
-			<Button size="sm" variant="secondary" disabled={count(items) === items.length} onclick={() => setAllowed(items, true)}>Allow all</Button>
-			<Button size="sm" variant="secondary" disabled={count(items) === 0} onclick={() => setAllowed(items, false)}>Allow none</Button>
+			<Button size="sm" variant="secondary" disabled={saving || count(items) === items.length} onclick={() => setAllowed(items, true)}>Allow all</Button>
+			<Button size="sm" variant="secondary" disabled={saving || count(items) === 0} onclick={() => setAllowed(items, false)}>Allow none</Button>
 		</div>
 	</div>
 {/snippet}
@@ -89,12 +96,13 @@
 {#snippet row(i: Item, sub?: string)}
 	<label class="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/60 active:bg-muted">
 		<span class="min-w-0 flex-1"><span class="block truncate text-[0.9375rem] font-medium">{i.name}</span>{#if sub}<span class="block truncate text-sm text-muted-foreground">{sub}</span>{/if}</span>
-		<Switch checked={i.allowed} onCheckedChange={(v) => setAllowed([i], v)} aria-label="Allow {i.name}" />
+		<Switch disabled={saving} checked={i.allowed} onCheckedChange={(v) => setAllowed([i], v)} aria-label="Allow {i.name}" />
 	</label>
 {/snippet}
 
 <Page title={data ? `${data.user.name}'s access` : 'Access'} subtitle={!data ? '' : guest ? 'A guest sees only what you switch on here.' : 'A member can use everything unless you switch it off here.'} back={{ href: '/admin/users', label: 'People' }} width="md">
 	{#if error}<p role="alert" class="rounded-2xl bg-signal-soft px-4 py-3 text-sm text-signal-foreground">{error}</p>{/if}
+	{#if !data && !error}<SkeletonList kind="rows" count={5} />{/if}
 	{#if data}
 		<div class="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1" role="tablist" aria-label="What to manage">
 			{#each data.tabs as t (t)}
@@ -108,13 +116,13 @@
 		{#key tab}
 		<div class="space-y-3 rise">
 			{#if tab === 'rooms'}
-				<p class="px-1 text-sm text-muted-foreground">Switching a room on or off changes every device in it. Fine-tune single devices under Devices.</p>
+				<p class="px-1 text-sm text-muted-foreground">Switching a room on or off changes every device in it. To fine-tune single devices, use the Devices tab.</p>
 				<Group>
 					{#each roomRows as r (r.id)}
 						<label class="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/60 active:bg-muted">
 							<span class="min-w-0 flex-1"><span class="block truncate text-[0.9375rem] font-medium">{r.name}</span>
-								<span class="block text-sm text-muted-foreground">{count(r.items) === 0 ? 'None allowed' : count(r.items) === r.items.length ? `All ${r.items.length} devices` : `${count(r.items)} of ${r.items.length} devices`}</span></span>
-							<Switch checked={count(r.items) === r.items.length} onCheckedChange={() => toggleAll(r.items)} aria-label="Allow all of {r.name}" />
+								<span class="block text-sm text-muted-foreground">{count(r.items) === 0 ? 'None allowed' : count(r.items) === r.items.length ? r.items.length === 1 ? 'The device' : `All ${r.items.length} devices` : `${count(r.items)} of ${plural(r.items.length, 'device')}`}</span></span>
+							<Switch disabled={saving} checked={count(r.items) === r.items.length} onCheckedChange={() => toggleAll(r.items)} aria-label="Allow all of {r.name}" />
 						</label>
 					{/each}
 				</Group>
@@ -136,7 +144,7 @@
 								<ChevronDown class="size-4 shrink-0 text-muted-foreground transition-transform duration-300 {isOpen ? '' : '-rotate-90'}" />
 								<span class="min-w-0"><span class="block truncate text-[0.9375rem] font-medium">{s.title}</span><span class="block text-sm text-muted-foreground">{count(s.items)} of {s.items.length} allowed</span></span>
 							</button>
-							<Switch checked={count(s.items) === s.items.length} onCheckedChange={() => toggleAll(s.items)} aria-label="Allow all in {s.title}" />
+							<Switch disabled={saving} checked={count(s.items) === s.items.length} onCheckedChange={() => toggleAll(s.items)} aria-label="Allow all in {s.title}" />
 						</div>
 						<Collapse open={isOpen}><div class="divide-y divide-border border-t">{#each s.items as d (d.id)}{@render row(d, by === 'room' ? TYPE[d.category] : roomOf(d.roomId))}{/each}</div></Collapse>
 					</div>
@@ -164,7 +172,7 @@
 				<Group>{#each data.abilities as a (a.id)}
 					<label class="flex min-h-14 cursor-pointer items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/60 active:bg-muted">
 						<span class="min-w-0 flex-1"><span class="block text-[0.9375rem] font-medium">{abilityText(a.id)[0]}</span><span class="block text-sm text-muted-foreground">{abilityText(a.id)[1]}</span></span>
-						<Switch checked={a.on} onCheckedChange={() => ability(a)} aria-label={abilityText(a.id)[0]} />
+						<Switch disabled={saving} checked={a.on} onCheckedChange={() => ability(a)} aria-label={abilityText(a.id)[0]} />
 					</label>
 				{/each}</Group>
 			{/if}

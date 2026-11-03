@@ -124,6 +124,21 @@ Legend: ✅ verified / fixed · 🟡 partly · ⛔ open · ➖ by design (docume
 | Not built | Blinds scrubbing (the app has no cover devices yet) | ➖ |
 | Already there before this round | Bottom sheets, sideways room swiping, "often used" strip, icon shortcuts (lock all, good night, lights off), "Automate this" on alerts | ✅ |
 
+## Design review round (November 2026)
+Fixes made after a product and design review. **Checked** means seen in a headless Chrome at phone size against a seeded Home Assistant; nothing here has been tried on a real phone or on the Raspberry Pi yet.
+| Area | What changed | Status |
+|---|---|---|
+| Trust | One formatting library (`lib/fmt.ts`): units, precision, dates, plurals. Door and window sensors read Open/Closed. The Home headline counts every light, plug and fan that is on, and never says "locked" while something is open. A device's secondary entities (the hub's config and diagnostic entities) are no longer listed as devices | ✅ checked; unit-tested |
+| Freshness | Home says when it was last updated and says so when the hub is quiet; locks and sensors show how long ago they changed; a pending command reads "Turning on…" | ✅ checked on Home and tiles; the slow-network wording was not provoked |
+| Controls | Tiles have a visible switch; the card body opens details; the sheet has the switch, last change (and who, when the app did it), rename, room and icon. Hold-a-room-to-switch-off is replaced by an "All off" button with Undo | ✅ checked |
+| Navigation | Back closes sheets; tabs replace history and remember scroll and sub-tab; the tapped tab lights at once; a top progress bar shows while a page loads | ✅ Back and tab history checked by script |
+| Rooms | Suggested from device names and created in one tap; colour and icon per room | ✅ checked (suggestions); room colour and icon picker not viewed |
+| Behaviours | One list for scenes, routines and automations; complete templates; weekday choice; plain-words sentence; shared builder bar with Try it now | 🟡 server tested; builder screens not viewed |
+| Settings | You split into personal and household; grouped notifications with a test; clearer People, Voice, System | 🟡 You and System viewed; the rest not |
+| Wall panel, status picture | Own layouts and the app's typeface | ✅ checked (phone and 1280 px) |
+| Look | Light and dark share one primary colour family; softer heading tracking; Home glow that follows the home's mood; home-screen install card | ✅ checked |
+| Still open | Page skeletons are added but were not seen; no room photos; haptics, shake and the install prompt on a real phone are untried | ⛔ |
+
 ## Re-running the real-world checks
 ```
 # Real Home Assistant (container already seeded; token in the scratchpad)

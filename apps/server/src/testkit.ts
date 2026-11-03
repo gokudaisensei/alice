@@ -52,6 +52,7 @@ export function fixtureEntities(): HaEntity[] {
 /** In-memory Home Assistant. Records calls; can be told to fail, ignore commands, or go offline. */
 export class FakeHa implements HaApi {
   entities = new Map<string, HaEntity>(fixtureEntities().map((e) => [e.entity_id, e]));
+  secondary = new Set<string>();
   stale = false;
   calls: { domain: string; service: string; data: Record<string, unknown>; entityId?: string }[] = [];
   failing = new Set<string>();

@@ -9,11 +9,13 @@
 	import Group from '#lib/components/app/Group.svelte';
 	import Row from '#lib/components/app/Row.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
+	import RoomSuggestions from '#lib/components/app/RoomSuggestions.svelte';
+	import { roomLook } from '#lib/roomLook.js';
 	import DevicePicker from '#lib/components/app/DevicePicker.svelte';
 	import * as Drawer from '#lib/components/ui/drawer';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
-	import { DoorOpen, Plus, Trash2, Layers } from '@lucide/svelte';
+	import { Plus, Trash2, Layers } from '@lucide/svelte';
 
 	type G = { id: string; name: string; entityIds: string[] };
 	let groups = $state<G[]>([]), error = $state('');
@@ -45,14 +47,15 @@
 	async function delGroup(g: G) { if (!confirm(`Delete the group “${g.name}”? The devices stay.`)) return; const r = await api('DELETE', `/api/admin/groups/${g.id}`); if (!r.ok) error = explain(r.data?.error); await Promise.all([loadGroups(), home.load()]); }
 </script>
 
-<Page title="Rooms & devices" subtitle="Organise your home. Open a room to add or rename its devices." width="md">
+<Page title="Edit rooms" subtitle="Organise your home. Open a room to add or rename its devices." width="md">
 	{#snippet actions()}<Button onclick={() => (roomOpen = true)}><Plus />New room</Button>{/snippet}
 	{#if error}<p role="alert" class="text-sm text-signal">{error}</p>{/if}
+	<RoomSuggestions />
 
 	<Section title="Rooms">
 		{#if home.orderedRooms.length}
 			<Group>{#each home.orderedRooms as r (r.id)}
-				<Row href="/admin/rooms/{r.id}" title={r.name} description="{home.inRoom(r.id).length} device{home.inRoom(r.id).length === 1 ? '' : 's'}">{#snippet icon()}<DoorOpen class="size-[18px]" />{/snippet}</Row>
+				<Row href="/admin/rooms/{r.id}" title={r.name} description="{home.inRoom(r.id).length} device{home.inRoom(r.id).length === 1 ? '' : 's'}">{#snippet icon()}{@const look = roomLook(r)}<look.icon class="size-[18px]" style="color: {look.color}" />{/snippet}</Row>
 			{/each}</Group>
 			{#if unplaced}<p class="text-sm text-muted-foreground">{unplaced} device{unplaced === 1 ? '' : 's'} {unplaced === 1 ? "isn't" : "aren't"} in a room yet. Open a room and tap Add to place {unplaced === 1 ? 'it' : 'them'}.</p>{/if}
 		{:else}

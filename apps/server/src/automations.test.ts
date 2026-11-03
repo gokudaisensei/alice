@@ -225,3 +225,50 @@ test("a hub that saves but never loads what the app writes is reported plainly, 
   expect([...t.ha.configs.keys()]).toEqual([]); // nothing left behind in the hub's files
   expect(t.db.query("SELECT (SELECT COUNT(*) FROM automations) a, (SELECT COUNT(*) FROM routines) r").get()).toEqual({ a: 0, r: 0 });
 });
+
+test("every suggested automation ends in real actions, not an empty list", async () => {
+  const { admin, j } = await home();
+  const list = (await j("GET", "/api/automations", admin)).json.suggested;
+  const bed = list.find((t: Body) => t.key === "bedtime_off");
+  expect(bed.triggers).toEqual([{ type: "time", at: "23:00" }]);
+  expect(bed.actions.map((a: Body) => a.entityId)).toEqual(["light.desk", "light.hall", "light.kitchen", "switch.plug"]);
+  expect(bed.complete).toBe(true);
+  for (const t of list) {
+    expect(t.actions.length).toBeGreaterThan(0);
+    const r = await j("POST", "/api/automations/preview", admin, { name: t.name, triggers: t.triggers, conditions: t.conditions, actions: t.actions });
+    expect(r.status).toBe(200); // saves as offered
+  }
+  expect(list.find((t: Body) => t.key === "sunset_on").actions.every((a: Body) => a.action === "turn_on")).toBe(true);
+});
+
+test("a suggested automation says plainly when the home has no lights for it", async () => {
+  const { t, admin, j } = await home();
+  for (const id of [...t.ha.entities.keys()]) if (id.startsWith("light.") || id.startsWith("switch.")) t.ha.entities.delete(id);
+  const s = (await j("GET", "/api/automations", admin)).json.suggested.find((x: Body) => x.key === "sunset_on");
+  expect(s.complete).toBe(false);
+  expect(s.missing).toContain("No lights");
+  expect(s.actions).toEqual([]);
+});
+
+test("weekday conditions: weekdays, weekends and chosen days publish a real weekday check, and every day means none", async () => {
+  const { t, admin, j } = await home();
+  const make = async (days: string[]) => { t.ha.configs.clear(); const r = await j("POST", "/api/automations", admin, body({ name: `d${days.length}${days[0]}`, conditions: [{ type: "days", days }] })); expect(r.status).toBe(200); return firstAuto(t)[1]; };
+  expect((await make(["mon", "tue", "wed", "thu", "fri"])).conditions).toEqual([{ condition: "time", weekday: ["mon", "tue", "wed", "thu", "fri"] }]);
+  expect((await make(["sun", "sat"])).conditions).toEqual([{ condition: "time", weekday: ["sat", "sun"] }]);
+  expect((await make(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])).conditions).toEqual([]);
+  const p = (await j("POST", "/api/automations/preview", admin, body({ conditions: [{ type: "days", days: ["mon", "tue", "wed", "thu", "fri"] }] }))).json;
+  expect(p.summary).toContain("it is a weekday");
+  expect((await j("POST", "/api/automations/preview", admin, body({ conditions: [{ type: "days", days: ["funday"] }] }))).status).toBe(400);
+  expect((await j("POST", "/api/automations/preview", admin, body({ conditions: [{ type: "days", days: [] }] }))).status).toBe(400);
+});
+
+test("try it now runs the steps once, skipping the conditions, and is permissioned", async () => {
+  const { t, admin, guest, j } = await home();
+  const id = (await j("POST", "/api/automations", admin, body())).json.id;
+  t.ha.calls.length = 0;
+  const r = await j("POST", `/api/automations/${id}/run`, admin);
+  expect(r.json).toMatchObject({ ok: true, started: true });
+  expect(t.ha.calls).toEqual([expect.objectContaining({ domain: "automation", service: "trigger", data: { skip_condition: true } })]);
+  expect((await j("POST", `/api/automations/${id}/run`, guest.cookie)).status).toBe(403);
+  expect((await j("POST", "/api/automations/nope/run", admin)).status).toBe(404);
+});

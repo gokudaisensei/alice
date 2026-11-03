@@ -262,3 +262,38 @@ test("admins can share scenes and routines with individual people; unknown targe
   expect((await j("GET", "/api/admin/actions", member.cookie)).status).toBe(403);
   expect((await t.call("PUT", `/api/admin/users/${guest.userId}/devices`, { cookie: admin, body: { allow: ["routine:nope"] } })).status).toBe(400);
 });
+
+test("every suggested routine carries real actions from the home's own devices", async () => {
+  const { t, member, j } = await home();
+  const by = (await j("GET", "/api/routines", member.cookie)).json.suggested.reduce((m: Body, s: Body) => ({ ...m, [s.key]: s }), {});
+  const kinds = (k: string) => by[k].defaultSteps.map((s: Body) => `${s.type}:${s.entityId ?? s.mode}:${s.action ?? ""}`);
+  expect(kinds("good_morning")).toEqual(["device:light.desk:turn_on", "device:light.hall:turn_on", "device:light.kitchen:turn_on", "mode:home:"]);
+  // plugs are switched off at night, but the unavailable heater is left out
+  expect(kinds("good_night")).toEqual(["device:light.desk:turn_off", "device:light.hall:turn_off", "device:light.kitchen:turn_off", "device:switch.plug:turn_off", "mode:night:"]);
+  expect(by.good_night.complete).toBe(true);
+  expect(by.good_night.summary).toContain("Turn off desk");
+  // a suggestion can be saved exactly as offered
+  const c = await j("POST", "/api/routines", member.cookie, { template: "good_morning", name: "Good Morning", steps: by.good_morning.defaultSteps });
+  expect(c.status).toBe(200);
+  expect(t.ha.calls.some((x) => x.domain !== "script")).toBe(false); // saving never runs anything
+});
+
+test("a suggestion says so when the home has nothing for it, rather than quietly being incomplete", async () => {
+  const { t, member, j } = await home();
+  for (const id of [...t.ha.entities.keys()]) if (id.startsWith("light.") || id.startsWith("switch.")) t.ha.entities.delete(id);
+  const s = (await j("GET", "/api/routines", member.cookie)).json.suggested.find((x: Body) => x.key === "good_morning");
+  expect(s.complete).toBe(false);
+  expect(s.missing).toContain("No lights");
+  expect(s.defaultSteps).toEqual([{ type: "mode", mode: "home" }]);
+});
+
+test("plugs that look like heaters, routers or fridges are never switched off by a suggestion", async () => {
+  const { t, member, j } = await home();
+  t.ha.entities.set("switch.router", { entity_id: "switch.router", state: "on", attributes: { friendly_name: "Router plug" } });
+  t.ha.entities.set("switch.heater", { entity_id: "switch.heater", state: "on", attributes: { friendly_name: "Heater" } });
+  const s = (await j("GET", "/api/routines", member.cookie)).json.suggested.find((x: Body) => x.key === "leaving_home");
+  const ids = s.defaultSteps.filter((x: Body) => x.type === "device").map((x: Body) => x.entityId);
+  expect(ids).toContain("switch.plug");
+  expect(ids).not.toContain("switch.router");
+  expect(ids).not.toContain("switch.heater");
+});

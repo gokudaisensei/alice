@@ -84,6 +84,7 @@ export function startMockHa(port: number, token = "dev-token") {
     const fail = (code: string, message: string) => ws.send(JSON.stringify({ id: m.id, type: "result", success: false, error: { code, message } }));
     if (m.type === "subscribe_events") { subs.add(ws); return ok(); }
     if (m.type === "get_states") return ok(states);
+    if (m.type === "config/entity_registry/list") return ok([]);
     if (m.type === "input_select/create") { const ent = e("input_select." + slug(m.name ?? ""), m.initial ?? "", { options: m.options, friendly_name: m.name }); states.push(ent); broadcast(ent); return ok(); }
     if (m.type === "call_service" && m.service === "reload" && isKind(m.domain)) { reload(m.domain); return ok(); }
     if (m.type === "call_service") {

@@ -24,24 +24,24 @@
  */
 :root {
 	--radius: 0.75rem;
-	--background: #f4f5f9;
+	--background: #edf0f8;
 	--foreground: #0b1020;
 	--card: #ffffff;
 	--card-foreground: #0b1020;
 	--popover: #ffffff;
 	--popover-foreground: #0b1020;
-	--primary: #2b50e0;
+	--primary: #4357d9;
 	--primary-foreground: #ffffff;
-	--secondary: #eaecf5;
+	--secondary: #e3e6f3;
 	--secondary-foreground: #0b1020;
-	--muted: #eceef6;
+	--muted: #e6e9f4;
 	--muted-foreground: #586079;
-	--accent: #e4e9fb;
+	--accent: #e1e6fb;
 	--accent-foreground: #0b1020;
 	--destructive: #d92d4a;
-	--border: #dfe2ee;
-	--input: #cdd2e4;
-	--ring: #2b50e0;
+	--border: #d3d8e9;
+	--input: #c1c8de;
+	--ring: #4357d9;
 	--raised: #fafaff;
 	--on: #ffb020;
 	--on-soft: #fff1d4;
@@ -59,7 +59,7 @@
 	--card-foreground: #eef0fa;
 	--popover: #151c34;
 	--popover-foreground: #eef0fa;
-	--primary: #7f9bff;
+	--primary: #8ea3ff;
 	--primary-foreground: #071033;
 	--secondary: #1a2140;
 	--secondary-foreground: #eef0fa;
@@ -70,7 +70,7 @@
 	--destructive: #ff7b8f;
 	--border: #1f2745;
 	--input: #2a3358;
-	--ring: #7f9bff;
+	--ring: #8ea3ff;
 	--raised: #182040;
 	--on: #ffc247;
 	--on-soft: #33270f;
@@ -124,7 +124,7 @@
 		font-family: var(--font-sans);
 		font-optical-sizing: auto;
 		font-feature-settings: 'ss01' 0, 'kern' 1;
-		letter-spacing: -0.006em;
+		letter-spacing: -0.003em;
 	}
 	:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 	/* Touch: no 300 ms tap delay or double-tap zoom on controls, no grey flash, no accidental text selection while pressing. */
@@ -139,10 +139,10 @@
 /* Type scale. Display is narrow, heavy and tightly tracked; it is used once per screen, for the sentence that matters. */
 @utility display {
 	font-size: clamp(1.875rem, 1.3rem + 2.6vw, 3.5rem);
-	line-height: 1.02;
+	line-height: 1.06;
 	font-weight: 700;
-	letter-spacing: -0.035em;
-	font-stretch: 88%;
+	letter-spacing: -0.02em;
+	font-stretch: 92%;
 	font-variation-settings: 'opsz' 96;
 	text-wrap: balance;
 }
@@ -150,8 +150,8 @@
 	font-size: clamp(1.625rem, 1.3rem + 1.4vw, 2.5rem);
 	line-height: 1.05;
 	font-weight: 650;
-	letter-spacing: -0.03em;
-	font-stretch: 90%;
+	letter-spacing: -0.018em;
+	font-stretch: 92%;
 	font-variation-settings: 'opsz' 72;
 }
 @utility heading {
@@ -160,12 +160,23 @@
 	font-weight: 620;
 	letter-spacing: -0.015em;
 }
+/* Supporting text levels, so metadata never looks like a body paragraph and status never looks like a label. */
+@utility meta { font-size: 0.8125rem; line-height: 1.35; color: var(--muted-foreground); }
+@utility caption { font-size: 0.75rem; line-height: 1.35; color: var(--muted-foreground); letter-spacing: 0.005em; }
 @utility figure {
 	font-weight: 650;
-	letter-spacing: -0.03em;
-	font-stretch: 90%;
+	letter-spacing: -0.015em;
+	font-stretch: 92%;
 	font-variant-numeric: tabular-nums;
 }
+
+/* The Home screen's mood: a wide, soft light from the top-left corner, in the colour of what is going on. */
+.glow { background: radial-gradient(70% 90% at 12% -10%, color-mix(in oklab, var(--glow) 20%, transparent), transparent 70%), radial-gradient(50% 70% at 95% -20%, color-mix(in oklab, var(--glow) 9%, transparent), transparent 70%); }
+.dark .glow { background: radial-gradient(70% 90% at 12% -10%, color-mix(in oklab, var(--glow) 24%, transparent), transparent 70%), radial-gradient(50% 70% at 95% -20%, color-mix(in oklab, var(--glow) 10%, transparent), transparent 70%); }
+@media (prefers-reduced-motion: reduce) { .glow { transition: none; } }
+
+/* In light mode a white card on a pale ground needs a little lift, or its edge disappears. */
+:root:not(.dark) .bg-card { box-shadow: 0 1px 0 rgb(255 255 255 / 0.8) inset, 0 1px 2px rgb(16 24 64 / 0.05); }
 
 /* Native selects and similar plain fields, matched to Input. */
 @utility field {
@@ -203,6 +214,7 @@
 }
 
 /* Arrange mode: tiles wobble gently so it is obvious they can be moved. */
+@keyframes load { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
 @keyframes jiggle { 0%, 100% { transform: rotate(-0.8deg); } 50% { transform: rotate(0.8deg); } }
 @utility jiggle { animation: jiggle 0.28s ease-in-out infinite; transform-origin: 50% 60%; }
 

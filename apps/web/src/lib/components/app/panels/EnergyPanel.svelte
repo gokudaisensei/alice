@@ -1,15 +1,17 @@
 <script lang="ts">
+	import { longDate, plural } from '#lib/fmt.js';
 	import { onMount } from 'svelte';
 	import { ChevronDown, Share2 } from '@lucide/svelte';
 	import { drawEnergy, sharePicture } from '#lib/sharePicture.js';
 	import { haptics } from '#lib/haptics.js';
 	import { api } from '#lib/api.js';
+	import SkeletonList from '#lib/components/app/SkeletonList.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
 
 	type Meter = { id: string; name: string; available: boolean; unit: string; now: number | null; kind: 'energy' | 'power' | 'other'; todayKwh?: number | null; days?: { date: string; kwh: number }[]; peak24h?: number | null; low24h?: number | null };
-	let meters = $state<Meter[]>([]), note = $state(''), since = $state<number | null>(null), loaded = $state(false);
+	let meters = $state<Meter[]>([]), since = $state<number | null>(null), loaded = $state(false);
 	let picked = $state<string | null>(null), showAll = $state(false), showOther = $state(false);
-	onMount(async () => { const r = await api<{ meters: Meter[]; note: string; sampledSince: number | null }>('GET', '/api/energy'); if (r.ok) { meters = r.data.meters; note = r.data.note; since = r.data.sampledSince; } loaded = true; });
+	onMount(async () => { const r = await api<{ meters: Meter[]; note: string; sampledSince: number | null }>('GET', '/api/energy'); if (r.ok) { meters = r.data.meters; since = r.data.sampledSince; } loaded = true; });
 
 	// The few meters that describe the whole home come first; the many plugs are a ranked list below.
 	const headline = /whole|house|grid|solar|total/i;
@@ -50,6 +52,7 @@
 </script>
 
 <div class="space-y-5">
+	{#if !loaded}<SkeletonList kind="cards" count={2} />{/if}
 	{#if loaded && !meters.length}<Empty title="No energy meters" description="Energy meters appear here once they're shared with you." />{/if}
 
 	{#if top.length}
@@ -95,14 +98,14 @@
 
 	{#if users.length}
 		<section aria-label="Using power now">
-			<div class="mb-2 flex items-baseline justify-between"><h2 class="heading">Using power now</h2><span class="text-xs text-muted-foreground">{users.length} meters</span></div>
+			<div class="mb-2 flex items-baseline justify-between"><h2 class="heading">Using power now</h2><span class="text-xs text-muted-foreground">{plural(users.length, 'meter')}</span></div>
 			<ul class="divide-y overflow-hidden rounded-tile border bg-card">
 				{#each shown as m (m.id)}
 					{@const w = watts(m, m.now)}
 					<li class="px-3.5 py-2.5">
 						<div class="flex items-baseline justify-between gap-3"><span class="truncate text-[0.9375rem]">{m.name.replace(/ (plug )?power$/i, '')}</span><span class="figure shrink-0 text-[0.9375rem] tabular-nums">{w.v}<span class="ml-0.5 text-xs font-medium text-muted-foreground">{w.u}</span></span></div>
 						<div class="mt-1.5 h-1 rounded-full bg-muted" aria-hidden="true"><div class="h-full rounded-full bg-primary/70 transition-[width] duration-500" style="width:{Math.max(2, ((m.now ?? 0) / biggest) * 100)}%"></div></div>
-						{#if m.peak24h != null}<p class="mt-1 text-[11px] text-muted-foreground">24 h range {range(m)}</p>{/if}
+						{#if m.peak24h != null}<p class="mt-1 text-xs text-muted-foreground">24-hour range {range(m)}</p>{/if}
 					</li>
 				{/each}
 			</ul>
@@ -123,5 +126,5 @@
 		</section>
 	{/if}
 
-	{#if loaded && meters.length}<p class="max-w-[70ch] text-xs text-muted-foreground">{note}{#if since} Sampling began {new Date(since).toLocaleDateString()}.{/if} Meters are shown separately and never added together, since one may already include another.</p>{/if}
+	{#if loaded && meters.length}<p class="max-w-[60ch] text-[0.8125rem] leading-relaxed text-muted-foreground">{#if since}Recording since {longDate(since)}. {/if}Readings are sampled every 15 minutes, so weekly figures are estimates. Meters are listed separately and not added up, because one may already include another.</p>{/if}
 </div>

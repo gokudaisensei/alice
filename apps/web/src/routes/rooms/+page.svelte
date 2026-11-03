@@ -5,13 +5,15 @@
 	import { home } from '#lib/home.svelte.js';
 	import { session } from '#lib/session.svelte.js';
 	import { haptics } from '#lib/haptics.js';
-	import { longpress } from '#lib/gestures.svelte.js';
+	import RoomSuggestions from '#lib/components/app/RoomSuggestions.svelte';
+	import { plural } from '#lib/fmt.js';
 	import { tileClass } from '#lib/tiles.js';
 	import DeviceCard from '#lib/components/app/DeviceCard.svelte';
 	import Page from '#lib/components/app/Page.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
 	import { Button } from '#lib/components/ui/button';
-	import { Settings2 } from '@lucide/svelte';
+	import { roomLook } from '#lib/roomLook.js';
+	import { PowerOff, Settings2 } from '@lucide/svelte';
 
 	const unplaced = $derived(home.devices.filter((d) => !d.roomId && !['sensor', 'energy'].includes(d.category)));
 	const pages = $derived([...home.orderedRooms.map((r) => ({ id: r.id, name: r.name })), ...(unplaced.length ? [{ id: 'none', name: 'No room' }] : [])]);
@@ -39,22 +41,24 @@
 		if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.6 && Date.now() - st < 700) go(cur + (dx < 0 ? 1 : -1));
 	}
 	async function lightsOff() { haptics.grab(); await home.batch(`Turned off ${lightsOn.length} light${lightsOn.length === 1 ? '' : 's'}`, async () => { for (const d of lightsOn) await home.command(d.id, 'turn_off'); }); haptics.success(); }
-	/** Hold the room's name to switch off everything that's on in it, not only the lights. */
+	/** Switch off everything that is on in the room, not only the lights. Offered as a plain button, with Undo in the toast that follows. */
+	const running = $derived(list.filter((d) => d.available && d.state === 'on' && d.controls.some((c) => c.type === 'power')));
 	async function roomOff() {
-		const on = list.filter((d) => d.available && d.state === 'on' && d.controls.some((c) => c.type === 'power'));
-		if (!on.length) { home.say('info', `Everything in ${room?.name} is already off.`); return; }
-		await home.batch(`Turned off ${room?.name}`, async () => { await Promise.all(on.map((d) => home.command(d.id, 'turn_off'))); }); haptics.success();
+		if (!running.length) return;
+		await home.batch(`Turned off ${room?.name}`, async () => { await Promise.all(running.map((d) => home.command(d.id, 'turn_off'))); }); haptics.success();
 	}
 </script>
 
 <Page title="Rooms" width="xl">
+	{#if session.can('rooms.manage')}<RoomSuggestions />{/if}
 	{#snippet actions()}{#if session.can('rooms.manage')}<Button variant="secondary" size="sm" href="/admin/rooms"><Settings2 />Manage</Button>{/if}{/snippet}
 	{#if pages.length}
 		<div class="-mx-5 flex snap-x snap-proximity scroll-px-5 gap-2 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0" role="tablist" aria-label="Rooms">
 			{#each pages as p, i (p.id)}
 				{@const on = devicesOf(p.id).filter((d) => d.state === 'on' && d.available).length}
+{@const look = roomLook(home.rooms.find((r) => r.id === p.id) ?? p)}
 				<button type="button" role="tab" aria-selected={cur === i} data-room-chip={p.id} onclick={() => go(i)} class="flex h-11 shrink-0 snap-start items-center gap-2 rounded-full px-4 text-[0.9375rem] font-medium transition-[background-color,color,transform] duration-150 active:scale-[0.97] {cur === i ? 'bg-foreground text-background' : 'bg-secondary text-muted-foreground'}">
-					{p.name}{#if on}<span class="size-1.5 rounded-full bg-on" aria-label="{on} on"></span>{/if}
+					<look.icon class="size-4 shrink-0" style={cur === i ? '' : `color: ${look.color}`} aria-hidden="true" />{p.name}{#if on}<span class="size-1.5 rounded-full bg-on" aria-label="{on} on"></span>{/if}
 				</button>
 			{/each}
 		</div>
@@ -65,15 +69,15 @@
 			{#key room?.id}
 				<div in:fly={{ x: dir * 40, duration: 240 }} class="space-y-4">
 					<div class="flex items-end justify-between gap-3">
-						<div use:longpress={{ ms: 560, onlong: roomOff }} class="select-none" style="-webkit-touch-callout:none"><h2 class="title">{room?.name}</h2><p class="mt-1 text-sm text-muted-foreground">{list.length} device{list.length === 1 ? '' : 's'}{#if lightsOn.length}&nbsp;· {lightsOn.length} light{lightsOn.length === 1 ? '' : 's'} on{/if}</p></div>
-						{#if lightsOn.length}<Button variant="secondary" size="sm" onclick={lightsOff}>Lights off</Button>{/if}
+						<div><h2 class="title">{room?.name}</h2><p class="mt-1 text-sm text-muted-foreground">{plural(list.length, 'device')}{#if lightsOn.length}&nbsp;· {lightsOn.length} light{lightsOn.length === 1 ? '' : 's'} on{/if}</p></div>
+						<div class="flex shrink-0 gap-2">{#if lightsOn.length}<Button variant="secondary" size="sm" onclick={lightsOff}>Lights off</Button>{/if}{#if running.length}<Button variant="secondary" size="sm" onclick={roomOff}><PowerOff />All off</Button>{/if}</div>
 					</div>
 					{#if list.length}<div class="tile-grid">{#each list as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div>
 					{:else}<Empty title="Nothing in this room yet" description="Devices appear here once they're placed in it.">{#if session.can('rooms.manage') && room && room.id !== 'none'}<Button href="/admin/rooms/{room.id}?add=1">Add devices</Button>{/if}</Empty>{/if}
 				</div>
 			{/key}
 		</div>
-		<p class="text-center text-xs text-muted-foreground md:hidden">Swipe sideways to change room. Hold the room's name to turn it all off.</p>
+		<p class="text-center text-xs text-muted-foreground md:hidden">Swipe sideways to change room.</p>
 	{:else if home.loaded}
 		<Empty title="No rooms yet" description="Rooms group your devices so they're easy to find.">{#if session.can('rooms.manage')}<Button href="/admin/rooms">Set up rooms</Button>{/if}</Empty>
 	{/if}

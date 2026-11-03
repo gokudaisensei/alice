@@ -7,7 +7,7 @@ import type { HaApi, HaEntity } from "./ha";
 import { SESSION, lookupSession, type SessionUser } from "./session";
 import { readCookie } from "./auth";
 import { MODE_ENTITY } from "./modes";
-import { all } from "./sql";
+import { all, one } from "./sql";
 import { asObject, deny, text, type ErrorBody } from "./http";
 
 /** The readings a screen needs from a device, which ones depend on its kind. The hub's raw attributes never leave the server. */
@@ -24,9 +24,13 @@ export type DeviceView = {
   available: boolean; reason: "device_offline" | "home_assistant_unavailable" | null;
   state: string; controls: Control[]; reading: Reading;
   attrs: DeviceAttrs;
+  /** the icon a person chose for it, or null to let the app pick one */
+  icon: string | null;
+  /** when the state last changed, as reported by the hub (ms since 1970) */
+  changedAt: number | null;
 };
 
-export type DeviceMeta = { entity_id: string; name: string | null; room_id: string | null; hidden: number };
+export type DeviceMeta = { entity_id: string; name: string | null; room_id: string | null; hidden: number; icon: string | null };
 type RunResult =
   | { status: 200; body: { ok: true; confirmed: boolean; device: DeviceView | null } }
   | { status: 400 | 401 | 404 | 409 | 503; body: ErrorBody };
@@ -46,7 +50,7 @@ function attrsOf(d: Descriptor, e: HaEntity): DeviceAttrs {
 }
 
 export function createDeviceService(db: Database, ha: HaApi) {
-  const meta = (household: string) => new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r]));
+  const meta = (household: string) => new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden, icon FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r]));
 
   /** Role default, overridable per user. Guests start with nothing. */
   const accessor = (u: Pick<SessionUser, "id" | "role">) => {
@@ -60,12 +64,13 @@ export function createDeviceService(db: Database, ha: HaApi) {
 
   function viewOf(e: HaEntity, m: DeviceMeta | undefined): DeviceView | null {
     const d = describe(e);
-    if (!d.ordinary || m?.hidden) return null;
+    if (!d.ordinary || m?.hidden || ha.secondary?.has(e.entity_id)) return null;
     const stale = ha.isStale(), offline = e.state === "unavailable";
     return {
       id: e.entity_id, name: m?.name || d.name, category: d.category, roomId: m?.room_id ?? null,
       available: !stale && !offline, reason: stale ? "home_assistant_unavailable" : offline ? "device_offline" : null,
       state: e.state, controls: d.controls, reading: d.reading, attrs: attrsOf(d, e),
+      changedAt: Date.parse(e.last_changed ?? e.last_updated ?? "") || null, icon: m?.icon ?? null,
     };
   }
 
@@ -150,7 +155,7 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
     })
     .get("/api/rooms", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      const rooms = all<{ id: string; name: string }>(db, "SELECT id, name FROM rooms WHERE household_id = ? ORDER BY position, name", g.user.householdId);
+      const rooms = all<{ id: string; name: string; color: string | null; icon: string | null }>(db, "SELECT id, name, color, icon FROM rooms WHERE household_id = ? ORDER BY position, name", g.user.householdId);
       if (g.user.permissions.includes("rooms.manage")) return { rooms };
       // Everyone else only learns about rooms that contain something they can use.
       const used = new Set(svc.visibleDevices(g.user).map((d) => d.roomId));
@@ -197,6 +202,17 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
       const numeric = pts.length > 0 && pts.every((p) => Number.isFinite(Number(p.state)));
       const step = Math.max(1, Math.ceil(pts.length / 200));
       return { kind: numeric ? "numeric" : "state", points: pts.filter((_, i) => i % step === 0 || i === pts.length - 1), now: Date.now() };
+    })
+    // Who last changed a device from this app. A change the app did not make (made in Home Assistant or at the device) has no name.
+    .get("/api/devices/:id/last-change", ({ request, params, set }) => {
+      const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
+      const dev = svc.deviceFor(g.user, params.id);
+      if (!dev) return deny(set, 404, "not_found");
+      const row = one<{ name: string; at: number }>(db, "SELECT u.display_name AS name, d.last_used AS at FROM device_usage d JOIN users u ON u.id = d.user_id WHERE d.entity_id = ? AND u.household_id = ? ORDER BY d.last_used DESC LIMIT 1", params.id, g.user.householdId);
+      const changed = Date.parse(dev.entity.last_changed ?? dev.entity.last_updated ?? "") || null;
+      // Our own record counts only if it sits right beside the hub's last change; otherwise something else changed it since.
+      const ours = !!row && !!changed && Math.abs(row.at - changed) < 20_000;
+      return { at: changed, by: ours ? (g.user.role === "guest" ? "someone in the home" : row!.name) : null };
     })
     .get("/api/stream", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);

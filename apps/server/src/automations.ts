@@ -31,12 +31,16 @@ export type Condition =
   | { type: "mode"; mode: string }
   | { type: "days"; days: string[] };
 
+/** A starting point: when it runs, and which of the home's real devices it acts on. */
+type Recipe = { lights?: "turn_on" | "turn_off"; plugs?: "turn_off" };
+export type AutomationTemplate = { key: string; name: string; blurb: string; triggers: Trigger[]; conditions: Condition[]; recipe: Recipe };
+
 /** Starting points only. Nothing is configured, and nothing runs, until a person finishes and saves one. */
-export const AUTOMATION_TEMPLATES = [
-  { key: "bedtime_off", name: "Switch things off at bedtime", blurb: "At a set time every night, turn off the devices you choose.", triggers: [{ type: "time", at: "23:00" }], conditions: [], actions: [] },
-  { key: "sunset_on", name: "Lights on at sunset", blurb: "When it gets dark, turn on the lights you choose.", triggers: [{ type: "sun", event: "sunset" }], conditions: [], actions: [] },
-  { key: "away_off", name: "Switch things off when away", blurb: "When the house is set to Away, turn off the devices you choose.", triggers: [{ type: "mode", mode: "away" }], conditions: [], actions: [] },
-] as const satisfies readonly { key: string; name: string; blurb: string; triggers: readonly Trigger[]; conditions: readonly Condition[]; actions: readonly Step[] }[];
+export const AUTOMATION_TEMPLATES: readonly AutomationTemplate[] = [
+  { key: "bedtime_off", name: "Switch things off at bedtime", blurb: "Every night at 23:00, turn off the lights and plugs.", triggers: [{ type: "time", at: "23:00" }], conditions: [], recipe: { lights: "turn_off", plugs: "turn_off" } },
+  { key: "sunset_on", name: "Lights on at sunset", blurb: "When it gets dark, turn on the lights.", triggers: [{ type: "sun", event: "sunset" }], conditions: [], recipe: { lights: "turn_on" } },
+  { key: "away_off", name: "Switch things off when away", blurb: "When the house is set to Away, turn off the lights and plugs.", triggers: [{ type: "mode", mode: "away" }], conditions: [], recipe: { lights: "turn_off", plugs: "turn_off" } },
+];
 
 const hhmm = (v: unknown): v is string => typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
 const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 1_000_000;
@@ -78,7 +82,7 @@ export function createAutomationService(db: Database, ha: HaApi, svc: DeviceServ
     : c.type === "sensor" ? `${nameOf(c.entityId)} ${range(c.entityId, c.above, c.below)}`
     : c.type === "time" ? `the time is between ${c.after} and ${c.before}`
     : c.type === "mode" ? `the household mode is ${cap(c.mode)}`
-    : `it is ${c.days.map((d) => DAY_NAME[d]).join(", ")}`;
+    : c.days.join() === "mon,tue,wed,thu,fri" ? "it is a weekday" : c.days.join() === "sat,sun" ? "it is a weekend day" : `it is ${c.days.map((d) => DAY_NAME[d]).join(", ")}`;
   const summarise = (t: Trigger[], c: Condition[], a: Step[]) =>
     `When ${t.map(triggerText).join(" or ")}${c.length ? `, and only if ${c.map(conditionText).join(" and ")}` : ""}: ${a.map((x, i) => (i ? rt.text(x).replace(/^./, (c) => c.toLowerCase()) : rt.text(x))).join(", then ")}`;
 
@@ -186,7 +190,12 @@ export function createAutomationService(db: Database, ha: HaApi, svc: DeviceServ
     };
   }
   const visible = (u: SessionUser) => rows(u.householdId).filter((r) => mine(u, r.id)).map(view);
-  return { compile, summarise, rows, mine, view, visible, entityOf, parsed };
+  /** The templates with real actions filled in from the devices this person may use, or a plain note on what is missing. */
+  const suggest = (u: SessionUser) => AUTOMATION_TEMPLATES.map(({ recipe, ...t }) => {
+    const r = rt.resolve(u, { ...recipe, mode: undefined });
+    return { ...t, actions: r.steps, complete: r.complete, missing: r.missing, summary: summarise(t.triggers, t.conditions, r.steps), configured: false };
+  });
+  return { compile, summarise, suggest, rows, mine, view, visible, entityOf, parsed };
 }
 export type AutomationService = ReturnType<typeof createAutomationService>;
 
@@ -227,7 +236,7 @@ export function automationRoutes(db: Database, ha: HaApi, secure: boolean, svc: 
   return new Elysia({ name: "automations" })
     .get("/api/automations", ({ request, set }) => {
       const g = authorize(db, request, secure, ["automation.manage"]); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      return { automations: svc.visible(g.user), suggested: AUTOMATION_TEMPLATES.map((t) => ({ ...t, configured: false })) };
+      return { automations: svc.visible(g.user), suggested: svc.suggest(g.user) };
     })
     .get("/api/automations/:id", ({ request, params, set }) => {
       const g = authorize(db, request, secure, ["automation.manage"]); if (!("user" in g)) return deny(set, g.status, g.body.error);
@@ -272,6 +281,17 @@ export function automationRoutes(db: Database, ha: HaApi, secure: boolean, svc: 
       if ("error" in r) return deny(set, r.status, r.error);
       log(g.user, enabled ? "automation.enable" : "automation.disable", row.id);
       return { ok: true, enabled };
+    })
+    // "Try it now": run the steps once, ignoring the trigger and conditions. Home Assistant does the work.
+    .post("/api/automations/:id/run", async ({ request, params, set }) => {
+      const g = authorize(db, request, secure, ["automation.manage"]); if (!("user" in g)) return deny(set, g.status, g.body.error);
+      const row = svc.mine(g.user, params.id); if (!row) return deny(set, 404, "not_found");
+      if (ha.isStale()) return deny(set, 503, "ha_unavailable");
+      const e = svc.entityOf(row); if (!e) return deny(set, 409, "ha_rejected");
+      const r = await ha.callService("automation", "trigger", { skip_condition: true }, e.entity_id);
+      if (!r.ok) return deny(set, r.error === "ha_unavailable" ? 503 : 409, r.error);
+      log(g.user, "automation.run", row.id);
+      return { ok: true, started: true };
     })
     .post("/api/automations/:id/duplicate", async ({ request, params, set }) => {
       const g = authorize(db, request, secure, ["automation.manage"]); if (!("user" in g)) return deny(set, g.status, g.body.error);

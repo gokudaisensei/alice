@@ -5,6 +5,7 @@
 	import { tileClass } from '#lib/tiles.js';
 	import { Input } from '#lib/components/ui/input';
 	import Page from '#lib/components/app/Page.svelte';
+	import SkeletonList from '#lib/components/app/SkeletonList.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
 	import { Button } from '#lib/components/ui/button';
 	import { Search } from '@lucide/svelte';
@@ -46,7 +47,9 @@
 	{#if all.length}
 		<div class="tile-grid">{#each all.slice(0, shown) as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div>
 		{#if all.length > shown}<div class="flex justify-center"><Button variant="secondary" onclick={() => (shown += 36)}>Show {Math.min(36, all.length - shown)} more <span class="text-muted-foreground">({all.length - shown} left)</span></Button></div>{/if}
-	{:else if home.loaded}
+	{:else if !home.loaded}
+		<SkeletonList kind="tiles" count={8} />
+	{:else}
 		<Empty title={q ? 'No devices match' : 'No devices yet'} description={q ? 'Try a different name, room or type.' : 'Nothing has been shared with you yet. Ask the person who manages your home.'} />
 	{/if}
 </Page>

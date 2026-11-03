@@ -15,7 +15,7 @@ export function tabs(): NavItem[] {
 
 export function manageNav(can: (p: string) => boolean): NavItem[] {
 	return [
-		{ href: '/admin/rooms', label: 'Rooms & devices', icon: Wrench, show: can('admin.access') && can('rooms.manage') },
+		{ href: '/admin/rooms', label: 'Edit rooms', icon: Wrench, show: can('admin.access') && can('rooms.manage') },
 		{ href: '/admin/users', label: 'People', icon: Users, show: can('admin.access') && can('users.manage') },
 		{ href: '/admin/voice', label: 'Voice control', icon: Mic, show: can('admin.access') },
 		{ href: '/admin/system', label: 'System', icon: Activity, show: can('admin.access'), keywords: 'health backups updates support' }
@@ -26,12 +26,12 @@ export function manageNav(can: (p: string) => boolean): NavItem[] {
 export function allPages(can: (p: string) => boolean, hasEnergy: boolean): NavItem[] {
 	return [
 		...tabs(),
-		{ href: '/devices', label: 'All devices', icon: Plug },
+		{ href: '/devices', label: 'Devices', icon: Plug },
 		{ href: '/routines?tab=scenes', label: 'Scenes', icon: Sparkles },
 		{ href: '/routines?tab=automations', label: 'Automations', icon: Workflow, show: can('automation.manage') },
 		{ href: '/activity?tab=energy', label: 'Energy', icon: Zap, show: hasEnergy },
-		{ href: '/settings', label: 'Appearance and home screen', icon: Settings },
-		{ href: '/settings/notifications', label: 'Notification settings', icon: Bell },
+		{ href: '/settings', label: 'Appearance', icon: Settings },
+		{ href: '/settings/notifications', label: 'Notifications', icon: Bell },
 		...manageNav(can)
 	].filter((n) => n.show !== false);
 }

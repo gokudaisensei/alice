@@ -15,7 +15,7 @@ test("controls follow the device's real capabilities, not its category", () => {
   expect(describe(ent("media_player.n", "on", { supported_features: 4 })).controls).toEqual([{ type: "media", playback: false, volume: true, power: false }]);
   const sensor = describe(ent("sensor.t", "21", { unit_of_measurement: "°C" }));
   expect(sensor.controls).toEqual([]);
-  expect(sensor.reading).toEqual({ value: "21", unit: "°C", kind: "measurement" });
+  expect(sensor.reading).toEqual({ value: "21", unit: "°C", kind: "measurement", cls: null });
   expect(describe(ent("sensor.p", "5", { device_class: "power", unit_of_measurement: "W" })).category).toBe("energy");
   expect(describe(ent("cover.c", "open")).ordinary).toBe(false); // covers/blinds are out of v1
   expect(describe(ent("climate.x", "off", {})).ordinary).toBe(false); // no usable thermostat controls
@@ -197,7 +197,7 @@ test("rooms and device organisation are admin-only and household-scoped", async 
   expect((await t.call("PUT", "/api/admin/devices/nope.nope", { cookie: admin, body: { name: "x" } })).status).toBe(404);
   await t.call("PUT", "/api/admin/devices/light.hall", { cookie: admin, body: { hidden: true } });
   expect(await ids(member.cookie)).not.toContain("light.hall");
-  expect((await t.call("GET", "/api/rooms", { cookie: member.cookie })).json.rooms).toEqual([{ id: room.id, name: "Kitchen" }]);
+  expect((await t.call("GET", "/api/rooms", { cookie: member.cookie })).json.rooms).toEqual([{ id: room.id, name: "Kitchen", color: null, icon: null }]);
 });
 
 test("personal preferences and favourites are per user and validated", async () => {
@@ -361,4 +361,47 @@ test("devices move in and out of a room in bulk, and a group can be edited", asy
   expect((await call("GET", "/api/admin/groups")).json.groups).toEqual([{ id: gid, name: "All lamps", entityIds: ["light.desk", "light.hall"] }]);
   expect((await call("PUT", `/api/admin/groups/${gid}`, { entityIds: [] })).status).toBe(400);
   expect((await call("PUT", `/api/admin/groups/${gid}`, { name: "x" }, m.cookie)).status).toBe(403);
+});
+
+test("parts of a device (config entities) are not listed as devices, and each device says when it last changed", async () => {
+  const { t, admin, devices } = await home();
+  t.ha.secondary.add("light.kitchen");
+  const list = (await devices(admin)).devices as Body[];
+  expect(list.find((d) => d.id === "light.kitchen")).toBeUndefined();
+  const other = list.find((d) => d.id !== "light.kitchen")!;
+  expect(other).toHaveProperty("changedAt");
+  expect(other).toHaveProperty("icon", null);
+});
+
+test("a person can choose a device's icon from the known set only", async () => {
+  const { t, admin, devices } = await home();
+  const put = (icon: unknown) => t.call("PUT", "/api/admin/devices/light.kitchen", { cookie: admin, body: { icon } });
+  expect((await put("coffee")).status).toBe(200);
+  expect(((await devices(admin)).devices as Body[]).find((d) => d.id === "light.kitchen")).toMatchObject({ icon: "coffee" });
+  expect((await put("<script>")).status).toBe(400);
+  expect((await put(null)).status).toBe(200);
+});
+
+test("a room can have a colour and an icon from the known sets, and keeps them when renamed", async () => {
+  const { t, admin } = await home();
+  const room = (await t.call("POST", "/api/admin/rooms", { cookie: admin, body: { name: "Study" } })).json as { id: string };
+  const patch = (body: Body) => t.call("PATCH", `/api/admin/rooms/${room.id}`, { cookie: admin, body });
+  expect((await patch({ color: "teal", icon: "desk" })).status).toBe(200);
+  expect((await patch({ name: "Office" })).status).toBe(200);
+  const list = (await t.call("GET", "/api/rooms", { cookie: admin })).json.rooms as Body[];
+  expect(list.find((r) => r.id === room.id)).toMatchObject({ name: "Office", color: "teal", icon: "desk" });
+  expect((await patch({ color: "#ff0000" })).status).toBe(400);
+  expect((await patch({ icon: "<b>" })).status).toBe(400);
+  expect((await patch({ color: null, icon: null })).status).toBe(200);
+});
+
+test("a device says who last changed it from the app, and nobody when the hub changed it", async () => {
+  const { t, admin, cmd } = await home();
+  await cmd(admin, "light.kitchen", "turn_off");
+  const e = t.ha.entities.get("light.kitchen")!;
+  t.ha.entities.set("light.kitchen", { ...e, last_changed: new Date().toISOString() });
+  const mine = (await t.call("GET", "/api/devices/light.kitchen/last-change", { cookie: admin })).json;
+  expect(typeof mine.by).toBe("string");
+  t.ha.entities.set("light.kitchen", { ...e, last_changed: new Date(Date.now() + 5 * 60_000).toISOString() });
+  expect((await t.call("GET", "/api/devices/light.kitchen/last-change", { cookie: admin })).json.by).toBeNull();
 });

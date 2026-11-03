@@ -3,11 +3,12 @@
 	import { dur } from '#lib/motion.js';
 	import { onMount } from 'svelte';
 	import { api } from '#lib/api.js';
+	import { clock } from '#lib/fmt.js';
 	import type { Support } from '#lib/dto.js';
 	let s = $state<Support | null>(null);
 	async function load() { const r = await api<{ active: Support | null }>('GET', '/api/support'); if (r.ok) s = r.data.active; }
 	onMount(() => { load(); const t = setInterval(load, 60_000); window.addEventListener('support-changed', load); return () => { clearInterval(t); window.removeEventListener('support-changed', load); }; });
-	const until = $derived(s ? new Date(s.expiresAt).toLocaleTimeString([], { timeStyle: 'short' }) : '');
+	const until = $derived(s ? clock(s.expiresAt) : '');
 </script>
 
 {#if s}

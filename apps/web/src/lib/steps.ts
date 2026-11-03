@@ -1,4 +1,5 @@
 import { capitalize } from './utils.js';
+import { plural } from './fmt.js';
 import type { Device } from './home.svelte.js';
 
 export type Step =
@@ -40,4 +41,55 @@ export function stepText(s: Step, nameOf: (id: string) => string, actions?: Acti
 	const unit = actions?.find((a) => a.action === s.action)?.input;
 	const v = s.value !== undefined && unit?.kind === 'number' ? ` to ${s.value}${unit.unit}` : s.value !== undefined ? ` to ${s.value}` : '';
 	return `${label}${v} — ${nameOf(s.entityId)}`;
+}
+
+/** "Kitchen, Desk and Hall", or "Kitchen, Desk, Hall and 2 more" when the list gets long. */
+export function joinNames(xs: string[], show = 3): string {
+	const n = xs.length;
+	if (n <= 1) return xs.join('');
+	if (n <= show + 1) return `${xs.slice(0, -1).join(', ')} and ${xs[n - 1]}`;
+	return `${xs.slice(0, show).join(', ')} and ${n - show} more`;
+}
+
+/** How an action reads in the middle of a sentence ("turn off", "set the brightness to 40% on"). */
+function verb(action: string, value: unknown, actions?: ActionOption[]): string {
+	const v = value;
+	switch (action) {
+		case 'turn_on': return 'turn on';
+		case 'turn_off': return 'turn off';
+		case 'lock': return 'lock';
+		case 'media_play': return 'play';
+		case 'media_pause': return 'pause';
+		case 'set_brightness': return `set the brightness to ${v}% on`;
+		case 'set_color_temp': return `set the warmth to ${v}K on`;
+		case 'set_speed': return `set the speed to ${v}% on`;
+		case 'set_temperature': return `set the temperature to ${v}° on`;
+		case 'set_hvac_mode': return `set the mode to ${v} on`;
+		case 'set_volume': return `set the volume to ${v}% on`;
+		default: return (actions?.find((a) => a.action === action)?.label ?? action.replace(/_/g, ' ')).toLowerCase();
+	}
+}
+
+/**
+ * Steps as one flowing sentence: "turn off Kitchen, Desk and Hall, set the house to Night, then wait 5 seconds".
+ * Neighbouring devices that get the same action are grouped so a long routine stays readable.
+ * Returns '' when there are no steps.
+ */
+export function stepsSentence(steps: Step[], nameOf: (id: string) => string, optsOf?: (id: string) => ActionOption[]): string {
+	const parts: string[] = [];
+	for (let i = 0; i < steps.length; i++) {
+		const s = steps[i]!;
+		if (s.type === 'device') {
+			const group = [s];
+			while (steps[i + 1]?.type === 'device') {
+				const n = steps[i + 1] as typeof s;
+				if (n.action !== s.action || n.value !== s.value) break;
+				group.push(n); i++;
+			}
+			parts.push(`${verb(s.action, s.value, optsOf?.(s.entityId))} ${joinNames(group.map((g) => nameOf(g.entityId)))}`);
+		} else if (s.type === 'scene') parts.push(`activate the scene “${nameOf(s.entityId)}”`);
+		else if (s.type === 'mode') parts.push(`set the house to ${capitalize(s.mode)}`);
+		else parts.push(`wait ${plural(s.seconds, 'second')}`);
+	}
+	return parts.length < 3 ? parts.join(', then ') : `${parts.slice(0, -1).join(', ')}, then ${parts[parts.length - 1]}`;
 }

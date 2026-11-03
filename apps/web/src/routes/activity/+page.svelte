@@ -15,7 +15,7 @@
 	let tab = $state(page.url.searchParams.get('tab') ?? 'alerts');
 	$effect(() => { if (guest && tab !== 'alerts') tab = 'alerts'; });
 	$effect(() => { const u = new URL(location.href); if (u.searchParams.get('tab') !== tab) { u.searchParams.set('tab', tab); replaceState(u, {}); } });
-	const sub = { alerts: 'Things that need your attention. Problems are only reported once they have lasted a few minutes.', energy: 'What your meters are reading, and how the last week looked.', insights: 'Plain observations about your home. Nothing changes unless you choose.' } as Record<string, string>;
+	const sub = { alerts: 'Things that need your attention.', energy: 'What your meters read now, and how the last week looked.', insights: 'Plain observations about your home. Nothing changes unless you choose.' } as Record<string, string>;
 	void home;
 </script>
 

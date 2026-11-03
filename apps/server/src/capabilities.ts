@@ -1,6 +1,13 @@
 import type { HaEntity } from "./ha";
 import { asObject, oneOf } from "./http";
 
+/** The icons a person can pick for a device. The web app draws each one. */
+export const DEVICE_ICONS = ["bulb", "lamp", "plug", "coffee", "kettle", "heater", "fan", "tv", "speaker", "lock", "door", "window", "garage", "camera", "thermometer", "water", "bolt", "motion", "smoke", "washer", "fridge", "oven", "bed", "sofa"] as const;
+
+/** How a room can look: colours and icons the household chooses from. The web app draws each one. */
+export const ROOM_COLORS = ["blue", "teal", "green", "amber", "orange", "red", "pink", "purple", "grey"] as const;
+export const ROOM_ICONS = ["sofa", "bed", "kitchen", "bath", "desk", "car", "tree", "door", "stairs", "tv", "baby", "dining"] as const;
+
 export type Category = "light" | "switch" | "fan" | "climate" | "sensor" | "lock" | "camera" | "media" | "energy";
 
 export type Control =
@@ -14,7 +21,8 @@ export type Control =
   | { type: "media"; playback: boolean; volume: boolean; power: boolean }
   | { type: "camera" };
 
-export type Reading = { value: string; unit: string | null; kind: "measurement" } | null;
+/** `cls` is the hub's device class (door, window, motion, temperature…), which says how to word an on/off reading. */
+export type Reading = { value: string; unit: string | null; kind: "measurement"; cls?: string | null } | null;
 
 export type Descriptor = {
   entityId: string; domain: string; category: Category; name: string;
@@ -75,7 +83,7 @@ export function describe(e: HaEntity): Descriptor {
       const unit = a.unit_of_measurement == null ? null : String(a.unit_of_measurement);
       // Plain readings only. Timestamps ("last backup"), dates and enum text states are the hub's own housekeeping, not things in a home.
       const housekeeping = domain === "sensor" && (["timestamp", "date", "enum", "duration"].includes(String(a.device_class)) || (!unit && !a.device_class && !Number.isFinite(Number(e.state)) && e.state !== "unavailable" && e.state !== "unknown"));
-      return { ...base, category: energy ? "energy" : "sensor", ordinary: !housekeeping, reading: { value: e.state, unit, kind: "measurement" } };
+      return { ...base, category: energy ? "energy" : "sensor", ordinary: !housekeeping, reading: { value: e.state, unit, kind: "measurement", cls: typeof a.device_class === "string" ? a.device_class : null } };
     }
     default:
       // covers, blinds, curtains (excluded from v1) and anything else

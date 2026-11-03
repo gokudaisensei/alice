@@ -3,10 +3,11 @@
 	import { dur } from '#lib/motion.js';
 	import { onMount } from 'svelte';
 	import { api } from '#lib/api.js';
+	import { clock } from '#lib/fmt.js';
 	let n = $state<{ version: string; emergency: boolean; reason: string; startsAt: string } | null>(null);
 	async function load() { const r = await api<{ notice: typeof n }>('GET', '/api/updates/notice'); if (r.ok) n = r.data.notice; }
 	onMount(() => { load(); const t = setInterval(load, 30_000); return () => clearInterval(t); });
-	const at = $derived(n ? new Date(n.startsAt).toLocaleTimeString([], { timeStyle: 'short' }) : '');
+	const at = $derived(n ? clock(Date.parse(n.startsAt)) : '');
 	const soon = $derived(n ? Date.parse(n.startsAt) > Date.now() : false);
 </script>
 

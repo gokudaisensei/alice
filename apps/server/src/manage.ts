@@ -2,12 +2,12 @@ import { Elysia } from "elysia";
 import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { audit, activity } from "./audit";
-import { describe } from "./capabilities";
+import { describe, DEVICE_ICONS, ROOM_COLORS, ROOM_ICONS } from "./capabilities";
 import type { DeviceMeta } from "./devices";
 import { authorize } from "./guard";
 import type { HaApi } from "./ha";
 import { friendlyName } from "./ha";
-import { asObject, cleanName, deny, text } from "./http";
+import { asObject, cleanName, deny, oneOf, text } from "./http";
 import { effectivePermissions, type Permission, type Role } from "./policy";
 import { all, exists, one, scalar } from "./sql";
 
@@ -51,12 +51,13 @@ export function manageRoutes(db: Database, ha: HaApi, secure: boolean) {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
       if (!entityOk(params.id)) return deny(set, 404, "not_found");
       const h = g.user.householdId, b = asObject(body);
-      const next = one<Pick<DeviceMeta, "name" | "room_id" | "hidden">>(db, "SELECT name, room_id, hidden FROM device_meta WHERE household_id = ? AND entity_id = ?", h, params.id) ?? { name: null, room_id: null, hidden: 0 };
+      const next = one<Pick<DeviceMeta, "name" | "room_id" | "hidden" | "icon">>(db, "SELECT name, room_id, hidden, icon FROM device_meta WHERE household_id = ? AND entity_id = ?", h, params.id) ?? { name: null, room_id: null, hidden: 0, icon: null };
       if ("name" in b) { next.name = b.name === null ? null : cleanName(b.name); if (b.name !== null && !next.name) return deny(set, 400, "invalid_input"); }
       if ("roomId" in b) { if (b.roomId !== null && !roomOk(h, b.roomId)) return deny(set, 400, "invalid_input"); next.room_id = b.roomId as string | null; }
       if ("hidden" in b) next.hidden = b.hidden ? 1 : 0;
-      db.query("INSERT INTO device_meta (household_id, entity_id, name, room_id, hidden) VALUES (?,?,?,?,?) ON CONFLICT(household_id, entity_id) DO UPDATE SET name=excluded.name, room_id=excluded.room_id, hidden=excluded.hidden")
-        .run(h, params.id, next.name, next.room_id, next.hidden);
+      if ("icon" in b) { if (b.icon !== null && !oneOf(DEVICE_ICONS, b.icon)) return deny(set, 400, "invalid_input"); next.icon = b.icon as string | null; }
+      db.query("INSERT INTO device_meta (household_id, entity_id, name, room_id, hidden, icon) VALUES (?,?,?,?,?,?) ON CONFLICT(household_id, entity_id) DO UPDATE SET name=excluded.name, room_id=excluded.room_id, hidden=excluded.hidden, icon=excluded.icon")
+        .run(h, params.id, next.name, next.room_id, next.hidden, next.icon);
       audit(db, { householdId: h, actorType: "user", actorId: g.user.id, action: "device.organise", target: params.id, outcome: "success" });
       return { ok: true };
     })
@@ -71,9 +72,15 @@ export function manageRoutes(db: Database, ha: HaApi, secure: boolean) {
     })
     .patch("/api/admin/rooms/:id", ({ request, params, body, set }) => {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      const n = cleanName(asObject(body).name); if (!n) return deny(set, 400, "invalid_input");
-      const r = db.query("UPDATE rooms SET name = ? WHERE id = ? AND household_id = ?").run(n, params.id, g.user.householdId);
-      return r.changes ? { ok: true } : deny(set, 404, "not_found");
+      const b = asObject(body), h = g.user.householdId;
+      const cur = one<{ name: string; color: string | null; icon: string | null }>(db, "SELECT name, color, icon FROM rooms WHERE id = ? AND household_id = ?", params.id, h);
+      if (!cur) return deny(set, 404, "not_found");
+      let name = cur.name, color = cur.color, icon = cur.icon;
+      if ("name" in b) { const n = cleanName(b.name); if (!n) return deny(set, 400, "invalid_input"); name = n; }
+      if ("color" in b) { if (b.color !== null && !oneOf(ROOM_COLORS, b.color)) return deny(set, 400, "invalid_input"); color = b.color as string | null; }
+      if ("icon" in b) { if (b.icon !== null && !oneOf(ROOM_ICONS, b.icon)) return deny(set, 400, "invalid_input"); icon = b.icon as string | null; }
+      db.query("UPDATE rooms SET name = ?, color = ?, icon = ? WHERE id = ? AND household_id = ?").run(name, color, icon, params.id, h);
+      return { ok: true };
     })
     // Put devices into a room or take them out, in one go.
     .put("/api/admin/rooms/:id/devices", ({ request, params, body, set }) => {

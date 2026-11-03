@@ -1,7 +1,7 @@
 export type HaConn = "connecting" | "connected" | "auth_failed" | "disconnected";
 /** Whatever the device reports. Read it through {@link attrString}, {@link attrNumber}, or narrow it yourself. */
 export type HaAttributes = Record<string, unknown>;
-export type HaEntity = { entity_id: string; state: string; attributes: HaAttributes; last_updated?: string };
+export type HaEntity = { entity_id: string; state: string; attributes: HaAttributes; last_updated?: string; last_changed?: string };
 
 /** The entity's `friendly_name`, falling back to `fallback` (its id by default). */
 export const friendlyName = (e: HaEntity | undefined, fallback = e?.entity_id ?? ""): string => String(e?.attributes.friendly_name ?? fallback);
@@ -22,6 +22,8 @@ export type HaEvent = { type: "entity"; entityId: string } | { type: "conn" };
 export type CallResult = { ok: true } | { ok: false; error: string };
 export interface HaApi extends HaHealth {
   entities: ReadonlyMap<string, HaEntity>;
+  /** Entities the hub marks as configuration, diagnostics, hidden or disabled: parts of a device, not things to show as devices. */
+  secondary?: ReadonlySet<string>;
   isStale(): boolean;
   callService(domain: string, service: string, data?: Record<string, unknown>, entityId?: string): Promise<CallResult>;
   /** Resolves true if HA reports a new state for the entity within `ms` (i.e. the device actually responded). */
@@ -44,6 +46,7 @@ type HistoryRow = { state: unknown; last_changed?: string; last_updated?: string
 export class HaClient implements HaApi {
   conn: HaConn = "disconnected";
   entities = new Map<string, HaEntity>();
+  secondary = new Set<string>();
   lastMessageAt = 0;
   private sock: WebSocket | null = null;
   private nextId = 1;
@@ -104,6 +107,13 @@ export class HaClient implements HaApi {
       await this.send({ type: "subscribe_events", event_type: "state_changed" });
       const r = await this.send({ type: "get_states" });
       if (r.success) { this.entities = new Map((r.result as HaEntity[]).map((e) => [e.entity_id, e])); this.conn = "connected"; this.emit({ type: "conn" }); }
+      // Which entities are only parts of a device (a bulb's "do not disturb" switch). Without the registry every entity is shown, as before.
+      const reg = await this.send({ type: "config/entity_registry/list" });
+      if (reg.success && Array.isArray(reg.result)) {
+        type Row = { entity_id?: string; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null };
+        this.secondary = new Set((reg.result as Row[]).filter((x) => x.entity_id && (x.entity_category || x.hidden_by || x.disabled_by)).map((x) => x.entity_id as string));
+        this.emit({ type: "conn" });
+      }
       return;
     }
     if (m.type === "event" && m.event?.event_type === "state_changed") {

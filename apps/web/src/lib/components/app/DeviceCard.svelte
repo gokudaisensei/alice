@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { home, type Control, type Device } from '#lib/home.svelte.js';
-	import type { IconComponent } from '#lib/icons.js';
-	import { session } from '#lib/session.svelte.js';
+		import { session } from '#lib/session.svelte.js';
 	import PowerLimit from '#lib/components/app/PowerLimit.svelte';
 	import { Switch } from '#lib/components/ui/switch';
 	import { Slider } from '#lib/components/ui/slider';
@@ -21,26 +20,44 @@
 	import { scrubbed, crossed } from '#lib/scrub.js';
 	import HoldButton from '#lib/components/app/HoldButton.svelte';
 	import TileMenu from '#lib/components/app/TileMenu.svelte';
-	import { Lightbulb, Plug, Fan, Thermometer, Lock, LockOpen, Camera, Tv, Gauge, Zap, Star, Workflow, Minus, Plus, Play, Pause, Check } from '@lucide/svelte';
+	import { iconFor } from '#lib/icons.js';
+	import { sheet } from '#lib/sheet.svelte.js';
+	import { api } from '#lib/api.js';
+	import { onMount } from 'svelte';
+	import { ago, measure, parts, sensorWord } from '#lib/fmt.js';
+	import DeviceEdit from '#lib/components/app/DeviceEdit.svelte';
+	import { Star, Workflow, Minus, Plus, Play, Pause, Check, Pencil } from '@lucide/svelte';
 
 	let { device, compact = false }: { device: Device; compact?: boolean } = $props();
 
-	const icons: Record<string, IconComponent> = { light: Lightbulb, switch: Plug, fan: Fan, climate: Thermometer, lock: Lock, camera: Camera, media: Tv, sensor: Gauge, energy: Zap };
-	const Icon = $derived(device.category === 'lock' && device.state === 'unlocked' ? LockOpen : (icons[device.category] ?? Gauge));
+	const Icon = $derived(iconFor(device));
 	/** The device's control of type `t`, narrowed to that kind of control. */
 	const has = <const T extends Control['type']>(t: T) => device.controls.find((c): c is Extract<Control, { type: T }> => c.type === t);
 	const fanSpeed = $derived(has('fan_speed')), thermostat = $derived(has('thermostat')), colorTemp = $derived(has('color_temp')), media = $derived(has('media'));
 	const off = $derived(!device.available || !home.online || !!home.busy[device.id]);
-	let more = $state(false), detail = $state(false);
+	let more = $state(false), editing = $state(false);
+	/** Said once, the first time someone switches on a dimmable light: the slide gesture is otherwise easy to miss. */
+	function slideHint() { try { if (localStorage.getItem('hint-slide') === '1') return; localStorage.setItem('hint-slide', '1'); } catch { return; } setTimeout(() => home.say('info', 'Tip: press and hold the tile, then slide sideways to dim it.'), 900); }
+	// The details sheet is a history entry, so Back closes it instead of leaving the page.
+	const sheetState = sheet(() => `device:${device.id}`);
+	const detail = $derived(sheetState.open);
+	// Who last changed it: a name when it was done from this app, otherwise a plain note that it happened elsewhere.
+	let changedBy = $state<string | null | undefined>(undefined);
+	$effect(() => { if (detail) { changedBy = undefined; api<{ by: string | null }>('GET', `/api/devices/${encodeURIComponent(device.id)}/last-change`).then((r) => { if (r.ok) changedBy = r.data.by; }); } });
+	// Camera pictures are fetched again every minute, and never served from an old copy.
+	let stamp = $state(Math.floor(Date.now() / 60_000));
+	onMount(() => { if (device.category !== 'camera') return; const t = setInterval(() => (stamp = Math.floor(Date.now() / 60_000)), 60_000); return () => clearInterval(t); });
+	const snap = $derived(`/api/devices/${encodeURIComponent(device.id)}/snapshot?t=${stamp}`);
 	const phoneTile = $derived(viewport.phone && !compact);
 	const wide = $derived(isWide(device));
 	const dimmable = $derived(device.available && device.state === 'on' && !!has('brightness'));
 
 	// Ember means on; signal means a door is open to the world. Everything else stays neutral.
 	const tone = $derived<'on' | 'signal' | 'none'>(!device.available ? 'none' : device.category === 'lock' && device.state === 'unlocked' ? 'signal' : ['light', 'switch', 'fan'].includes(device.category) && device.state === 'on' ? 'on' : device.category === 'media' && device.state === 'playing' ? 'on' : 'none');
-	const surface = { on: 'border-transparent bg-on-soft text-on-foreground', signal: 'border-transparent bg-signal-soft text-signal-foreground', none: 'bg-card' };
-	const chip = { on: 'bg-on text-on-foreground shadow-[0_0_0_4px_color-mix(in_oklab,var(--on)_22%,transparent)]', signal: 'bg-signal text-white shadow-[0_0_0_4px_color-mix(in_oklab,var(--signal)_20%,transparent)]', none: 'bg-secondary text-muted-foreground' };
-	const sub = { on: 'text-on-foreground/70', signal: 'text-signal-foreground/80', none: 'text-muted-foreground' };
+	// On is a faint warm wash with a small filled icon; an open door is the only thing allowed to shout.
+	const surface = { on: 'border-on/25 bg-[color-mix(in_oklab,var(--on)_9%,var(--card))]', signal: 'border-transparent bg-signal-soft text-signal-foreground', none: 'bg-card' };
+	const chip = { on: 'bg-on text-on-foreground', signal: 'bg-signal text-white', none: 'bg-secondary text-muted-foreground' };
+	const sub = { on: 'text-muted-foreground', signal: 'text-signal-foreground/80', none: 'text-muted-foreground' };
 	const sliderTone = $derived(tone === 'on' ? '[&_[data-slot=slider-track]]:bg-on/25 [&_[data-slot=slider-range]]:bg-on' : '[&_[data-slot=slider-range]]:bg-primary');
 
 	/** Pressing the icon does the obvious thing: switch it, lock it, play it. Pressing anywhere else opens the details. */
@@ -53,48 +70,42 @@
 		else if (media?.power) home.command(device.id, device.state === 'off' ? 'turn_on' : 'turn_off');
 		else if (media?.playback) home.command(device.id, device.state === 'playing' ? 'media_pause' : 'media_play');
 	}
-	const toggleLabel = $derived(has('lock') ? (device.state === 'locked' ? `Unlock ${device.name}` : `Lock ${device.name}`) : has('power') ? `Turn ${device.name} ${device.state === 'on' ? 'off' : 'on'}` : `Play or pause ${device.name}`);
 
 	// The one number worth seeing at a glance, shown large on the right.
 	const numeric = (v: unknown) => v !== null && v !== '' && Number.isFinite(Number(v));
 	const metric = $derived.by(() => {
 		if (!device.available) return null;
-		const a = device.attrs;
-		if (device.category === 'light' && device.state === 'on' && numeric(a.brightnessPct)) return { v: String(a.brightnessPct), u: '%' };
-		if (device.category === 'fan' && device.state === 'on' && numeric(a.speedPct)) return { v: String(a.speedPct), u: '%' };
-		if ((device.category === 'sensor' || device.category === 'energy') && device.reading && numeric(device.reading.value)) return { v: device.reading.value, u: device.reading.unit ?? '' };
-		if (device.category === 'climate' && device.reading && numeric(device.reading.value)) return { v: device.reading.value, u: '°' };
+		if ((device.category === 'sensor' || device.category === 'energy') && device.reading && numeric(device.reading.value)) return parts(device.reading.value, device.reading.unit);
+		if (device.category === 'climate' && device.reading && numeric(device.reading.value)) return parts(device.reading.value, device.reading.unit ?? '°C', { short: true });
 		return null;
 	});
 	const plain = (s: string) => (['unknown', 'unavailable'].includes(s) ? 'No reading' : s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()));
-	const short = $derived.by(() => {
+	const since = $derived(device.changedAt ? ago(device.changedAt) : '');
+	/** What the tile or sheet says about the device: confirmed state first, a pending command in plain words, a failure never as a state. */
+	const status = $derived.by(() => {
 		if (!home.online) return 'Paused';
 		if (device.reason === 'device_offline') return 'Offline';
 		if (device.reason === 'home_assistant_unavailable') return 'Hub unreachable';
-		const a = device.attrs;
+		const a = device.attrs, on = device.state === 'on';
+		if (home.busy[device.id]) return has('lock') ? (device.state === 'locked' ? 'Unlocking…' : 'Locking…') : has('power') ? (on ? 'Turning off…' : 'Turning on…') : 'Working…';
 		switch (device.category) {
-			case 'light': case 'fan': case 'switch': return device.state === 'on' ? 'On' : 'Off';
-			case 'lock': return device.state === 'locked' ? 'Locked' : device.state === 'unlocked' ? 'Unlocked' : device.state;
-			case 'media': return device.state === 'off' ? 'Off' : (a.title ?? device.state);
-			case 'climate': return `${plain(device.state)}${numeric(a.target) ? ` · set ${a.target}°` : ''}`;
-			case 'sensor': case 'energy': return !device.reading || ['unknown', 'unavailable', ''].includes(device.reading.value) ? 'No reading' : numeric(device.reading.value) ? '' : plain(device.reading.value);
-			default: return '';
+			case 'light': return on ? (numeric(a.brightnessPct) ? `On · ${a.brightnessPct}%` : 'On') : 'Off';
+			case 'fan': return on ? (numeric(a.speedPct) ? `On · ${a.speedPct}%` : 'On') : 'Off';
+			case 'switch': return on ? 'On' : device.state === 'off' ? 'Off' : plain(device.state);
+			case 'climate': return `${device.reading && numeric(device.reading.value) ? measure(device.reading.value, device.reading.unit ?? '°C', { short: true }) : '—'}${numeric(a.target) ? ` → ${a.target}°` : ''} · ${plain(device.state)}`;
+			case 'lock': return `${device.state === 'locked' ? 'Locked' : device.state === 'unlocked' ? 'Unlocked' : plain(device.state)}${since ? ` · ${since}` : ''}`;
+			case 'media': return device.state === 'off' ? 'Off' : (a.title ?? plain(device.state));
+			case 'sensor': case 'energy': {
+				if (!device.reading || ['unknown', 'unavailable', ''].includes(device.reading.value)) return 'No reading';
+				if (numeric(device.reading.value)) return measure(device.reading.value, device.reading.unit);
+				const w = sensorWord(device);
+				return w ? `${w}${since ? ` · ${since}` : ''}` : plain(device.reading.value);
+			}
+			default: return plain(device.state);
 		}
 	});
-	const status = $derived.by(() => {
-		if (device.reason === 'device_offline') return 'Offline';
-		if (device.reason === 'home_assistant_unavailable') return 'Hub unreachable';
-		const a = device.attrs;
-		switch (device.category) {
-			case 'light': return device.state === 'on' ? (a.brightnessPct != null ? `On · ${a.brightnessPct}%` : 'On') : 'Off';
-			case 'fan': return device.state === 'on' ? (a.speedPct != null ? `On · ${a.speedPct}%` : 'On') : 'Off';
-			case 'climate': return `${device.reading && numeric(device.reading.value) ? device.reading.value + '°' : '—'}${numeric(a.target) ? ` → ${a.target}°` : ''} · ${plain(device.state)}`;
-			case 'lock': return device.state === 'locked' ? 'Locked' : device.state === 'unlocked' ? 'Unlocked' : device.state;
-			case 'media': return device.state === 'off' ? 'Off' : (a.title ?? device.state);
-			case 'sensor': case 'energy': return device.reading && numeric(device.reading.value) ? `${device.reading.value}${device.reading.unit ? ' ' + device.reading.unit : ''}` : plain(device.reading?.value ?? device.state);
-			default: return device.state === 'on' ? 'On' : device.state === 'off' ? 'Off' : device.state;
-		}
-	});
+	/** On a small tile the number sits top right, so the line below drops it. */
+	const short = $derived(metric && ['sensor', 'energy', 'climate'].includes(device.category) && device.available && home.online && !device.reason ? (device.category === 'climate' ? (numeric(device.attrs.target) ? `Set to ${device.attrs.target}° · ${plain(device.state)}` : plain(device.state)) : since) : status);
 	const hasSecondary = $derived(!!(has('color_temp') || has('color') || has('thermostat') || has('media')));
 
 	// Press and hold lifts the tile. Slide sideways to set a level (brightness, fan speed, temperature, volume); let go without
@@ -147,9 +158,9 @@
 	function openDetail() {
 		const doc = document as unknown as { startViewTransition?: (cb: () => Promise<void>) => { finished: Promise<unknown> } };
 		const chipEl = tileEl?.querySelector<HTMLElement>('[data-chip]');
-		if (!doc.startViewTransition || reduced() || !chipEl) { detail = true; return; }
+		if (!doc.startViewTransition || reduced() || !chipEl) { sheetState.open = true; return; }
 		chipEl.style.viewTransitionName = 'dev-chip';
-		const t = doc.startViewTransition(async () => { chipEl.style.viewTransitionName = ''; detail = true; await tick(); });
+		const t = doc.startViewTransition(async () => { chipEl.style.viewTransitionName = ''; sheetState.open = true; await tick(); });
 		void t.finished.catch(() => {}).finally(() => { chipEl.style.viewTransitionName = ''; });
 	}
 	function tap() {
@@ -189,7 +200,7 @@
 				</div>
 			{/if}
 			{#if has('camera')}
-				<img src="/api/devices/{encodeURIComponent(device.id)}/snapshot" alt="Latest picture from {device.name}" class="aspect-video max-h-56 w-full rounded-xl bg-muted object-cover" loading="lazy" />
+				<img src={snap} alt="Latest picture from {device.name}" class="aspect-video max-h-56 w-full rounded-xl bg-muted object-cover" loading="lazy" />
 			{/if}
 			{#if hasSecondary && ((device.state === 'on' && (has('color_temp') || has('color'))) || has('thermostat'))}
 				<button type="button" class="text-sm font-medium text-primary underline-offset-4 hover:underline {tone === 'on' ? 'text-on-foreground' : ''}" onclick={() => (more = !more)} aria-expanded={more}>{more ? 'Fewer settings' : 'More settings'}</button>
@@ -202,7 +213,7 @@
 							</label>
 						{/if}
 						{#if has('color') && device.state === 'on'}
-							<label class="block space-y-1.5 text-sm">Color
+							<label class="block space-y-1.5 text-sm">Colour
 								<Slider type="single" class={sliderTone} value={device.attrs.hs?.[0] ?? 0} min={0} max={360} step={1} disabled={off} aria-label="{device.name} hue" onValueCommit={(v) => home.command(device.id, 'set_color', { h: v, s: device.attrs.hs?.[1] ?? 100 })} />
 							</label>
 						{/if}
@@ -221,13 +232,13 @@
 	{#if session.can('automation.manage') && !compact}
 		<Button variant="ghost" size="icon-sm" class="text-current opacity-55 hover:opacity-100" href="/automations/new?device={encodeURIComponent(device.id)}" aria-label="Create an automation for {device.name}"><Workflow class="size-4" /></Button>
 	{/if}
-	<Button variant="ghost" size="icon-sm" class="text-current opacity-55 hover:opacity-100" aria-label={home.isFavorite(device.id) ? `Remove ${device.name} from favorites` : `Add ${device.name} to favorites`} aria-pressed={home.isFavorite(device.id)} onclick={() => { haptics.tap(); home.toggleFavorite(device.id); }}>
+	<Button variant="ghost" size="icon-sm" class="text-current opacity-55 hover:opacity-100" aria-label={home.isFavorite(device.id) ? `Remove ${device.name} from favourites` : `Add ${device.name} to favourites`} aria-pressed={home.isFavorite(device.id)} onclick={() => { haptics.tap(); home.toggleFavorite(device.id); }}>
 		<Star class="size-4 {home.isFavorite(device.id) ? 'fill-current' : ''}" />
 	</Button>
 {/snippet}
 {#snippet control()}
 	{#if has('power')}
-		<Switch checked={device.state === 'on'} disabled={off} aria-label="{device.name} power" onCheckedChange={(v) => { haptics.tap(); home.command(device.id, v ? 'turn_on' : 'turn_off'); }} />
+		<Switch checked={device.state === 'on'} disabled={off} aria-label="{device.name} power" onCheckedChange={(v) => { haptics.tap(); home.command(device.id, v ? 'turn_on' : 'turn_off'); if (v && has('brightness')) slideHint(); }} />
 	{:else if has('lock') && device.state === 'locked'}
 		<HoldButton onhold={() => home.command(device.id, 'unlock')} hint="Hold to unlock {device.name}" disabled={off} class="inline-flex h-8 items-center rounded-lg bg-secondary px-3 text-sm font-medium text-secondary-foreground disabled:opacity-50">Hold to unlock</HoldButton>
 	{:else if has('lock')}
@@ -237,10 +248,17 @@
 {#snippet icn(size: string)}
 	{#if toggleable && has('lock') && device.state === 'locked'}
 		<HoldButton data-chip ring onhold={() => home.command(device.id, 'unlock')} hint="Hold to unlock {device.name}" disabled={off} aria-label="Hold to unlock {device.name}" class="pointer-events-auto z-20 flex {size} shrink-0 items-center justify-center rounded-full transition-colors duration-200 disabled:opacity-60 {chip[tone]}"><Icon class="size-[46%]" aria-hidden="true" /></HoldButton>
-	{:else if toggleable}
-		<button type="button" data-chip onclick={toggle} disabled={off} aria-label={toggleLabel} aria-pressed={tone !== 'none'} class="pointer-events-auto relative z-20 flex {size} shrink-0 items-center justify-center rounded-full transition-[background-color,box-shadow,transform] duration-200 active:scale-90 disabled:opacity-60 {chip[tone]}">{#key tone}<span class="flex size-full items-center justify-center" in:scale={{ start: 0.7, duration: dur(220), easing: backOut }}><Icon class="size-[46%]" aria-hidden="true" /></span>{/key}</button>
 	{:else}
-		<span data-chip class="flex {size} shrink-0 items-center justify-center rounded-full transition-colors duration-300 {chip[tone]}"><Icon class="size-[46%]" aria-hidden="true" /></span>
+		<span data-chip class="flex {size} shrink-0 items-center justify-center rounded-full transition-colors duration-300 {chip[tone]}">{#key tone}<span class="flex size-full items-center justify-center" in:scale={{ start: 0.7, duration: dur(220), easing: backOut }}><Icon class="size-[46%]" aria-hidden="true" /></span>{/key}</span>
+	{/if}
+{/snippet}
+{#snippet tileSwitch()}
+	{#if selection.active || !device.available}
+		<!-- nothing to switch while choosing several, or when the device can't be reached -->
+	{:else if has('power')}
+		<Switch class="pointer-events-auto relative z-20" checked={device.state === 'on'} disabled={off} aria-label="{device.name}: {device.state === 'on' ? 'on' : 'off'}" onCheckedChange={(v) => { haptics.tap(); home.command(device.id, v ? 'turn_on' : 'turn_off'); if (v && has('brightness')) slideHint(); }} />
+	{:else if has('lock') && device.state !== 'locked'}
+		<Button class="pointer-events-auto relative z-20" size="sm" variant="secondary" disabled={off} onclick={toggle}>Lock</Button>
 	{/if}
 {/snippet}
 {#snippet label()}
@@ -250,13 +268,22 @@
 {#snippet drawerBody()}
 	<Drawer.Header class="px-0 pb-1"><Drawer.Title class="flex items-center gap-3 text-left"><span class="flex size-10 shrink-0 items-center justify-center rounded-full {chip[tone]}" style="view-transition-name: dev-chip"><Icon class="size-5" aria-hidden="true" /></span><span class="min-w-0"><span class="block truncate text-lg font-semibold tracking-[-0.02em]">{device.name}</span><span class="block text-sm font-normal text-muted-foreground">{status}</span></span></Drawer.Title><Drawer.Description class="sr-only">Controls for {device.name}</Drawer.Description></Drawer.Header>
 	<div class="space-y-5 pt-2">
+		{#if device.available && (has('power') || (has('lock') && device.state !== 'locked'))}
+			<div class="flex items-center justify-between rounded-2xl bg-secondary/60 px-4 py-3">
+				<span class="text-[0.9375rem] font-medium">{has('lock') ? 'Lock the door' : device.state === 'on' ? 'On' : 'Off'}</span>
+				{@render control()}
+			</div>
+		{/if}
 		{#if device.available}<div class="space-y-3.5">{@render controls()}</div>{:else}<p class="text-sm text-muted-foreground">{device.reason === 'device_offline' ? 'This device is offline. Check its power and Wi-Fi.' : 'The home hub can’t be reached, so it can’t be controlled right now.'}</p>{/if}
 		{#if detail}<DeviceHistory id={device.id} />{/if}
+		{#if since && device.available}<p class="text-sm text-muted-foreground">Last changed {since}{#if changedBy}, by {changedBy}{:else if changedBy === null}, in Home Assistant or at the device{/if}.</p>{/if}
 		{#if device.category === 'energy' && ['W', 'kW'].includes(device.reading?.unit ?? '') && session.can('automation.manage')}<PowerLimit {device} />{/if}
 		<div class="flex flex-wrap gap-2 border-t pt-4">
-			<Button variant="secondary" aria-pressed={home.isFavorite(device.id)} onclick={() => { haptics.tap(); home.toggleFavorite(device.id); }}><Star class={home.isFavorite(device.id) ? 'fill-current' : ''} />{home.isFavorite(device.id) ? 'Favorite' : 'Add to favorites'}</Button>
+			<Button variant="secondary" aria-pressed={home.isFavorite(device.id)} onclick={() => { haptics.tap(); home.toggleFavorite(device.id); }}><Star class={home.isFavorite(device.id) ? 'fill-current' : ''} />{home.isFavorite(device.id) ? 'Favourite' : 'Add to favourites'}</Button>
 			{#if session.can('automation.manage')}<Button variant="secondary" href="/automations/new?device={encodeURIComponent(device.id)}"><Workflow />Automate</Button>{/if}
+			{#if session.can('rooms.manage')}<Button variant="secondary" aria-expanded={editing} onclick={() => (editing = !editing)}><Pencil />{editing ? 'Close editor' : 'Rename, room and icon'}</Button>{/if}
 		</div>
+		{#if editing && session.can('rooms.manage')}<DeviceEdit {device} onsaved={() => (editing = false)} />{/if}
 	</div>
 {/snippet}
 
@@ -265,7 +292,7 @@
 	{@const cam = has('camera') && device.available}
 	<div data-device={device.id} bind:this={tileEl} class="relative isolate h-full select-none overflow-hidden rounded-tile border transition-[background-color,transform,box-shadow] duration-300 {lift ? 'lifted z-10' : 'active:scale-[0.985]'} {home.flash[device.id] === 'ok' ? 'flash-ok' : home.flash[device.id] === 'fail' ? 'flash-fail' : ''} {selection.has(device.id) ? 'ring-2 ring-primary' : ''} {cam ? 'border-transparent bg-card' : surface[tone]} {device.available && home.online ? '' : 'opacity-65'}" style="touch-action: pan-y; -webkit-touch-callout: none">
 		{#if cam}
-			<img src="/api/devices/{encodeURIComponent(device.id)}/snapshot" alt="" class="pointer-events-none absolute inset-0 -z-10 size-full object-cover" loading="lazy" />
+			<img src={snap} alt="" class="pointer-events-none absolute inset-0 -z-10 size-full object-cover" loading="lazy" />
 			<div class="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-t from-black/70 via-black/10 to-black/20"></div>
 		{/if}
 		{#if drag}<div class="pointer-events-none absolute inset-y-0 left-0 z-0 bg-on/45" style="width:{fill}%" aria-hidden="true"></div>{/if}
@@ -294,7 +321,7 @@
 			<div class="pointer-events-none relative z-10 flex h-full flex-col justify-between p-3">
 				<div class="flex items-start justify-between gap-2">
 					{@render icn('size-10')}
-					{#if metric}<span class="figure text-[1.375rem] leading-none {tone === 'none' ? '' : ''}">{metric.v}<span class="ml-0.5 text-sm font-medium opacity-60">{metric.u}</span></span>{/if}
+					{#if metric}<span class="figure text-[1.375rem] leading-none">{metric.v}<span class="ml-0.5 text-sm font-medium opacity-60">{metric.u}</span></span>{:else}{@render tileSwitch()}{/if}
 				</div>
 				<div class="min-w-0 pt-2">{@render label()}</div>
 			</div>
@@ -303,10 +330,10 @@
 		{#if drag}<div class="pointer-events-none absolute inset-0 z-20 flex items-center justify-center"><span class="figure rounded-full bg-foreground/90 px-3 py-1 text-lg text-background">{shown}</span></div>{/if}
 		{#if selection.active}<span class="pointer-events-none absolute bottom-3 right-3 z-30 flex size-6 items-center justify-center rounded-full border-2 transition-colors {selection.has(device.id) ? 'border-primary bg-primary text-primary-foreground' : 'border-foreground/30 bg-background/70'}" aria-hidden="true">{#if selection.has(device.id)}<Check class="size-3.5" strokeWidth={3} />{/if}</span>{/if}
 	</div>
-	<Drawer.Root bind:open={detail}>
+	<Drawer.Root bind:open={sheetState.open}>
 		<Drawer.Content class="max-h-[88dvh] rounded-t-3xl"><div class="overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-2">{@render drawerBody()}</div></Drawer.Content>
 	</Drawer.Root>
-	<TileMenu {device} bind:open={menu} ondetails={() => (detail = true)} />
+	<TileMenu {device} bind:open={menu} ondetails={() => (sheetState.open = true)} />
 {:else}
 <div data-device={device.id} class="relative h-full rounded-tile border transition-colors duration-300 {home.flash[device.id] === 'ok' ? 'flash-ok' : home.flash[device.id] === 'fail' ? 'flash-fail' : ''} {surface[tone]} {device.available ? '' : 'opacity-65'}">
 	{#if compact}
@@ -317,12 +344,12 @@
 			{@render control()}
 		</div>
 	{:else}
-		<div class="flex items-center gap-1 p-3.5 pb-1">
+		<div class="flex items-center gap-3 p-3.5 pb-2">
 			{@render icn('size-10')}
-			<span class="ml-auto flex items-center gap-0.5">{@render actions()}</span>
-			<span class="ml-1.5">{@render control()}</span>
+			<div class="min-w-0 flex-1"><h3 class="truncate text-[0.9375rem] font-semibold leading-tight tracking-[-0.015em]">{device.name}</h3><p class="mt-0.5 truncate text-sm {sub[tone]}" aria-live="polite">{#if !device.available}<Badge variant="outline" class="-ml-0.5 h-5 px-2">{status}</Badge>{:else}{status}{/if}</p></div>
+			<span class="flex items-center gap-0.5">{@render actions()}</span>
+			<span class="ml-1">{@render control()}</span>
 		</div>
-		<div class="px-3.5 pb-3 pt-1.5"><h3 class="truncate text-[0.9375rem] font-semibold leading-tight tracking-[-0.015em]">{device.name}</h3><p class="mt-0.5 truncate text-sm {sub[tone]}" aria-live="polite">{#if !device.available}<Badge variant="outline" class="-ml-0.5 h-5 px-2">{status}</Badge>{:else}{status}{/if}</p></div>
 	{/if}
 
 	{#if !compact && device.available}

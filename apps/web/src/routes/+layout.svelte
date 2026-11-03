@@ -1,8 +1,8 @@
 <script lang="ts">
 	import './layout.css';
 	import favicon from '#lib/assets/favicon.svg';
-	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
+	import { afterNavigate, beforeNavigate, goto } from '$app/navigation';
+	import { navigating, page } from '$app/state';
 	import { onMount, untrack } from 'svelte';
 	import { session } from '#lib/session.svelte.js';
 	import { home } from '#lib/home.svelte.js';
@@ -22,6 +22,7 @@
 	import { ArrowDown, ChevronLeft, Loader2, LogOut, Moon, Search, Settings, Sun, SunMoon } from '@lucide/svelte';
 	import SelectBar from '#lib/components/app/SelectBar.svelte';
 	import { ui } from '#lib/ui.svelte.js';
+	import { install } from '#lib/install.svelte.js';
 	import { pull, edge, pullToRefresh, edgeBack } from '#lib/gestures.svelte.js';
 	import { startShake, stopShake } from '#lib/shake.js';
 	import type { LayoutProps } from './$types';
@@ -40,6 +41,7 @@
 		document.getElementById('boot')?.remove();
 		if (!session.me && !publicPaths.includes(page.url.pathname) && !page.url.pathname.startsWith('/ops')) goto('/login');
 	});
+	onMount(() => install.start());
 	// Phone gestures: pull down to refresh, swipe in from the left edge to go back (installed app only), shake to undo.
 	onMount(() => {
 		if (!matchMedia('(pointer: coarse)').matches) return;
@@ -54,15 +56,39 @@
 	$effect(() => {
 		const pref = home.prefs?.appearance ?? 'system';
 		const mq = matchMedia('(prefers-color-scheme: dark)');
-		const apply = () => { const dark = pref === 'dark' || (pref === 'system' && mq.matches); document.documentElement.classList.toggle('dark', dark); document.documentElement.style.colorScheme = dark ? 'dark' : 'light'; };
+		const apply = () => { const dark = pref === 'dark' || (pref === 'system' && mq.matches); document.documentElement.classList.toggle('dark', dark); document.documentElement.style.colorScheme = dark ? 'dark' : 'light'; document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.remove()); const meta = document.createElement('meta'); meta.name = 'theme-color'; meta.content = dark ? '#080b16' : '#edf0f8'; document.head.append(meta); };
 		apply(); mq.addEventListener('change', apply);
 		return () => mq.removeEventListener('change', apply);
 	});
 
+	// Switching tabs replaces the history entry instead of stacking one, so Back leaves a tab rather than walking through every tab you touched.
+	// Each tab also remembers where you had scrolled to and which sub-tab (Scenes, Energy…) you were on.
+	const scrolls = new Map<string, number>();
+	let subtabs = $state<Record<string, string>>({});
+	try { subtabs = JSON.parse(sessionStorage.getItem('subtabs:v1') ?? '{}'); } catch {}
+	const here_ = (u: URL) => u.pathname + u.search;
+	beforeNavigate(({ from }) => { if (from) scrolls.set(here_(from.url), window.scrollY); });
+	afterNavigate(({ to, type }) => {
+		if (!to) return;
+		const sub = to.url.searchParams.get('tab');
+		if (sub && subtabs[to.url.pathname] !== sub) { subtabs[to.url.pathname] = sub; try { sessionStorage.setItem('subtabs:v1', JSON.stringify(subtabs)); } catch {} }
+		const y = scrolls.get(here_(to.url));
+		if (y !== undefined && (type === 'goto' || type === 'link')) for (const ms of [0, 80, 320]) setTimeout(() => window.scrollTo(0, y), ms);
+	});
+	const target = (n: NavItem) => (subtabs[n.href] ? `${n.href}?tab=${subtabs[n.href]}` : n.href);
+	function go(e: MouseEvent, n: NavItem) {
+		if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+		e.preventDefault(); const fresh = !here(n); pending = n.href; goto(target(n), { replaceState: fresh }).finally(() => { pending = null; });
+	}
+	const tabRoot = $derived(tabs().some((t) => t.href === path));
+	// The tab you tapped lights up at once, even if the page behind it is slow to arrive.
+	let pending = $state<string | null>(null);
+	afterNavigate(() => { pending = null; });
+
 	const nav = $derived(tabs().map((n) => (n.href === '/activity' ? { ...n, badge: notifications.unread } : n)));
 	const manage = $derived(manageNav(session.can));
 	const path = $derived(page.url.pathname);
-	const here = (n: NavItem) => (n.href === '/' ? path === '/' : [n.href, ...(n.match ?? [])].some((h) => path === h || path.startsWith(h + '/')));
+	const here = (n: NavItem) => (pending ? pending === n.href : n.href === '/' ? path === '/' : [n.href, ...(n.match ?? [])].some((h) => path === h || path.startsWith(h + '/')));
 	const initial = $derived((session.me?.displayName ?? '?').trim().charAt(0).toUpperCase());
 	const roleLabel = $derived(session.me?.role === 'admin' ? 'Admin' : session.me?.role === 'member' ? 'Member' : 'Guest');
 
@@ -72,7 +98,7 @@
 </script>
 
 <svelte:window onkeydown={onKey} />
-<svelte:head><link rel="icon" href={favicon} /><title>Home</title><meta name="theme-color" content="#f4f5f9" media="(prefers-color-scheme: light)" /><meta name="theme-color" content="#080b16" media="(prefers-color-scheme: dark)" /></svelte:head>
+<svelte:head><link rel="icon" href={favicon} /><title>Home</title><meta name="theme-color" content="#edf0f8" media="(prefers-color-scheme: light)" /><meta name="theme-color" content="#080b16" media="(prefers-color-scheme: dark)" /></svelte:head>
 
 {#snippet mark()}
 	<span class="flex size-8 items-center justify-center rounded-[10px] bg-primary text-primary-foreground" aria-hidden="true">
@@ -81,7 +107,7 @@
 {/snippet}
 
 {#snippet navLink(n: NavItem)}
-	<a href={n.href} aria-current={here(n) ? 'page' : undefined}
+	<a href={target(n)} onclick={(e) => go(e, n)} aria-current={here(n) ? 'page' : undefined}
 		class="group flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-[0.9375rem] font-medium transition-colors {here(n) ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}">
 		<n.icon class="size-[18px] shrink-0 {here(n) ? 'text-primary' : ''}" />
 		<span class="flex-1 truncate">{n.label}</span>
@@ -89,6 +115,9 @@
 	</a>
 {/snippet}
 
+{#if navigating.to}
+	<div class="pointer-events-none fixed inset-x-0 top-0 z-[70] h-0.5 overflow-hidden bg-primary/15" role="progressbar" aria-label="Loading"><div class="h-full w-1/3 animate-[load_1.1s_ease-in-out_infinite] rounded-full bg-primary"></div></div>
+{/if}
 {#if pull.y > 0}
 	<div class="pointer-events-none fixed inset-x-0 top-0 z-[60] flex justify-center" style="transform: translateY({pull.y / 2 - 20}px)" aria-hidden="true">
 		<span class="flex size-10 items-center justify-center rounded-full border bg-card shadow-lg {pull.armed || pull.busy ? 'text-primary' : 'text-muted-foreground'}">
@@ -155,14 +184,14 @@
 
 		<nav class="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t bg-background/90 px-1 pb-[max(0.125rem,env(safe-area-inset-bottom))] pt-0.5 backdrop-blur-xl md:hidden" aria-label="Main">
 			{#each nav as t (t.href)}
-				<a href={t.href} aria-current={here(t) ? 'page' : undefined} class="relative flex flex-col items-center gap-px rounded-lg py-1 text-[10px] font-medium transition-colors duration-200 before:absolute before:left-1/2 before:top-0 before:h-0.5 before:-translate-x-1/2 before:rounded-full before:bg-primary before:transition-all before:duration-300 {here(t) ? 'text-primary before:w-7 before:opacity-100' : 'text-muted-foreground before:w-0 before:opacity-0'}">
+				<a href={target(t)} onclick={(e) => go(e, t)} aria-current={here(t) ? 'page' : undefined} class="relative flex flex-col items-center gap-px rounded-lg py-1 text-[10px] font-medium transition-colors duration-200 before:absolute before:left-1/2 before:top-0 before:h-0.5 before:-translate-x-1/2 before:rounded-full before:bg-primary before:transition-all before:duration-300 {here(t) ? 'text-primary before:w-7 before:opacity-100' : 'text-muted-foreground before:w-0 before:opacity-0'}">
 					{#if t.href === '/you'}<span class="flex size-[21px] items-center justify-center rounded-full text-[11px] font-semibold {here(t) ? 'bg-primary text-primary-foreground' : 'bg-secondary'}">{initial}</span>{:else}<t.icon class="size-[21px] transition-transform duration-300 {here(t) ? '-translate-y-px scale-110' : ''}" />{/if}{t.label}
 					{#if t.badge}<span class="absolute right-[calc(50%-18px)] top-0.5 size-2 rounded-full bg-signal ring-2 ring-background"></span>{/if}
 				</a>
 			{/each}
 		</nav>
 
-		{#if ui.oneHand}
+		{#if ui.oneHand && tabRoot}
 			<button type="button" onclick={() => (chrome.search = true)} aria-label="Search" class="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] right-4 z-30 flex size-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-xl transition-transform active:scale-95 md:hidden"><Search class="size-5" /></button>
 		{/if}
 		<CommandPalette bind:open={chrome.search} />

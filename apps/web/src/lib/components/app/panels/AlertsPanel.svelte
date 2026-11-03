@@ -3,9 +3,11 @@
 	import { onMount } from 'svelte';
 	import { api } from '#lib/api.js';
 	import { notifications, type Note } from '#lib/notifications.svelte.js';
+	import { clock } from '#lib/fmt.js';
 	import { session } from '#lib/session.svelte.js';
 	import { Button } from '#lib/components/ui/button';
 	import Group from '#lib/components/app/Group.svelte';
+	import SkeletonList from '#lib/components/app/SkeletonList.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
 	import { ChevronDown, Settings2 } from '@lucide/svelte';
 	import { slide } from 'svelte/transition';
@@ -16,15 +18,15 @@
 
 	async function load() { const r = await api<{ notifications: Note[]; unread: number }>('GET', '/api/notifications'); if (r.ok) { list = r.data.notifications; notifications.unread = r.data.unread; } loaded = true; }
 	onMount(load);
-	async function markAll() { const r = await api('POST', '/api/notifications/read'); if (r.ok) { list = list.map((n) => ({ ...n, read: true })); notifications.unread = 0; } }
+	let marking = $state(false);
+	async function markAll() { if (marking) return; marking = true; const r = await api('POST', '/api/notifications/read'); if (r.ok) { list = list.map((n) => ({ ...n, read: true })); notifications.unread = 0; } marking = false; }
 	async function markOne(n: Note) { if (n.read) return; const r = await api<{ unread: number }>('POST', '/api/notifications/read', { ids: [n.id] }); if (r.ok) { n.read = true; notifications.unread = r.data.unread; } }
-	const clock = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 	const dayKey = (ts: number) => new Date(ts).toDateString();
 	function dayLabel(ts: number) {
 		const d = new Date(ts), t = new Date(), y = new Date(Date.now() - 864e5);
 		if (d.toDateString() === t.toDateString()) return 'Today';
 		if (d.toDateString() === y.toDateString()) return 'Yesterday';
-		return d.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+		return d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
 	}
 	// Unread first by default: the list is for what still needs a look. "All" is one tap away.
 	let only = $state<'unread' | 'all'>('unread'), open = $state<string | null>(null), chosen = false;
@@ -47,8 +49,8 @@
 			{/each}
 		</div>
 		<span class="flex-1"></span>
-		<Button size="sm" variant="ghost" onclick={markAll} disabled={!notifications.unread}>Mark all read</Button>
-		<Button size="icon" variant="ghost" href="/settings/notifications" aria-label="Notification settings"><Settings2 class="size-4" /></Button>
+		<Button size="sm" variant="ghost" onclick={markAll} disabled={!notifications.unread || marking}>Mark all read</Button>
+		<Button size="icon" variant="ghost" href="/settings/notifications" aria-label="Notifications"><Settings2 class="size-4" /></Button>
 	</div>
 
 	{#each days as d (d.key)}
@@ -79,6 +81,8 @@
 			</Group>
 		</section>
 	{/each}
+
+	{#if !loaded}<SkeletonList kind="rows" count={4} />{/if}
 
 	{#if loaded && !shown.length}
 		<Empty title="You're all caught up" description={only === 'unread' ? 'Nothing needs your attention right now.' : 'No alerts yet.'} />
