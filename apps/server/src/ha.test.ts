@@ -49,7 +49,7 @@ test("when HA is down: unreachable, stale, and commands fail instead of queueing
 test("reads the hub's version, time zone and unit system", async () => {
   const ha = new HaClient("http://127.0.0.1:18123", "tok"); ha.start();
   await until(() => ha.info.version !== null);
-  expect(ha.info).toEqual({ version: "2026.10.4", timeZone: "Asia/Kolkata", locationName: "Home", metric: true });
+  expect(ha.info).toEqual({ version: "2026.10.4", timeZone: "Asia/Kolkata", locationName: "Home", metric: true, language: "en" });
   ha.stop();
 });
 

@@ -8,6 +8,7 @@
 	import Group from '#lib/components/app/Group.svelte';
 	import SkeletonList from '#lib/components/app/SkeletonList.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
+	import AssistSafety from '#lib/components/app/AssistSafety.svelte';
 	import { Switch } from '#lib/components/ui/switch';
 	import { Mic, TriangleAlert } from '@lucide/svelte';
 
@@ -36,6 +37,7 @@
 </script>
 
 <Page title="Voice control" subtitle="Choose what Alexa and Google Assistant may control. Nothing is on until you turn it on." width="md">
+	<AssistSafety />
 	{#if blocked}
 		<div role="status" class="flex gap-3 rounded-2xl bg-signal-soft p-4 text-sm text-signal-foreground">
 			<TriangleAlert class="mt-0.5 size-5 shrink-0" />

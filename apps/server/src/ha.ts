@@ -30,7 +30,7 @@ export type HaEvent = { type: "entity"; entityId: string } | { type: "conn" };
 /** Changes to the registries that describe the home (what is a device, what room it is in). Any of them means the cached structure is out of date. */
 export const REGISTRY_EVENTS = ["entity_registry_updated", "device_registry_updated", "area_registry_updated", "floor_registry_updated", "label_registry_updated"] as const;
 /** What the hub says about itself: used to word things the way the household does (units, time zone) and to spot an old version. */
-export type HaInfo = { version: string | null; timeZone: string | null; locationName: string | null; metric: boolean | null };
+export type HaInfo = { version: string | null; timeZone: string | null; locationName: string | null; metric: boolean | null; language: string | null };
 export type HaOptions = {
   /** how often to check the link is alive */ pingMs?: number;
   /** how long a reply may take before the link counts as dead */ replyMs?: number;
@@ -86,7 +86,7 @@ export class HaClient implements HaApi {
   labelsOf = new Map<string, string[]>();
   deviceInfo = new Map<string, HaDeviceInfo>();
   platformOf = new Map<string, string>();
-  info: HaInfo = { version: null, timeZone: null, locationName: null, metric: null };
+  info: HaInfo = { version: null, timeZone: null, locationName: null, metric: null, language: null };
   lastMessageAt = 0;
   private pinger: ReturnType<typeof setInterval> | null = null;
   private registryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -198,11 +198,11 @@ export class HaClient implements HaApi {
   private async loadInfo() {
     const c = await this.send({ type: "get_config" });
     if (!c.success || !c.result || typeof c.result !== "object") return;
-    const r = c.result as { version?: unknown; time_zone?: unknown; location_name?: unknown; unit_system?: { temperature?: unknown } };
+    const r = c.result as { version?: unknown; time_zone?: unknown; location_name?: unknown; language?: unknown; unit_system?: { temperature?: unknown } };
     const t = r.unit_system?.temperature;
     this.info = {
       version: typeof r.version === "string" ? r.version : null, timeZone: typeof r.time_zone === "string" ? r.time_zone : null,
-      locationName: typeof r.location_name === "string" ? r.location_name : null, metric: typeof t === "string" ? t === "°C" : null,
+      locationName: typeof r.location_name === "string" ? r.location_name : null, metric: typeof t === "string" ? t === "°C" : null, language: typeof r.language === "string" ? r.language : null,
     };
   }
 

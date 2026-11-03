@@ -81,7 +81,7 @@ export class FakeHa implements HaApi {
   configFails: string | null = null;
   wsCalls: Body[] = [];
   exposeFails = false;
-  info: HaInfo = { version: "2026.10.4", timeZone: "UTC", locationName: null, metric: true };
+  info: HaInfo = { version: "2026.10.4", timeZone: "UTC", locationName: null, metric: true, language: "en" };
   /** Answers for WebSocket commands a test wants the hub to give (by command type). */
   replies = new Map<string, (msg: Record<string, unknown>) => unknown>();
   areaFails = false; // the hub refuses area changes

@@ -59,7 +59,7 @@ export function startMockHa(port: number, token = "dev-token", opts: { demo?: bo
   const eventSubs = new Map<string, Set<ServerWebSocket<unknown>>>();
   /** The hub's registries: what is a device, and which part of it each entity is. Tests change these and then call `fire`. */
   const registry = { entities: [] as Record<string, unknown>[], devices: [] as Record<string, unknown>[], areas: [] as Record<string, unknown>[], floors: [] as Record<string, unknown>[], labels: [] as Record<string, unknown>[] };
-  const hubConfig = { version: "2026.10.4", time_zone: "Asia/Kolkata", location_name: "Home", unit_system: { temperature: "°C" } };
+  const hubConfig = { version: "2026.10.4", time_zone: "Asia/Kolkata", location_name: "Home", language: "en", unit_system: { temperature: "°C" } };
   if (opts.demo) {
     registry.floors.push({ floor_id: "ground", name: "Ground floor", level: 0 }, { floor_id: "first", name: "First floor", level: 1 });
     registry.areas.push({ area_id: "living", name: "Living room", floor_id: "ground" }, { area_id: "kitchen", name: "Kitchen", floor_id: "ground" }, { area_id: "bedroom", name: "Bedroom", floor_id: "first" }, { area_id: "garden", name: "Garden", floor_id: null });
@@ -67,6 +67,8 @@ export function startMockHa(port: number, token = "dev-token", opts: { demo?: bo
     registry.devices.push({ id: "d_living", name: "Living room lights", area_id: "living", manufacturer: "Acme", model: "Strip 2", sw_version: "1.4.2", labels: ["evening"] }, { id: "d_kitchen", name: "Kitchen light", area_id: "kitchen", manufacturer: "Acme", model: "Bulb", sw_version: "2.0", labels: ["evening"] });
     registry.entities.push({ entity_id: "light.living_room", device_id: "d_living", platform: "zha" }, { entity_id: "light.kitchen", device_id: "d_kitchen", platform: "zha" }, { entity_id: "light.hall", area_id: "garden", platform: "zha" }, { entity_id: "sensor.door_sensor_battery", device_id: "d_kitchen", platform: "zha" }, { entity_id: "cover.living_blinds", area_id: "living", platform: "zha" });
   }
+  /** What each assistant may touch in the demo: Home Assistant exposes doors and garages to its own assistant unless told not to. */
+  const exposedTo = new Map<string, Set<string>>(opts.demo ? [["light.kitchen", new Set(["conversation"])], ["lock.front_door", new Set(["conversation"])], ["cover.garage_door", new Set(["conversation", "cloud.alexa"])]] : []);
   let mute = false; // when set, the hub stops answering anything (a half-open link)
   const fire = (eventType: string) => { for (const s of eventSubs.get(eventType) ?? []) s.send(JSON.stringify({ type: "event", event: { event_type: eventType, data: {} } })); };
   const configs = new Map<string, Config>();
@@ -147,7 +149,16 @@ export function startMockHa(port: number, token = "dev-token", opts: { demo?: bo
       case "config_entries/get": return yes([{ entry_id: "e1", domain: "tuya", title: "Tuya", state: "setup_error" }, { entry_id: "e2", domain: "zha", title: "Zigbee", state: "loaded" }]);
       case "backup/info": return yes({ backups: [{ backup_id: "b1", date: new Date(Date.now() - 4 * 864e5).toISOString() }], last_completed_automatic_backup: new Date(Date.now() - 4 * 864e5).toISOString(), next_automatic_backup: new Date(Date.now() + 864e5).toISOString() });
       case "backup/generate": return yes({ backup_job_id: "j1" });
-      case "conversation/process": return yes({ response: { speech: { plain: { speech: "Okay" } } } });
+      case "homeassistant/expose_entity/list": return yes({ exposed_entities: Object.fromEntries([...exposedTo].map(([id, set]) => [id, Object.fromEntries([...set].map((a) => [a, true]))])) });
+      case "homeassistant/expose_entity": { for (const id of m.entity_ids as string[]) for (const a of m.assistants as string[]) { const set = exposedTo.get(id) ?? new Set<string>(); if (m.should_expose) set.add(a); else set.delete(a); if (set.size) exposedTo.set(id, set); else exposedTo.delete(id); } return yes(null); }
+      case "conversation/process": {
+        // Understands "turn on/off <name>" for lights, switches and fans, and nothing else: enough to show the app what comes back.
+        const mt = /turn\s+(on|off)\s+(?:the\s+)?(.+?)\s*$/i.exec(String(m.text));
+        const hit = mt && states.find((x) => /^(light|switch|fan)\./.test(x.entity_id) && String(x.attributes.friendly_name).toLowerCase().includes(mt[2]!.toLowerCase()));
+        if (!mt || !hit) return yes({ response: { response_type: "error", speech: { plain: { speech: "Sorry, I couldn't understand that." } }, data: { code: "no_intent_match" } }, conversation_id: "c1" });
+        const next = { ...hit, state: mt[1]!.toLowerCase() }; states[states.indexOf(hit)] = next; broadcast(next);
+        return yes({ response: { response_type: "action_done", speech: { plain: { speech: `Turned ${mt[1]!.toLowerCase()} ${hit.attributes.friendly_name}` } }, data: { success: [{ id: hit.entity_id, name: hit.attributes.friendly_name, type: "entity" }], failed: [] } }, conversation_id: "c1" });
+      }
       default: return undefined;
     }
   }

@@ -5,7 +5,8 @@
 	import { session } from '#lib/session.svelte.js';
 	import { allPages } from '#lib/nav.js';
 	import { parseIntent } from '#lib/intent.js';
-	import { Lightbulb, Play, Sparkles, CornerDownLeft } from '@lucide/svelte';
+	import { api, explain } from '#lib/api.js';
+	import { Lightbulb, Play, Sparkles, CornerDownLeft, MessageCircleQuestionMark } from '@lucide/svelte';
 
 	let { open = $bindable(false) }: { open: boolean } = $props();
 	let query = $state('');
@@ -37,6 +38,14 @@
 		return { d, label: 'Open', run: () => goto(`/devices?q=${encodeURIComponent(d.name)}`) };
 	}));
 	const run = (f: () => unknown) => { open = false; f(); };
+	// What the plain rules don't understand can go to Home Assistant's own assistant. Not for guests; the home's key is not theirs to use.
+	const canAsk = $derived(session.me?.role !== 'guest' && session.can('device.control') && query.trim().length >= 4 && !intent);
+	async function ask(text: string) {
+		const r = await api<{ ok: boolean; speech: string; changed: string[]; warning?: string }>('POST', '/api/assist', { text });
+		if (!r.ok) return home.say('error', r.data?.message ?? explain(r.data?.error));
+		home.say(r.data.ok ? 'ok' : 'error', r.data.warning ? `${r.data.speech} ${r.data.warning}` : r.data.speech);
+		if (r.data.changed.length) void home.load();
+	}
 	function doIntent() {
 		const i = intent; if (!i) return;
 		if (i.kind === 'refused') return home.say('error', i.label);
@@ -53,6 +62,13 @@
 		{#if !query.trim() && tries.length}
 			<Command.Group heading="Try">
 				{#each tries as t (t)}<Command.Item value="try {t}" onSelect={() => (query = t)}><CornerDownLeft class="size-4 opacity-50" /><span class="flex-1 truncate">“{t}”</span></Command.Item>{/each}
+			</Command.Group>
+		{/if}
+		{#if canAsk}
+			<Command.Group heading="Ask Home Assistant">
+				<Command.Item value="{query} ask assistant" onSelect={() => run(() => ask(query.trim()))}>
+					<MessageCircleQuestionMark class="size-4" /><span class="flex-1 truncate font-medium">Ask: “{query.trim()}”</span><span class="text-xs text-muted-foreground">Enter</span>
+				</Command.Item>
 			</Command.Group>
 		{/if}
 		{#if intent}
