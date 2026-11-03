@@ -2,7 +2,8 @@
 # Install and run the app on one machine, with Home Assistant on another (for example a Raspberry Pi).
 #
 #   ./alice.sh install http://ha.local:8123     one-time setup: checks, token, build
-#   ./alice.sh start [--tunnel]                 start in the background (--tunnel: public https address)
+#   ./alice.sh start [--tunnel | --origin URL]  start in the background (--tunnel: quick https address;
+#                                               --origin: the https address your own reverse proxy serves)
 #   ./alice.sh stop | status | logs
 #   ./alice.sh cli <command>                    server admin commands, e.g. setup-code, list-admins, recovery-code <id>
 #
@@ -103,10 +104,19 @@ running() { [ -f "$STATE/server.pid" ] && kill -0 "$(cat "$STATE/server.pid")" 2
 
 cmd_start() {
   load_env
-  local tunnel=0; [ "${1:-}" = "--tunnel" ] && tunnel=1
+  local tunnel=0 public=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --tunnel) tunnel=1 ;;
+      --origin) shift; public="${1:-}"; [[ "$public" =~ ^https:// ]] || die "--origin needs the public https address, e.g. --origin https://home.example.com" ;;
+      *) die "Unknown option $1" ;;
+    esac; shift
+  done
+  [ "$tunnel" = 1 ] && [ -n "$public" ] && die "Use either --tunnel or --origin, not both."
   running && die "Already running. Use ./alice.sh stop first (or ./alice.sh status)."
 
   local origin="http://localhost:$PORT" secure=false
+  if [ -n "$public" ]; then origin="${public%/}"; secure=true; fi
   if [ "$tunnel" = 1 ]; then
     need cloudflared || die "--tunnel needs cloudflared (https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)."
     : > "$STATE/tunnel.log"
@@ -170,5 +180,5 @@ case "${1:-help}" in
   status)  cmd_status ;;
   logs)    shift; cmd_logs "$@" ;;
   cli)     shift; cmd_cli "$@" ;;
-  *) sed -n 2,9p "$0" | sed 's/^# \{0,1\}//' ;;
+  *) sed -n 2,11p "$0" | sed 's/^# \{0,1\}//' ;;
 esac
