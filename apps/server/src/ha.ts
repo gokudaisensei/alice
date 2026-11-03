@@ -212,7 +212,8 @@ export class HaClient implements HaApi {
     const reg = await this.send({ type: "config/entity_registry/list" });
     if (!reg.success || !Array.isArray(reg.result)) return; // without the registry every entity is shown, as before
     type Row = { entity_id?: string; device_id?: string | null; name?: string | null; original_name?: string | null; device_class?: string | null; original_device_class?: string | null; area_id?: string | null; labels?: string[] | null; platform?: string | null; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null };
-    type Dev = { id?: string; area_id?: string | null; labels?: string[] | null; manufacturer?: string | null; model?: string | null; sw_version?: string | null; hw_version?: string | null; name?: string | null; name_by_user?: string | null; via_device_id?: string | null; connections?: [string, string][] };
+    /** Newer Home Assistant calls the link to a parent device `parent_device_id`; older ones `via_device_id`. */
+    type Dev = { id?: string; area_id?: string | null; parent_device_id?: string | null; labels?: string[] | null; manufacturer?: string | null; model?: string | null; sw_version?: string | null; hw_version?: string | null; name?: string | null; name_by_user?: string | null; via_device_id?: string | null; connections?: [string, string][] };
     const rows = reg.result as Row[];
     const dev = await this.send({ type: "config/device_registry/list" });
     if (gen !== this.registryGen) return; // a newer read has started; it has the last word
@@ -231,10 +232,11 @@ export class HaClient implements HaApi {
     // A bulb's "do not disturb" switch is a part of the bulb, not a device of its own.
     this.secondary = new Set(rows.filter((x) => x.entity_id && (x.entity_category || x.hidden_by || x.disabled_by)).map((x) => x.entity_id as string));
     const names = new Map<string, string>(), via = new Map<string, string>();
-    for (const d of devices) { const n = d.name_by_user || d.name; if (d.id && n) names.set(d.id, n); if (d.id && d.via_device_id) via.set(d.id, d.via_device_id); }
+    const parentOf = (d: Dev) => d.parent_device_id || d.via_device_id;
+    for (const d of devices) { const n = d.name_by_user || d.name; if (d.id && n) names.set(d.id, n); const p = parentOf(d); if (d.id && p) via.set(d.id, p); }
     // The same hardware can be registered twice by different integrations (an ESPHome device that is also an AirPlay receiver); they share a MAC address.
     const macs = new Map<string, string[]>();
-    for (const d of devices) for (const [k, v] of d.connections ?? []) if (k === "mac" && d.id && !d.via_device_id) macs.set(v.toLowerCase(), [...(macs.get(v.toLowerCase()) ?? []), d.id]);
+    for (const d of devices) for (const [k, v] of d.connections ?? []) if (k === "mac" && d.id && !parentOf(d)) macs.set(v.toLowerCase(), [...(macs.get(v.toLowerCase()) ?? []), d.id]);
     this.deviceInfo = new Map(devices.flatMap((d) => (d.id ? [[d.id, { manufacturer: d.manufacturer || null, model: d.model || null, firmware: d.sw_version || null, hardware: d.hw_version || null }] as const] : [])));
     const parentsOf = new Set(via.values()), sameAs = new Map<string, string>();
     for (const ids of macs.values()) { const main = ids.find((i) => parentsOf.has(i)) ?? ids[0]!; for (const i of ids) sameAs.set(i, main); }

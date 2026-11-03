@@ -115,3 +115,14 @@ test("labels, device details and the integration of each entity are read from th
   ha.stop();
   mock.registry.entities = []; mock.registry.devices = []; mock.registry.labels = [];
 });
+
+test("a device's parent is read under either name the hub has used, so a child device joins its parent", async () => {
+  mock.registry.devices = [{ id: "p", name: "Spaceship", connections: [] }, { id: "c", name: "Speaker part", parent_device_id: "p" }, { id: "c2", name: "Older style", via_device_id: "p" }];
+  mock.registry.entities = [{ entity_id: "light.a", device_id: "c" }, { entity_id: "light.b", device_id: "c2" }];
+  const ha = new HaClient("http://127.0.0.1:18123", "tok", { registryDebounceMs: 30 }); ha.start();
+  await until(() => ha.parents.size === 2);
+  expect(ha.parents.get("light.a")?.deviceName).toBe("Spaceship");
+  expect(ha.parents.get("light.b")?.deviceName).toBe("Spaceship");
+  ha.stop();
+  mock.registry.entities = []; mock.registry.devices = [];
+});

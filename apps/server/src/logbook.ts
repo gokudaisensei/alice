@@ -22,6 +22,9 @@ export function originOf(r: Row): Origin {
   return { kind: "device", name: null };
 }
 
+/** Rows that carry only a state ("on", "playing") are put in a sentence. */
+const said = (s: string | undefined) => (!s ? "changed" : s === "on" ? "turned on" : s === "off" ? "turned off" : s === "unavailable" ? "went offline" : s === "unknown" ? "lost its reading" : `is now ${s.replace(/_/g, " ")}`);
+
 const MAX_ENTITIES = 300, MAX_EVENTS = 100;
 
 /** Home Assistant's logbook for the devices this person can see: what changed, and what caused it. */
@@ -38,7 +41,7 @@ export function logbookRoutes(db: Database, ha: HaApi, secure: boolean, svc: Dev
     const stamp = (v: Row["when"]) => (typeof v === "number" ? (v < 1e11 ? v * 1000 : v) : Date.parse(String(v ?? "")));
     const events = (r.result as Row[]).flatMap((x) => {
       const v = x.entity_id ? views.get(x.entity_id) : undefined, at = stamp(x.when);
-      return v && Number.isFinite(at) ? [{ at, id: v.id, name: v.name, message: x.message ?? x.state ?? "changed", origin: originOf(x) }] : [];
+      return v && Number.isFinite(at) ? [{ at, id: v.id, name: v.name, message: x.message ?? said(x.state), origin: originOf(x) }] : [];
     }).sort((a, b) => b.at - a.at).slice(0, MAX_EVENTS);
     return { events };
   });

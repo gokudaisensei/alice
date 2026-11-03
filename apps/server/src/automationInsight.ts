@@ -96,7 +96,7 @@ export function automationInsightRoutes(db: Database, ha: HaApi, secure: boolean
       return {
         automations: list.filter((e) => e.entity_id.startsWith("automation.") && !mine.has(String(e.attributes.id)) && !String(e.attributes.id ?? "").startsWith("alice_"))
           .map((e) => ({ id: e.entity_id, name: friendlyName(e), enabled: e.state === "on", lastTriggered: lastTriggered(e) })).sort((a, b) => a.name.localeCompare(b.name)),
-        scripts: list.filter((e) => e.entity_id.startsWith("script.") && !scripts.has(e.entity_id) && !String(e.attributes.id ?? "").startsWith("alice_"))
+        scripts: list.filter((e) => e.entity_id.startsWith("script.") && !scripts.has(e.entity_id) && !e.entity_id.startsWith("script.alice_") && !String(e.attributes.id ?? "").startsWith("alice_"))
           .map((e) => ({ id: e.entity_id, name: friendlyName(e), running: e.state === "on", lastTriggered: lastTriggered(e) })).sort((a, b) => a.name.localeCompare(b.name)),
       };
     })

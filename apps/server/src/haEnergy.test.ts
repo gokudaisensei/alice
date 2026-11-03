@@ -92,7 +92,7 @@ test("the logbook says what caused each change, never who", async () => {
   t.ha.replies.set("logbook/get_events", () => [
     { when: at(60), entity_id: "light.kitchen", message: "turned on", context_event_type: "automation_triggered", context_name: "Evening lights" },
     { when: at(300), entity_id: "light.kitchen", message: "turned off", context_user_id: "u-secret-123", context_service: "turn_off", context_domain: "light" },
-    { when: at(900), entity_id: "switch.plug", message: "turned on" },
+    { when: at(900), entity_id: "switch.plug", state: "on" },
     { when: at(30), entity_id: "light.not_visible", message: "turned on" },
     { when: at(500), entity_id: "lock.front", message: "locked", context_domain: "script", context_entity_id_name: "Goodnight" },
   ]);
@@ -103,6 +103,7 @@ test("the logbook says what caused each change, never who", async () => {
     ["lock.front", { kind: "script", name: "Goodnight" }],
     ["switch.plug", { kind: "device", name: null }],
   ]);
+  expect(r.find((e) => e.id === "switch.plug").message).toBe("turned on"); // a row with only a state still reads as a sentence
   expect(JSON.stringify(r)).not.toContain("u-secret-123");
   t.ha.setStale(true);
   expect((await t.call("GET", "/api/logbook", { cookie: admin })).status).toBe(503);

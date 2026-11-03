@@ -85,6 +85,7 @@ test("automations and scripts made in the hub are listed apart from ours, and ca
   await make(); // ours: must not appear in the hub's own list
   t.ha.entities.set("automation.porch_light", ent("automation.porch_light", "on", { id: "1700000000000", friendly_name: "Porch light", last_triggered: "2026-11-02T18:00:00+00:00" }));
   t.ha.entities.set("script.goodnight", ent("script.goodnight", "off", { friendly_name: "Goodnight" }));
+  t.ha.entities.set("script.alice_routine_ab12", ent("script.alice_routine_ab12", "off", { friendly_name: "Good Morning" })); // ours: never in the hub's list
   const r = (await j("GET", "/api/automations/native", admin)).json;
   expect(r.automations).toEqual([{ id: "automation.porch_light", name: "Porch light", enabled: true, lastTriggered: "2026-11-02T18:00:00+00:00" }]);
   expect(r.scripts).toEqual([{ id: "script.goodnight", name: "Goodnight", running: false, lastTriggered: null }]);
