@@ -7,7 +7,7 @@ type ScriptStep = { action?: string; target?: { entity_id?: string }; data?: { o
 /** What HA keeps for a UI-managed scene (`name`, `entities`), script (`alias`, `sequence`) or automation (`alias`). */
 type Config = { alias?: string; name?: string; entities?: Record<string, { state: string } & Record<string, unknown>>; sequence?: ScriptStep[] };
 type Command = {
-  id?: number; type: string; access_token?: string; name?: string; initial?: string; options?: string[];
+  id?: number; type: string; event_type?: string; access_token?: string; name?: string; initial?: string; options?: string[];
   domain?: string; service?: string; service_data?: ServiceData; target?: { entity_id?: string };
 };
 type Kind = "scene" | "script" | "automation";
@@ -35,6 +35,12 @@ export function startMockHa(port: number, token = "dev-token") {
     e("person.sam", "home"),
   ];
   const subs = new Set<ServerWebSocket<unknown>>();
+  const eventSubs = new Map<string, Set<ServerWebSocket<unknown>>>();
+  /** The hub's registries: what is a device, and which part of it each entity is. Tests change these and then call `fire`. */
+  const registry = { entities: [] as Record<string, unknown>[], devices: [] as Record<string, unknown>[] };
+  const hubConfig = { version: "2026.10.4", time_zone: "Asia/Kolkata", location_name: "Home", unit_system: { temperature: "°C" } };
+  let mute = false; // when set, the hub stops answering anything (a half-open link)
+  const fire = (eventType: string) => { for (const s of eventSubs.get(eventType) ?? []) s.send(JSON.stringify({ type: "event", event: { event_type: eventType, data: {} } })); };
   const configs = new Map<string, Config>();
   const slug = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
   const broadcast = (ent: Entity) => { for (const s of subs) s.send(JSON.stringify({ type: "event", event: { event_type: "state_changed", data: { entity_id: ent.entity_id, new_state: ent } } })); };
@@ -73,18 +79,26 @@ export function startMockHa(port: number, token = "dev-token") {
     },
     websocket: {
       open(ws) { ws.send(JSON.stringify({ type: "auth_required" })); },
-      close(ws) { subs.delete(ws); },
+      close(ws) { subs.delete(ws); for (const v of eventSubs.values()) v.delete(ws); },
       message(ws, raw) { handle(ws, raw); },
     },
   });
   function handle(ws: ServerWebSocket<unknown>, raw: string | Buffer) {
     const m = JSON.parse(String(raw)) as Command;
+    if (mute && m.type !== "auth") return;
     if (m.type === "auth") return ws.send(JSON.stringify({ type: m.access_token === token ? "auth_ok" : "auth_invalid" }));
     const ok = (result: unknown = null) => ws.send(JSON.stringify({ id: m.id, type: "result", success: true, result }));
     const fail = (code: string, message: string) => ws.send(JSON.stringify({ id: m.id, type: "result", success: false, error: { code, message } }));
-    if (m.type === "subscribe_events") { subs.add(ws); return ok(); }
+    if (m.type === "ping") return ws.send(JSON.stringify({ id: m.id, type: "pong" }));
+    if (m.type === "get_config") return ok(hubConfig);
+    if (m.type === "subscribe_events") {
+      if (!m.event_type || m.event_type === "state_changed") subs.add(ws);
+      else eventSubs.set(m.event_type, (eventSubs.get(m.event_type) ?? new Set()).add(ws));
+      return ok();
+    }
     if (m.type === "get_states") return ok(states);
-    if (m.type === "config/entity_registry/list") return ok([]);
+    if (m.type === "config/entity_registry/list") return ok(registry.entities);
+    if (m.type === "config/device_registry/list") return ok(registry.devices);
     if (m.type === "input_select/create") { const ent = e("input_select." + slug(m.name ?? ""), m.initial ?? "", { options: m.options, friendly_name: m.name }); states.push(ent); broadcast(ent); return ok(); }
     if (m.type === "call_service" && m.service === "reload" && isKind(m.domain)) { reload(m.domain); return ok(); }
     if (m.type === "call_service") {
@@ -132,5 +146,5 @@ export function startMockHa(port: number, token = "dev-token") {
     }
     return fail("unknown_command", "?");
   }
-  return { server, states, stop: () => server.stop(true) };
+  return { server, states, registry, hubConfig, fire, goQuiet: (v = true) => { mute = v; }, stop: () => server.stop(true) };
 }
