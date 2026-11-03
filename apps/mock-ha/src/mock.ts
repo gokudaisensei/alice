@@ -14,7 +14,8 @@ type Kind = "scene" | "script" | "automation";
 
 const isKind = (v: string | undefined): v is Kind => v === "scene" || v === "script" || v === "automation";
 
-export function startMockHa(port: number, token = "dev-token") {
+/** `demo` fills the home with what Alice's newer screens need: areas, floors, a label, more kinds of device, and answers for energy, logbook, traces and the hub's own worries. */
+export function startMockHa(port: number, token = "dev-token", opts: { demo?: boolean } = {}) {
   const e = (id: string, state: string, a: Record<string, unknown> = {}): Entity =>
     ({ entity_id: id, state, attributes: { friendly_name: (id.split(".")[1] ?? id).replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()), ...a } });
   const states: Entity[] = [
@@ -34,11 +35,38 @@ export function startMockHa(port: number, token = "dev-token") {
     e("person.alex", "home"),
     e("person.sam", "home"),
   ];
+  if (opts.demo) states.push(
+    e("cover.garage_door", "closed", { supported_features: 3, device_class: "garage" }),
+    e("cover.living_blinds", "open", { supported_features: 15, device_class: "blind", current_position: 70 }),
+    e("alarm_control_panel.home", "disarmed", { supported_features: 1 | 2 | 4, code_format: "number" }),
+    e("vacuum.robo", "docked", { supported_features: 8192 | 4 | 16 | 32 | 512, fan_speed_list: ["quiet", "standard", "max"], fan_speed: "standard", battery_level: 88 }),
+    e("humidifier.bedroom", "on", { supported_features: 1, min_humidity: 30, max_humidity: 80, humidity: 55, current_humidity: 48, available_modes: ["auto", "sleep"], mode: "auto" }),
+    e("valve.main_water", "open", { supported_features: 3, device_class: "water" }),
+    e("water_heater.tank", "eco", { supported_features: 1 | 2 | 8, min_temp: 35, max_temp: 65, temperature: 50, current_temperature: 47, operation_list: ["eco", "electric", "off"], operation_mode: "eco" }),
+    e("siren.hall", "off"),
+    e("input_number.night_target", "19", { min: 14, max: 26, step: 0.5, unit_of_measurement: "°C" }),
+    e("input_select.guest_scene", "relaxed", { options: ["relaxed", "party", "movie"] }),
+    e("button.doorbell_chime", "unknown"),
+    e("weather.home", "partlycloudy", { temperature: 27, humidity: 61 }),
+    e("binary_sensor.hall_smoke", "off", { device_class: "smoke" }),
+    e("binary_sensor.back_door", "off", { device_class: "door" }),
+    e("sensor.door_sensor_battery", "11", { device_class: "battery", unit_of_measurement: "%" }),
+    e("automation.porch_light_at_dusk", "on", { id: "1700000000001", last_triggered: "2026-11-02T13:00:00+00:00" }),
+    e("script.goodnight_house", "off", {}),
+    e("update.home_assistant_core", "on", { title: "Home Assistant Core", installed_version: "2026.10.4", latest_version: "2026.11.0" }),
+  );
   const subs = new Set<ServerWebSocket<unknown>>();
   const eventSubs = new Map<string, Set<ServerWebSocket<unknown>>>();
   /** The hub's registries: what is a device, and which part of it each entity is. Tests change these and then call `fire`. */
   const registry = { entities: [] as Record<string, unknown>[], devices: [] as Record<string, unknown>[], areas: [] as Record<string, unknown>[], floors: [] as Record<string, unknown>[], labels: [] as Record<string, unknown>[] };
   const hubConfig = { version: "2026.10.4", time_zone: "Asia/Kolkata", location_name: "Home", unit_system: { temperature: "°C" } };
+  if (opts.demo) {
+    registry.floors.push({ floor_id: "ground", name: "Ground floor", level: 0 }, { floor_id: "first", name: "First floor", level: 1 });
+    registry.areas.push({ area_id: "living", name: "Living room", floor_id: "ground" }, { area_id: "kitchen", name: "Kitchen", floor_id: "ground" }, { area_id: "bedroom", name: "Bedroom", floor_id: "first" }, { area_id: "garden", name: "Garden", floor_id: null });
+    registry.labels.push({ label_id: "evening", name: "Evening lights" });
+    registry.devices.push({ id: "d_living", name: "Living room lights", area_id: "living", manufacturer: "Acme", model: "Strip 2", sw_version: "1.4.2", labels: ["evening"] }, { id: "d_kitchen", name: "Kitchen light", area_id: "kitchen", manufacturer: "Acme", model: "Bulb", sw_version: "2.0", labels: ["evening"] });
+    registry.entities.push({ entity_id: "light.living_room", device_id: "d_living", platform: "zha" }, { entity_id: "light.kitchen", device_id: "d_kitchen", platform: "zha" }, { entity_id: "light.hall", area_id: "garden", platform: "zha" }, { entity_id: "sensor.door_sensor_battery", device_id: "d_kitchen", platform: "zha" }, { entity_id: "cover.living_blinds", area_id: "living", platform: "zha" });
+  }
   let mute = false; // when set, the hub stops answering anything (a half-open link)
   const fire = (eventType: string) => { for (const s of eventSubs.get(eventType) ?? []) s.send(JSON.stringify({ type: "event", event: { event_type: eventType, data: {} } })); };
   const configs = new Map<string, Config>();
@@ -83,6 +111,46 @@ export function startMockHa(port: number, token = "dev-token") {
       message(ws, raw) { handle(ws, raw); },
     },
   });
+  const fnv = (t: string) => { let h = 2166136261; for (const c of t) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return Math.abs(h); };
+  type R = { ok: true; result: unknown } | { ok: false; code: string; message: string } | undefined;
+  /** Answers for the newer screens: believable numbers, deterministic per id. */
+  function demo(m: Record<string, unknown> & { type: string }): R {
+    const yes = (result: unknown): R => ({ ok: true, result });
+    const days = (since: string) => { const out: number[] = []; for (let t = Date.parse(since); t < Date.now(); t += 864e5) out.push(t); return out; };
+    switch (m.type) {
+      case "config/area_registry/create": { const a = { area_id: slug(String(m.name)), name: m.name, floor_id: null }; registry.areas.push(a); fire("area_registry_updated"); return yes(a); }
+      case "config/area_registry/update": { const a = registry.areas.find((x) => x.area_id === m.area_id); if (!a) return { ok: false, code: "not_found", message: "no such area" }; a.name = m.name ?? a.name; fire("area_registry_updated"); return yes(a); }
+      case "config/entity_registry/update": { const r = registry.entities.find((x) => x.entity_id === m.entity_id) ?? (registry.entities.push({ entity_id: m.entity_id }), registry.entities.at(-1)!); r.area_id = m.area_id ?? null; fire("entity_registry_updated"); return yes({ entity_entry: r }); }
+      case "energy/get_prefs": return yes({ energy_sources: [{ type: "grid", flow_from: [{ stat_energy_from: "sensor.grid_in" }], flow_to: [{ stat_energy_to: "sensor.grid_out" }] }, { type: "solar", stat_energy_from: "sensor.solar_yield" }, { type: "gas", stat_energy_from: "sensor.gas_total" }], device_consumption: [{ stat_consumption: "sensor.washer_power" }, { stat_consumption: "light.kitchen" }] });
+      case "recorder/get_statistics_metadata": return yes((m.statistic_ids as string[]).map((id) => ({ statistic_id: id, display_unit_of_measurement: id.includes("gas") ? "m³" : "kWh" })));
+      case "recorder/statistics_during_period": {
+        const ids = m.statistic_ids as string[], out: Record<string, unknown[]> = {};
+        const step = m.period === "month" ? 30 * 864e5 : m.period === "hour" ? 6 * 3600e3 : 864e5;
+        for (const id of ids) {
+          const base = 2 + (fnv(id) % 60) / 10, rows: unknown[] = [];
+          for (let t = Date.parse(String(m.start_time)); t < Date.now(); t += step) { const k = 1 + 0.4 * Math.sin(t / 3e8 + fnv(id)); rows.push({ start: t, end: t + step, change: Math.round(base * k * (m.period === "month" ? 28 : 1) * 100) / 100, mean: Math.round((18 + 6 * Math.sin(t / 4e7)) * 10) / 10 }); }
+          out[id] = rows;
+        }
+        void days; return yes(out);
+      }
+      case "logbook/get_events": {
+        const ids = (m.entity_ids as string[] | undefined) ?? [], now = Date.now() / 1000, rows: unknown[] = [];
+        ids.slice(0, 12).forEach((id, i) => rows.push(i % 3 === 0 ? { when: now - 600 - i * 900, entity_id: id, state: states.find((x) => x.entity_id === id)?.state ?? "on", context_event_type: "automation_triggered", context_name: "Porch light at dusk" } : i % 3 === 1 ? { when: now - 900 - i * 900, entity_id: id, state: "off", context_user_id: "abc", context_service: "turn_off", context_domain: "light" } : { when: now - 1200 - i * 900, entity_id: id, state: "on" }));
+        return yes(rows);
+      }
+      case "trace/list": return yes([{ run_id: "r1", timestamp: { start: new Date(Date.now() - 3600e3).toISOString() }, script_execution: "finished" }, { run_id: "r2", timestamp: { start: new Date(Date.now() - 600e3).toISOString() }, script_execution: "failed_conditions" }]);
+      case "trace/get": return yes({ trace: { "trigger/0": [{}], "condition/0": [{ result: { result: false } }] } });
+      case "search/related": return yes(m.item_id === "light.kitchen" ? { automation: ["automation.porch_light_at_dusk"], scene: ["scene.movie_time"] } : {});
+      case "validate_config": return yes({ triggers: { valid: true, error: null }, conditions: { valid: true, error: null }, actions: { valid: true, error: null } });
+      case "repairs/list_issues": return yes({ issues: [{ domain: "zha", issue_id: "radio_firmware", severity: "error", translation_key: "radio_firmware" }] });
+      case "persistent_notification/get": return yes({ n1: { notification_id: "n1", title: "Login attempt failed", message: "From **192.168.1.50**", created_at: new Date().toISOString() } });
+      case "config_entries/get": return yes([{ entry_id: "e1", domain: "tuya", title: "Tuya", state: "setup_error" }, { entry_id: "e2", domain: "zha", title: "Zigbee", state: "loaded" }]);
+      case "backup/info": return yes({ backups: [{ backup_id: "b1", date: new Date(Date.now() - 4 * 864e5).toISOString() }], last_completed_automatic_backup: new Date(Date.now() - 4 * 864e5).toISOString(), next_automatic_backup: new Date(Date.now() + 864e5).toISOString() });
+      case "backup/generate": return yes({ backup_job_id: "j1" });
+      case "conversation/process": return yes({ response: { speech: { plain: { speech: "Okay" } } } });
+      default: return undefined;
+    }
+  }
   function handle(ws: ServerWebSocket<unknown>, raw: string | Buffer) {
     const m = JSON.parse(String(raw)) as Command;
     if (mute && m.type !== "auth") return;
@@ -109,7 +177,10 @@ export function startMockHa(port: number, token = "dev-token") {
       if (!found || found.state === "unavailable") return fail("not_found", "unavailable");
       let ent = found;
       const svc = m.service, d = m.service_data ?? {};
-      if (svc === "turn_off") ent.state = "off"; else if (svc === "lock") ent.state = "locked"; else if (svc === "unlock") ent.state = "unlocked";
+      const SET: Record<string, string> = { open_cover: "open", close_cover: "closed", open_valve: "open", close_valve: "closed", alarm_disarm: "disarmed", alarm_arm_away: "armed_away", alarm_arm_home: "armed_home", alarm_arm_night: "armed_night", start: "cleaning", return_to_base: "docked", pause: "paused" };
+      if (SET[svc ?? ""]) ent.state = SET[svc ?? ""]!;
+      else if (svc === "set_operation_mode") ent.state = String((d as Record<string, unknown>).operation_mode ?? ent.state);
+      else if (svc === "turn_off") ent.state = "off"; else if (svc === "lock") ent.state = "locked"; else if (svc === "unlock") ent.state = "unlocked";
       else if (m.domain === "scene" && svc === "turn_on") {
         // apply the saved device states
         const cfg = [...configs.entries()].find(([k]) => k.startsWith("scene/") && k.endsWith(String(ent.attributes.id)))?.[1];
@@ -147,6 +218,7 @@ export function startMockHa(port: number, token = "dev-token") {
       for (const s of subs) s.send(JSON.stringify({ type: "event", event: { event_type: "state_changed", data: { entity_id: updated.entity_id, new_state: updated } } }));
       return ok();
     }
+    if (opts.demo) { const r = demo(m); if (r !== undefined) return r.ok === false ? fail(r.code, r.message) : ok(r.result); }
     return fail("unknown_command", "?");
   }
   return { server, states, registry, hubConfig, fire, goQuiet: (v = true) => { mute = v; }, stop: () => server.stop(true) };

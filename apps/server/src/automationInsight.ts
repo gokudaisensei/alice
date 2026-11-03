@@ -50,7 +50,7 @@ export function automationInsightRoutes(db: Database, ha: HaApi, secure: boolean
         if (r.script_execution === "failed_conditions") {
           const t = await ha.ws({ type: "trace/get", domain: "automation", item_id: row.ha_id, run_id: r.run_id });
           const i = failedCondition(t.success ? (t.result as TraceGet) : null), c = i === null ? undefined : conditions[i];
-          return { at, outcome, why: c ? `It started, but ${svc.conditionText(c)} wasn't true.` : "It started, but one of its limits wasn't met." };
+          return { at, outcome, why: c ? `It started, but a limit wasn't met: ${svc.conditionText(c)}.` : "It started, but one of its limits wasn't met." };
         }
         if (outcome === "skipped") return { at, outcome, why: "It was already running, so this start was ignored." };
         if (outcome === "error") return { at, outcome, why: "One of its steps failed. A device may have been offline." };

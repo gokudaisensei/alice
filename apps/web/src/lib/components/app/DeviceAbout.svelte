@@ -18,7 +18,7 @@
 	<details class="group rounded-2xl bg-secondary/40 px-4 py-3">
 		<summary class="cursor-pointer list-none text-sm font-medium">About this device</summary>
 		<dl class="mt-3 space-y-1.5 text-sm">
-			{#each rows as [k, v] (k)}<div class="flex justify-between gap-4"><dt class="text-muted-foreground">{k}</dt><dd class="min-w-0 truncate text-right">{v}</dd></div>{/each}
+			{#each rows as [k, v] (k)}<div class="flex justify-between gap-4"><dt class="text-muted-foreground">{k}</dt><dd class="min-w-0 break-words text-right">{v}</dd></div>{/each}
 		</dl>
 	</details>
 {/if}

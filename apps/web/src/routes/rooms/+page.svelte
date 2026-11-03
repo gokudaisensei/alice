@@ -70,7 +70,7 @@
 			{#key room?.id}
 				<div in:fly={{ x: dir * 40, duration: 240 }} class="space-y-4">
 					<div class="flex items-end justify-between gap-3">
-						<div><h2 class="title">{room?.name}</h2><p class="mt-1 text-sm text-muted-foreground">{#if floor}{floor}&nbsp;· {/if}{plural(list.length, 'device')}{#if lightsOn.length}&nbsp;· {lightsOn.length} light{lightsOn.length === 1 ? '' : 's'} on{/if}</p></div>
+						<div><h2 class="title">{room?.name}</h2><p class="mt-1 text-sm text-muted-foreground">{#if floor}<span class="whitespace-nowrap">{floor}</span> · {/if}{plural(list.length, 'device')}{#if lightsOn.length}&nbsp;· {lightsOn.length} light{lightsOn.length === 1 ? '' : 's'} on{/if}</p></div>
 						<div class="flex shrink-0 gap-2">{#if lightsOn.length}<Button variant="secondary" size="sm" onclick={lightsOff}>Lights off</Button>{/if}{#if running.length}<Button variant="secondary" size="sm" onclick={roomOff}><PowerOff />All off</Button>{/if}</div>
 					</div>
 					{#if list.length}<div class="tile-grid">{#each list as d (d.id)}<div class={tileClass(d)}><DeviceCard device={d} /></div>{/each}</div>

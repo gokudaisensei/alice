@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { KIND_PLURAL } from '#lib/kinds.js';
 	import { api } from '#lib/api.js';
 	import { home, type Device } from '#lib/home.svelte.js';
 	import DeviceCard from '#lib/components/app/DeviceCard.svelte';
@@ -15,7 +16,7 @@
 	let hits = $state<string[] | null>(null);
 	let filter = $state('all');
 	let timer: ReturnType<typeof setTimeout>;
-	const labels: Record<string, string> = { light: 'Lights', switch: 'Switches', fan: 'Fans', climate: 'Climate', lock: 'Locks', camera: 'Cameras', media: 'Media', sensor: 'Sensors', energy: 'Energy' };
+	const labels = KIND_PLURAL;
 
 	// Server-side search: the server decides what this user may find.
 	$effect(() => {
@@ -28,7 +29,7 @@
 		}, 200);
 	});
 
-	const cats = $derived([...new Set(home.devices.map((d) => d.category))]);
+	const cats = $derived([...new Set(home.devices.map((d) => d.category))].sort((a, b) => { const k = Object.keys(KIND_PLURAL); return (k.indexOf(a) + 1 || 99) - (k.indexOf(b) + 1 || 99); }));
 	const filters = $derived([{ key: 'all', text: 'All' }, ...cats.map((c) => ({ key: c, text: labels[c] ?? c }))]);
 	let shown = $state(36);
 	$effect(() => { q; filter; shown = 36; });

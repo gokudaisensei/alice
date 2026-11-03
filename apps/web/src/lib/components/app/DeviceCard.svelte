@@ -10,6 +10,7 @@
 	import DeviceHistory from '#lib/components/app/DeviceHistory.svelte';
 	import DeviceAbout from '#lib/components/app/DeviceAbout.svelte';
 	import ExtraControls from '#lib/components/app/ExtraControls.svelte';
+	import { WEATHER } from '#lib/kinds.js';
 	import { isWide } from '#lib/tiles.js';
 	import { scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
@@ -109,8 +110,8 @@
 			case 'waterheater': return `${device.reading && numeric(device.reading.value) ? measure(device.reading.value, device.reading.unit ?? '°C', { short: true }) : '—'}${numeric(a.target) ? ` → ${a.target}°` : ''} · ${plain(device.state)}`;
 			case 'alarm': return plain(device.state.replace('armed_', 'armed ').replace('arming', 'arming…'));
 			case 'siren': return on ? 'Sounding' : 'Off';
-			case 'input': return numeric(a.value) ? String(a.value) : (a.option ?? plain(device.state));
-			case 'weather': return `${plain(a.condition ?? device.state)}${numeric(a.target) ? ` · ${a.target}°` : ''}`;
+			case 'input': { const n = has('number'); return n && numeric(a.value) ? `${a.value}${n.unit ? ' ' + n.unit : ''}` : button ? 'Tap to press' : (a.option ?? plain(device.state)); }
+			case 'weather': return `${WEATHER[a.condition ?? device.state] ?? plain(a.condition ?? device.state)}${numeric(a.target) ? ` · ${a.target}°` : ''}`;
 			case 'sensor': case 'energy': {
 				if (!device.reading || ['unknown', 'unavailable', ''].includes(device.reading.value)) return 'No reading';
 				if (numeric(device.reading.value)) return measure(device.reading.value, device.reading.unit);

@@ -55,8 +55,8 @@ test("why it did or didn't run: the failed condition is named, in the words the 
   const r = (await j("GET", `/api/automations/${id}/trace`, admin)).json;
   expect(r.enabled).toBe(true);
   expect(r.runs.map((x: Body) => x.outcome)).toEqual(["skipped", "error", "ran"]); // newest first
-  expect(r.runs[0].why).toBe("It started, but someone is home wasn't true.");
-  expect(r.summary).toBe("It started, but someone is home wasn't true.");
+  expect(r.runs[0].why).toBe("It started, but a limit wasn't met: someone is home.");
+  expect(r.summary).toBe("It started, but a limit wasn't met: someone is home.");
   expect(JSON.stringify(r)).not.toContain("secret internal text");
   void haId;
   await j("POST", `/api/automations/${id}/enabled`, admin, { enabled: false });

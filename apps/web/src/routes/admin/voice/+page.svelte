@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { KIND_SINGULAR } from '#lib/kinds.js';
 	import { onMount } from 'svelte';
 	import { api, explain, sensitive } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
@@ -21,7 +22,7 @@
 		if (!r.ok) msg = r.data?.message ?? explain(r.data?.error);
 		await load();
 	}
-	const CAT: Record<string, string> = { light: 'Light', switch: 'Switch or plug', fan: 'Fan', climate: 'Heating or cooling', media: 'Media player' };
+	const CAT: Record<string, string> = { ...KIND_SINGULAR, light: 'Light', switch: 'Switch or plug', fan: 'Fan', climate: 'Heating or cooling', media: 'Media player' };
 	/** "Light · Kitchen", "Scene", "Routine": what it is, and where it lives. */
 	function about(i: Item) {
 		if (i.kind !== 'device') return i.kind === 'scene' ? 'Scene: sets several things at once' : 'Routine: runs a set of steps';

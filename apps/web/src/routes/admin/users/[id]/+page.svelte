@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { KIND_PLURAL } from '#lib/kinds.js';
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { ChevronDown, Search } from '@lucide/svelte';
@@ -33,7 +34,7 @@
 	onMount(load);
 
 	const LABEL: Record<string, string> = { rooms: 'Rooms', devices: 'Devices', scenes: 'Scenes', routines: 'Routines', automations: 'Automations', abilities: 'Abilities' };
-	const TYPE: Record<string, string> = { light: 'Lights', switch: 'Switches and plugs', fan: 'Fans', climate: 'Climate', lock: 'Locks', camera: 'Cameras', media: 'Media players', sensor: 'Sensors', energy: 'Energy meters' };
+	const TYPE: Record<string, string> = { ...KIND_PLURAL, light: 'Lights', switch: 'Switches and plugs', fan: 'Fans', climate: 'Climate', lock: 'Locks', camera: 'Cameras', media: 'Media players', sensor: 'Sensors', energy: 'Energy meters' };
 	const ABILITY: Record<string, readonly [title: string, hint: string]> = {
 		'device.control': ['Control devices', 'Switch, dim, lock and adjust the devices they can use'],
 		'scene.activate': ['Run scenes and routines', 'Start the ones they can use'],

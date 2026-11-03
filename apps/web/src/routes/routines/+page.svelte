@@ -16,6 +16,7 @@
 	import ScenesPanel from '#lib/components/app/panels/ScenesPanel.svelte';
 	import RoutinesPanel from '#lib/components/app/panels/RoutinesPanel.svelte';
 	import AutomationsPanel from '#lib/components/app/panels/AutomationsPanel.svelte';
+	import NativeAutomations from '#lib/components/app/NativeAutomations.svelte';
 	import { Button } from '#lib/components/ui/button';
 	import { Plus, Sparkles, TriangleAlert } from '@lucide/svelte';
 
@@ -63,6 +64,7 @@
 				{#if autoCount}<Group><AutomationsPanel /></Group>
 				{:else}<p class="rounded-2xl bg-secondary/60 px-4 py-4 text-sm text-muted-foreground">Nothing runs on its own yet. Start one from an idea below, for example lights that come on at sunset.</p>{/if}
 			</Section>
+			<NativeAutomations />
 		{/if}
 	{/if}
 

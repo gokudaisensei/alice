@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { KIND_SINGULAR } from '#lib/kinds.js';
 	import { untrack } from 'svelte';
 	import { api, explain } from '#lib/api.js';
 	import { home } from '#lib/home.svelte.js';
@@ -19,7 +20,7 @@
 	let q = $state(''), rows = $state<Row[]>([]), total = $state(0), picked = $state<string[]>([]), loading = $state(false), saving = $state(false), error = $state(''), only = $state<'all' | 'none'>('all');
 	let timer: ReturnType<typeof setTimeout>;
 	const roomName = (id: string | null) => (id ? home.rooms.find((r) => r.id === id)?.name : null);
-	const KIND: Record<string, string> = { light: 'Light', switch: 'Plug', fan: 'Fan', climate: 'Climate', lock: 'Lock', camera: 'Camera', media: 'Media', sensor: 'Sensor', energy: 'Energy' };
+	const KIND: Record<string, string> = { ...KIND_SINGULAR, light: 'Light', switch: 'Plug', fan: 'Fan', climate: 'Climate', lock: 'Lock', camera: 'Camera', media: 'Media', sensor: 'Sensor', energy: 'Energy' };
 
 	async function fetchPage(offset: number) {
 		loading = true;

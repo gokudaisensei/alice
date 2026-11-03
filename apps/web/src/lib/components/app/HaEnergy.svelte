@@ -12,12 +12,12 @@
 	$effect(() => { const r = range; data = null; api<Data>('GET', `/api/energy/ha?range=${r}`).then((x) => { if (x.ok && r === range) data = x.data; }); });
 
 	const num = (n: number) => (Math.abs(n) >= 100 ? Math.round(n).toLocaleString() : (Math.round(n * 10) / 10).toLocaleString());
-	const label = (d: string, bucket: 'day' | 'month') => bucket === 'month' ? new Date(d + '-15T12:00').toLocaleDateString([], { month: 'short' }) : new Date(d + 'T12:00').toLocaleDateString([], range === 'week' ? { weekday: 'short' } : { day: 'numeric' });
+	const label = (d: string, bucket: 'day' | 'month') => bucket === 'month' ? new Date(d + '-15T12:00').toLocaleDateString([], { month: 'short' }) : new Date(d + 'T12:00').toLocaleDateString([], range === 'week' ? { weekday: 'short', day: 'numeric' } : { day: 'numeric', month: 'short' });
 	const why = { ha_unavailable: 'Home Assistant can’t be reached right now.', not_configured: 'Set up the Energy dashboard in Home Assistant and its figures will appear here.', no_statistics: 'Home Assistant hasn’t recorded energy yet. Check back in an hour or two.' };
 </script>
 
 <section class="space-y-3 rounded-tile border bg-card p-3.5" aria-label="Energy from Home Assistant">
-	<div class="flex items-center justify-between gap-3"><h2 class="heading">Home energy</h2>
+	<div class="space-y-2.5"><h2 class="heading">Home energy</h2>
 		<Segmented options={[{ id: 'week', label: '7 days' }, { id: 'month', label: '30 days' }, { id: 'year', label: 'Year' }]} bind:value={range} label="Range" /></div>
 	{#if !data}<div class="h-28 animate-pulse rounded-xl bg-muted"></div>
 	{:else if !data.available}<p class="text-sm text-muted-foreground">{why[data.reason]}</p>

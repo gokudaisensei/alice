@@ -16,10 +16,10 @@
 	onMount(load);
 	async function bringIn() {
 		busy = true; error = '';
-		const r = await api('POST', '/api/admin/groups/ha-import', { labelIds: chosen.map((l) => l.id) });
+		const r = await api<{ created: number; linked: number }>('POST', '/api/admin/groups/ha-import', { labelIds: chosen.map((l) => l.id) });
 		busy = false;
 		if (!r.ok) { haptics.error(); error = r.data?.message ?? explain(r.data?.error); return; }
-		haptics.success(); await Promise.all([load(), home.load()]); home.say('ok', `Brought in ${plural(chosen.length, 'group')} from Home Assistant.`);
+		haptics.success(); await Promise.all([load(), home.load()]); home.say('ok', `Brought in ${plural(r.data.created + r.data.linked, 'group')} from Home Assistant.`);
 	}
 </script>
 

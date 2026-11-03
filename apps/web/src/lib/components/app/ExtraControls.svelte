@@ -48,7 +48,7 @@
 		{#if alarm.code}<Input type="password" inputmode="numeric" autocomplete="off" maxlength={12} placeholder="Alarm code" aria-label="Alarm code" bind:value={code} disabled={off} />{/if}
 		<div class="flex flex-wrap gap-2">
 			{#if armed}<Button size="sm" disabled={off} onclick={() => send('disarm', {})}>Disarm</Button>
-			{:else}{#each alarm.modes as m}<Button variant="secondary" size="sm" class="capitalize" disabled={off} onclick={() => send('arm', { mode: m })}>Arm {m === 'home' ? 'at home' : m}</Button>{/each}{/if}
+			{:else}{#each alarm.modes as m}<Button variant="secondary" size="sm" disabled={off} onclick={() => send('arm', { mode: m })}>Arm {m === 'home' ? 'at home' : m}</Button>{/each}{/if}
 		</div>
 	</div>
 {/if}

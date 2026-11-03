@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { KIND_SINGULAR } from '#lib/kinds.js';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -67,7 +68,7 @@
 			{#if devices.length}
 				<Group>{#each devices as d (d.id)}
 					{@const Icon = icons[d.category] ?? Gauge}
-					<Row onclick={() => open(d)} title={d.name} description={d.available ? capitalize(d.category) : 'Offline'}>
+					<Row onclick={() => open(d)} title={d.name} description={d.available ? (KIND_SINGULAR[d.category] ?? capitalize(d.category)) : 'Offline'}>
 						{#snippet icon()}<Icon class="size-[18px]" />{/snippet}
 						{#snippet trailing()}<Pencil class="size-4 text-muted-foreground/70" />{/snippet}
 					</Row>

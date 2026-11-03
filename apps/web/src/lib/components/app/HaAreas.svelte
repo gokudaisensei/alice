@@ -17,10 +17,10 @@
 
 	async function bringIn() {
 		busy = true; error = '';
-		const r = await api('POST', '/api/admin/rooms/ha-import', { areaIds: chosen.map((a) => a.id) });
+		const r = await api<{ created: number; linked: number }>('POST', '/api/admin/rooms/ha-import', { areaIds: chosen.map((a) => a.id) });
 		busy = false;
 		if (!r.ok) { haptics.error(); error = r.data?.message ?? explain(r.data?.error); return; }
-		haptics.success(); await Promise.all([load(), home.load()]); home.say('ok', `Brought in ${plural(chosen.length, 'room')} from Home Assistant.`);
+		haptics.success(); await Promise.all([load(), home.load()]); home.say('ok', `Brought in ${plural(r.data.created + r.data.linked, 'room')} from Home Assistant.`);
 	}
 </script>
 
