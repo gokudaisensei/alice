@@ -31,7 +31,7 @@ real("connects, loads the demo home, and describes real devices", async () => {
   expect(by("climate.hvac").controls.map((c: Body) => c.type)).toContain("thermostat");
   expect(by("lock.front_door").controls.map((c: Body) => c.type)).toContain("lock");
   expect(by("sensor.power_consumption")).toMatchObject({ category: "energy" });
-  expect(by("cover.kitchen_window")).toBeUndefined(); // covers are out of scope for ordinary users
+  expect(by("cover.kitchen_window")).toMatchObject({ category: "cover" }); // covers are offered now (P3); the demo window has open, close and position
 });
 
 real("a command reaches the real light and is confirmed by the real state change", async () => {

@@ -10,7 +10,14 @@ export type Control =
 	| { type: 'power' } | { type: 'brightness' } | { type: 'color_temp'; minK: number; maxK: number } | { type: 'color' }
 	| { type: 'fan_speed'; step: number }
 	| { type: 'thermostat'; min: number; max: number; step: number; modes: string[]; unit: string }
-	| { type: 'lock' } | { type: 'media'; playback: boolean; volume: boolean; power: boolean } | { type: 'camera' };
+	| { type: 'lock' } | { type: 'media'; playback: boolean; volume: boolean; power: boolean } | { type: 'camera' }
+	| { type: 'cover'; position: boolean; tilt: boolean; stop: boolean; cls: string | null }
+	| { type: 'vacuum'; start: boolean; pause: boolean; dock: boolean; locate: boolean; speeds: string[] }
+	| { type: 'humidifier'; min: number; max: number; modes: string[] }
+	| { type: 'valve'; position: boolean; stop: boolean; cls: string | null }
+	| { type: 'alarm'; modes: ('home' | 'away' | 'night' | 'vacation')[]; code: boolean }
+	| { type: 'number'; min: number; max: number; step: number; unit: string | null }
+	| { type: 'select'; options: string[] } | { type: 'press' };
 
 /** The readings the server picks out for each kind of device. Which ones are present depends on the device. */
 export type DeviceAttrs = {
@@ -18,6 +25,10 @@ export type DeviceAttrs = {
 	speedPct?: number | null;
 	target?: number | null; hvacAction?: string | null;
 	volumePct?: number | null; title?: string | null;
+	positionPct?: number | null; tiltPct?: number | null;
+	speed?: string | null; batteryPct?: number | null;
+	humidityPct?: number | null; targetHumidityPct?: number | null; mode?: string | null;
+	codeRequired?: boolean; value?: number | null; option?: string | null; condition?: string | null;
 };
 
 export type Device = {

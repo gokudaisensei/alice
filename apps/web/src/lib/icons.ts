@@ -1,4 +1,4 @@
-import { Activity, Blinds, Bed, Camera, Coffee, CookingPot, DoorClosed, DoorOpen, Droplets, Fan, Gauge, Heater, Lamp, LampDesk, Lightbulb, Lock, LockOpen, Microwave, Plug, Refrigerator, ToggleRight, Siren, Sofa, Speaker, Thermometer, Tv, Warehouse, WashingMachine, Zap, type House } from '@lucide/svelte';
+import { Activity, Blinds, Bot, CloudSun, Shield, ShieldCheck, SlidersHorizontal, Bed, Camera, Coffee, CookingPot, DoorClosed, DoorOpen, Droplets, Fan, Gauge, Heater, Lamp, LampDesk, Lightbulb, Lock, LockOpen, Microwave, Plug, Refrigerator, ToggleRight, Siren, Sofa, Speaker, Thermometer, Tv, Warehouse, WashingMachine, Zap, type House } from '@lucide/svelte';
 import type { Device } from './home.svelte.js';
 import { sensorWord } from './fmt.js';
 
@@ -39,6 +39,14 @@ export function iconFor(d: Pick<Device, 'category' | 'state' | 'name' | 'reading
 		case 'camera': return Camera;
 		case 'media': return /speaker|sound|music/i.test(d.name) ? Speaker : Tv;
 		case 'energy': return Zap;
+		case 'cover': return d.deviceClass === 'garage' || /garage/i.test(d.name) ? Warehouse : d.deviceClass === 'door' || d.deviceClass === 'gate' ? DoorClosed : Blinds;
+		case 'vacuum': return Bot;
+		case 'humidifier': case 'valve': return Droplets;
+		case 'waterheater': return Heater;
+		case 'siren': return Siren;
+		case 'alarm': return d.state.startsWith('armed') ? ShieldCheck : Shield;
+		case 'input': return SlidersHorizontal;
+		case 'weather': return CloudSun;
 		case 'switch': { const k = NAMED.find(([re]) => re.test(d.name))?.[1]; return (k && BY_KEY.get(k)) || (d.deviceClass === 'outlet' ? Plug : ToggleRight); }
 		case 'sensor': {
 			const cls = d.reading?.cls ?? '';

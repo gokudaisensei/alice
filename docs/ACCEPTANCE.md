@@ -44,7 +44,7 @@ How each requirement of the specification is met, and the evidence. ✅ shown by
 | Health page | `backup.test.ts`, `updates.test.ts` | ✅ |
 
 ## Explicit exclusions (confirmed absent)
-Covers/blinds are not offered to ordinary users (`real-ha.test.ts`); no AI/ML anywhere (insights are plain SQL thresholds); no user-defined modes (four fixed); no drag-and-drop dashboards (two fixed layouts, ordered lists); no native app (installable web app only); no integration UI for household admins.
+Covers are offered since P3, but opening a garage, gate or door cover asks for a fresh passkey check (`adapters.test.ts`); no AI/ML anywhere (insights are plain SQL thresholds); no user-defined modes (four fixed); no drag-and-drop dashboards (two fixed layouts, ordered lists); no native app (installable web app only); no integration UI for household admins.
 
 ## Resilience
 | Scenario | Evidence | |

@@ -9,6 +9,7 @@
 	import * as Drawer from '#lib/components/ui/drawer';
 	import DeviceHistory from '#lib/components/app/DeviceHistory.svelte';
 	import DeviceAbout from '#lib/components/app/DeviceAbout.svelte';
+	import ExtraControls from '#lib/components/app/ExtraControls.svelte';
 	import { isWide } from '#lib/tiles.js';
 	import { scale } from 'svelte/transition';
 	import { backOut } from 'svelte/easing';
@@ -62,12 +63,17 @@
 	const sliderTone = $derived(tone === 'on' ? '[&_[data-slot=slider-track]]:bg-on/25 [&_[data-slot=slider-range]]:bg-on' : '[&_[data-slot=slider-range]]:bg-primary');
 
 	/** Pressing the icon does the obvious thing: switch it, lock it, play it. Pressing anywhere else opens the details. */
-	const toggleable = $derived(device.available && !!(has('power') || has('lock') || media?.power || media?.playback));
-	const toggleLabel = $derived(has('lock') ? (device.state === 'locked' ? 'unlock' : 'lock') : media?.playback && !has('power') ? (device.state === 'playing' ? 'pause' : 'play') : device.state === 'on' || device.state === 'playing' ? 'switch off' : 'switch on');
+	const opener = $derived(has('cover') ?? has('valve')), vac = $derived(has('vacuum')), button = $derived(has('press'));
+	const toggleable = $derived(device.available && !!(has('power') || has('lock') || media?.power || media?.playback || opener || vac?.start || button));
+	const isOpen = $derived(['open', 'opening'].includes(device.state));
+	const toggleLabel = $derived(opener && !has('power') ? (isOpen ? 'close' : 'open') : button ? 'press' : vac && !has('power') ? (device.state === 'cleaning' ? 'send home' : 'start') : has('lock') ? (device.state === 'locked' ? 'unlock' : 'lock') : media?.playback && !has('power') ? (device.state === 'playing' ? 'pause' : 'play') : device.state === 'on' || device.state === 'playing' ? 'switch off' : 'switch on');
 	function toggle() {
 		haptics.tap();
 		if (selection.active) { selection.toggle(device.id); return; } // while choosing several, the icon chooses too
 		if (has('power')) home.command(device.id, device.state === 'on' ? 'turn_off' : 'turn_on');
+		else if (opener) home.command(device.id, isOpen ? 'close' : 'open');
+		else if (button) home.command(device.id, 'press');
+		else if (vac) home.command(device.id, device.state === 'cleaning' && vac.dock ? 'vacuum_dock' : 'vacuum_start');
 		else if (has('lock')) home.command(device.id, device.state === 'locked' ? 'unlock' : 'lock');
 		else if (media?.power) home.command(device.id, device.state === 'off' ? 'turn_on' : 'turn_off');
 		else if (media?.playback) home.command(device.id, device.state === 'playing' ? 'media_pause' : 'media_play');
@@ -97,6 +103,14 @@
 			case 'climate': return `${device.reading && numeric(device.reading.value) ? measure(device.reading.value, device.reading.unit ?? '°C', { short: true }) : '—'}${numeric(a.target) ? ` → ${a.target}°` : ''} · ${plain(device.state)}`;
 			case 'lock': return `${device.state === 'locked' ? 'Locked' : device.state === 'unlocked' ? 'Unlocked' : plain(device.state)}${since ? ` · ${since}` : ''}`;
 			case 'media': return device.state === 'off' ? 'Off' : (a.title ?? plain(device.state));
+			case 'cover': case 'valve': return `${plain(device.state)}${numeric(a.positionPct) && !['closed', 'closing'].includes(device.state) ? ` · ${a.positionPct}%` : ''}`;
+			case 'vacuum': return `${plain(device.state)}${numeric(a.batteryPct) ? ` · ${a.batteryPct}%` : ''}`;
+			case 'humidifier': return on ? `On${numeric(a.humidityPct) ? ` · ${a.humidityPct}% humidity` : ''}` : 'Off';
+			case 'waterheater': return `${device.reading && numeric(device.reading.value) ? measure(device.reading.value, device.reading.unit ?? '°C', { short: true }) : '—'}${numeric(a.target) ? ` → ${a.target}°` : ''} · ${plain(device.state)}`;
+			case 'alarm': return plain(device.state.replace('armed_', 'armed ').replace('arming', 'arming…'));
+			case 'siren': return on ? 'Sounding' : 'Off';
+			case 'input': return numeric(a.value) ? String(a.value) : (a.option ?? plain(device.state));
+			case 'weather': return `${plain(a.condition ?? device.state)}${numeric(a.target) ? ` · ${a.target}°` : ''}`;
 			case 'sensor': case 'energy': {
 				if (!device.reading || ['unknown', 'unavailable', ''].includes(device.reading.value)) return 'No reading';
 				if (numeric(device.reading.value)) return measure(device.reading.value, device.reading.unit);
@@ -201,6 +215,7 @@
 					<Button variant="secondary" size="sm" disabled={off} onclick={() => home.command(device.id, 'media_pause')}><Pause />Pause</Button>
 				</div>
 			{/if}
+			<ExtraControls {device} {off} {sliderTone} />
 			{#if has('camera')}
 				<img src={snap} alt="Latest picture from {device.name}" class="aspect-video max-h-56 w-full rounded-xl bg-muted object-cover" loading="lazy" />
 			{/if}

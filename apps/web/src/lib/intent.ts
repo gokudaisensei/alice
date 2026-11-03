@@ -57,7 +57,7 @@ export function parseIntent(raw: string, c: Ctx): Intent | null {
 	if (cat && !nameWords.length) pool = pool.filter((d) => d.category === cat);
 	else if (nameWords.length) pool = pool.filter((d) => nameWords.every((w) => norm(d.name).split(' ').includes(w)));
 	else if (!room) return null;
-	if (action === 'turn_on' || action === 'turn_off') pool = pool.filter((d) => d.category !== 'lock' && d.category !== 'sensor' && d.category !== 'energy' && d.category !== 'camera');
+	if (action === 'turn_on' || action === 'turn_off') pool = pool.filter((d) => ['light', 'switch', 'fan', 'climate', 'media', 'humidifier'].includes(d.category)); // never a door, gate, valve or alarm
 	if (action === 'set_brightness') pool = pool.filter((d) => d.category === 'light');
 	if (!pool.length) return null;
 	if (!wantsAll && !room && pool.length > 1 && nameWords.length && !cat) return null; // "kitchen" matched several different things: don't guess

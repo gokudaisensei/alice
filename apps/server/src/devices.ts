@@ -17,6 +17,12 @@ export type DeviceAttrs = {
   speedPct?: number | null; // fans
   target?: number | null; hvacAction?: string | null; // thermostats
   volumePct?: number | null; title?: string | null; // media players
+  positionPct?: number | null; tiltPct?: number | null; // covers and valves
+  speed?: string | null; batteryPct?: number | null; // vacuums
+  humidityPct?: number | null; targetHumidityPct?: number | null; mode?: string | null; // humidifiers
+  codeRequired?: boolean; // alarm panels
+  value?: number | null; option?: string | null; // numbers and selects
+  condition?: string | null; // weather
 };
 
 export type DeviceView = {
@@ -68,6 +74,14 @@ function attrsOf(d: Descriptor, e: HaEntity): DeviceAttrs {
     out.brightnessPct = typeof a.brightness === "number" ? Math.round((a.brightness / 255) * 100) : null;
     out.colorTempK = round(a.color_temp_kelvin); out.hs = Array.isArray(a.hs_color) ? a.hs_color.filter((x): x is number => typeof x === "number") : null;
   } else if (d.domain === "fan") out.speedPct = round(a.percentage);
+  else if (d.domain === "cover" || d.domain === "valve") { out.positionPct = round(a.current_position); out.tiltPct = round(a.current_tilt_position); }
+  else if (d.domain === "vacuum") { out.speed = typeof a.fan_speed === "string" ? a.fan_speed : null; out.batteryPct = round(a.battery_level); }
+  else if (d.domain === "humidifier") { out.humidityPct = round(a.current_humidity); out.targetHumidityPct = round(a.humidity); out.mode = typeof a.mode === "string" ? a.mode : null; }
+  else if (d.domain === "water_heater") { out.target = typeof a.temperature === "number" ? a.temperature : null; out.mode = typeof a.operation_mode === "string" ? a.operation_mode : null; }
+  else if (d.domain === "alarm_control_panel") out.codeRequired = a.code_format === "number" || a.code_format === "text";
+  else if (d.domain === "number" || d.domain === "input_number") out.value = Number.isFinite(Number(e.state)) ? Number(e.state) : null;
+  else if (d.domain === "select" || d.domain === "input_select") out.option = e.state;
+  else if (d.domain === "weather") { out.condition = e.state; out.target = typeof a.temperature === "number" ? a.temperature : null; out.humidityPct = round(a.humidity); }
   else if (d.domain === "climate") { out.target = typeof a.temperature === "number" ? a.temperature : null; out.hvacAction = typeof a.hvac_action === "string" ? a.hvac_action : null; }
   else if (d.domain === "media_player") { out.volumePct = typeof a.volume_level === "number" ? Math.round(a.volume_level * 100) : null; out.title = typeof a.media_title === "string" ? a.media_title : null; }
   return out;
@@ -151,7 +165,7 @@ export function createDeviceService(db: Database, ha: HaApi) {
     if ("error" in call) return { status: 400, body: { error: call.error, message: say(call.error, view.name) } };
     if (call.sensitive && Date.now() - u.reauthAt > SESSION.reauthMs) return { status: 401, body: { error: "reauth_required" } };
     const res = await ha.callService(call.domain, call.service, call.data, id);
-    if (call.domain === "lock") audit(db, { householdId: u.householdId, actorType: "user", actorId: u.id, action: `lock.${call.service}`, target: id, outcome: res.ok ? "success" : "failure" });
+    if (call.domain === "lock" || call.sensitive) audit(db, { householdId: u.householdId, actorType: "user", actorId: u.id, action: call.domain === "lock" ? `lock.${call.service}` : `${call.domain}.${call.service}`, target: id, outcome: res.ok ? "success" : "failure" });
     if (!res.ok) return { status: res.error === "ha_unavailable" ? 503 : 409, body: { error: res.error, message: say(res.error, view.name) } };
     let confirmed = await ha.waitForChange(id, entity, 1500);
     const now = ha.entities.get(id);
@@ -251,7 +265,7 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
       if (!q) return { devices: [], rooms: [], scenes: [], routines: [] };
       const rooms = roomRows(db, ha, g.user.householdId).map(({ id, name }) => ({ id, name }));
       const roomName = new Map(rooms.map((r) => [r.id, r.name.toLowerCase()]));
-      const words: Record<Category, string> = { light: "light lights lamp", switch: "switch plug outlet socket", fan: "fan", climate: "thermostat climate air conditioner ac heating", sensor: "sensor", lock: "lock door", camera: "camera", media: "media tv television speaker player", energy: "energy power meter" };
+      const words: Record<Category, string> = { light: "light lights lamp", switch: "switch plug outlet socket", fan: "fan", climate: "thermostat climate air conditioner ac heating", sensor: "sensor", lock: "lock door", camera: "camera", media: "media tv television speaker player", energy: "energy power meter", cover: "cover blind blinds curtain shade garage gate shutter", vacuum: "vacuum robot cleaner", humidifier: "humidifier humidity", valve: "valve water gas", waterheater: "water heater geyser boiler", siren: "siren alarm", alarm: "alarm security", input: "helper switch number option button", weather: "weather forecast" };
       const matches = (d: DeviceView) => d.name.toLowerCase().includes(q) || (!!d.roomId && !!roomName.get(d.roomId)?.includes(q)) || words[d.category].split(" ").some((w) => w.startsWith(q));
       const devices = svc.visibleDevices(g.user).filter(matches).slice(0, 20);
       return { devices: devices.map((d) => ({ id: d.id, name: d.name, category: d.category, roomId: d.roomId })), rooms: rooms.filter((r) => r.name.toLowerCase().includes(q)).slice(0, 10), ...extraSearch(g.user, q) };
