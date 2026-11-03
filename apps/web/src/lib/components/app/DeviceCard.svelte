@@ -255,8 +255,6 @@
 {#snippet tileSwitch()}
 	{#if selection.active || !device.available}
 		<!-- nothing to switch while choosing several, or when the device can't be reached -->
-	{:else if has('power')}
-		<Switch class="pointer-events-auto relative z-20" checked={device.state === 'on'} disabled={off} aria-label="{device.name}: {device.state === 'on' ? 'on' : 'off'}" onCheckedChange={(v) => { haptics.tap(); home.command(device.id, v ? 'turn_on' : 'turn_off'); if (v && has('brightness')) slideHint(); }} />
 	{:else if has('lock') && device.state !== 'locked'}
 		<Button class="pointer-events-auto relative z-20" size="sm" variant="secondary" disabled={off} onclick={toggle}>Lock</Button>
 	{/if}

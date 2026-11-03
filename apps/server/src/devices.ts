@@ -99,7 +99,7 @@ export function createDeviceService(db: Database, ha: HaApi) {
   }
 
   /** Names a card after its physical device when that device shows as two or more cards ("Spaceship · Speaker"); a lone card keeps its own name. */
-  function withSubtitles(views: DeviceView[]): DeviceView[] {
+  function withSubtitles(views: DeviceView[], named: Map<string, DeviceMeta>): DeviceView[] {
     const parents = ha.parents; if (!parents?.size) return views;
     const count = new Map<string, number>();
     for (const v of views) { const p = parents.get(v.id); if (p) count.set(p.deviceId, (count.get(p.deviceId) ?? 0) + 1); }
@@ -109,14 +109,16 @@ export function createDeviceService(db: Database, ha: HaApi) {
     return views.map((v) => {
       const p = parents.get(v.id);
       if (!p || (count.get(p.deviceId) ?? 0) < 2) return v;
-      return { ...v, subtitle: `${sentence(p.deviceName)} · ${partOf(v.category, p, String(ha.entities.get(v.id)?.attributes.friendly_name ?? v.id), ha.entities.get(v.id)?.attributes.device_class)}` };
+      // The hub's own name for a part repeats its device ("spaceship microphone Microphone mute"); inside a group the part's own label is enough.
+      const own = !named.get(v.id)?.name && p.label ? sentence(p.label) : null;
+      return { ...v, ...(own ? { name: own } : {}), subtitle: `${sentence(p.deviceName)} · ${partOf(v.category, p, String(ha.entities.get(v.id)?.attributes.friendly_name ?? v.id), ha.entities.get(v.id)?.attributes.device_class)}` };
     });
   }
 
   function visibleDevices(u: SessionUser): DeviceView[] {
     const ok = accessor(u), m = meta(u.householdId), out: DeviceView[] = [];
     for (const e of ha.entities.values()) { const v = ok(e.entity_id) ? viewOf(e, m.get(e.entity_id)) : null; if (v) out.push(v); }
-    return withSubtitles(out).sort((a, b) => a.name.localeCompare(b.name));
+    return withSubtitles(out, m).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   function deviceFor(u: SessionUser, id: string): { entity: HaEntity; view: DeviceView } | null {
@@ -126,7 +128,7 @@ export function createDeviceService(db: Database, ha: HaApi) {
     if (!view) return null;
     const p = ha.parents?.get(id);
     // Counting siblings needs every card of that device, so only do the work for entities that have a parent.
-    if (p) { const m = meta(u.householdId), ok = accessor(u); const sibs = [...ha.entities.values()].filter((x) => ha.parents?.get(x.entity_id)?.deviceId === p.deviceId && ok(x.entity_id)).map((x) => viewOf(x, m.get(x.entity_id))).filter((x): x is DeviceView => !!x); return { entity: e, view: withSubtitles(sibs).find((x) => x.id === id) ?? view }; }
+    if (p) { const m = meta(u.householdId), ok = accessor(u); const sibs = [...ha.entities.values()].filter((x) => ha.parents?.get(x.entity_id)?.deviceId === p.deviceId && ok(x.entity_id)).map((x) => viewOf(x, m.get(x.entity_id))).filter((x): x is DeviceView => !!x); return { entity: e, view: withSubtitles(sibs, m).find((x) => x.id === id) ?? view }; }
     return { entity: e, view };
   }
 
