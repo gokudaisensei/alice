@@ -17,6 +17,9 @@ type HaMessage =
   | HaReply;
 /** The answer to a command we sent, matched by `id`. */
 export type HaReply = { type?: "result"; id?: number; success: boolean; error?: { code?: string; message?: string }; result?: unknown };
+/** The physical device an entity is a part of. `label` is what the entity is called within it; `cls` is its device class. */
+export type Parent = { deviceId: string; deviceName: string; label: string | null; cls: string | null };
+
 export interface HaHealth { health(): "ok" | "unreachable" | "auth_failed" }
 export type HaEvent = { type: "entity"; entityId: string } | { type: "conn" };
 export type CallResult = { ok: true } | { ok: false; error: string };
@@ -24,6 +27,8 @@ export interface HaApi extends HaHealth {
   entities: ReadonlyMap<string, HaEntity>;
   /** Entities the hub marks as configuration, diagnostics, hidden or disabled: parts of a device, not things to show as devices. */
   secondary?: ReadonlySet<string>;
+  /** Which physical device an entity belongs to, from the hub's registries (name as the person sees it, and the entity's own label). */
+  parents?: ReadonlyMap<string, Parent>;
   isStale(): boolean;
   callService(domain: string, service: string, data?: Record<string, unknown>, entityId?: string): Promise<CallResult>;
   /** Resolves true if HA reports a new state for the entity within `ms` (i.e. the device actually responded). */
@@ -47,6 +52,7 @@ export class HaClient implements HaApi {
   conn: HaConn = "disconnected";
   entities = new Map<string, HaEntity>();
   secondary = new Set<string>();
+  parents = new Map<string, Parent>();
   lastMessageAt = 0;
   private sock: WebSocket | null = null;
   private nextId = 1;
@@ -110,8 +116,23 @@ export class HaClient implements HaApi {
       // Which entities are only parts of a device (a bulb's "do not disturb" switch). Without the registry every entity is shown, as before.
       const reg = await this.send({ type: "config/entity_registry/list" });
       if (reg.success && Array.isArray(reg.result)) {
-        type Row = { entity_id?: string; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null };
-        this.secondary = new Set((reg.result as Row[]).filter((x) => x.entity_id && (x.entity_category || x.hidden_by || x.disabled_by)).map((x) => x.entity_id as string));
+        type Row = { entity_id?: string; device_id?: string | null; name?: string | null; original_name?: string | null; device_class?: string | null; original_device_class?: string | null; entity_category?: string | null; hidden_by?: string | null; disabled_by?: string | null };
+        const rows = reg.result as Row[];
+        this.secondary = new Set(rows.filter((x) => x.entity_id && (x.entity_category || x.hidden_by || x.disabled_by)).map((x) => x.entity_id as string));
+        const dev = await this.send({ type: "config/device_registry/list" });
+        const names = new Map<string, string>(), via = new Map<string, string>();
+        if (dev.success && Array.isArray(dev.result)) for (const d of dev.result as { id?: string; name?: string | null; name_by_user?: string | null; via_device_id?: string | null; connections?: [string, string][] }[]) { const n = d.name_by_user || d.name; if (d.id && n) names.set(d.id, n); if (d.id && d.via_device_id) via.set(d.id, d.via_device_id); }
+        // The same hardware can be registered twice by different integrations (an ESPHome device that is also an AirPlay receiver); they share a MAC address.
+        const macs = new Map<string, string[]>();
+        if (dev.success && Array.isArray(dev.result)) for (const d of dev.result as { id?: string; via_device_id?: string | null; connections?: [string, string][] }[]) for (const [k, v] of d.connections ?? []) if (k === "mac" && d.id && !d.via_device_id) macs.set(v.toLowerCase(), [...(macs.get(v.toLowerCase()) ?? []), d.id]);
+        const parentsOf = new Set(via.values()), sameAs = new Map<string, string>();
+        for (const ids of macs.values()) { const main = ids.find((i) => parentsOf.has(i)) ?? ids[0]!; for (const i of ids) sameAs.set(i, main); }
+        // A device that is part of another (an ESPHome device's camera or microphone) belongs to the one at the top.
+        const root = (id: string) => { let r = id; for (let i = 0; i < 5 && via.has(r) && names.has(via.get(r)!); i++) r = via.get(r)!; return sameAs.get(r) ?? r; };
+        this.parents = new Map(rows.flatMap((x): [string, Parent][] => {
+          const top = x.device_id ? root(x.device_id) : undefined, n = top ? names.get(top) : undefined;
+          return x.entity_id && x.device_id && n ? [[x.entity_id, { deviceId: top!, deviceName: n, label: x.name || x.original_name || null, cls: x.device_class || x.original_device_class || null }]] : [];
+        }));
         this.emit({ type: "conn" });
       }
       return;

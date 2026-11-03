@@ -29,6 +29,10 @@ export type Device = {
 	changedAt?: number | null;
 	/** the icon a person chose for it; null lets the app pick one */
 	icon?: string | null;
+	/** the hub's device class (outlet, speaker, …), when it gives one */
+	deviceClass?: string | null;
+	/** "Spaceship · Speaker": set only when a physical device shows as several cards */
+	subtitle?: string | null;
 };
 export type Room = { id: string; name: string; color?: string | null; icon?: string | null };
 export type Group = { id: string; name: string; deviceIds: string[] };

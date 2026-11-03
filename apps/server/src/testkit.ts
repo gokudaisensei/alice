@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { migrate, openDb } from "./db";
 import { ensureBootstrapCode, issueEnrollmentToken } from "./auth";
 import { realWebAuthn, type WebAuthnService } from "./webauthn";
-import type { CallResult, HaApi, HaAttributes, HaEntity, HaEvent, HaReply } from "./ha";
+import type { CallResult, HaApi, HaAttributes, HaEntity, HaEvent, HaReply, Parent } from "./ha";
 import { asObject } from "./http";
 
 /**
@@ -53,6 +53,7 @@ export function fixtureEntities(): HaEntity[] {
 export class FakeHa implements HaApi {
   entities = new Map<string, HaEntity>(fixtureEntities().map((e) => [e.entity_id, e]));
   secondary = new Set<string>();
+  parents = new Map<string, Parent>();
   stale = false;
   calls: { domain: string; service: string; data: Record<string, unknown>; entityId?: string }[] = [];
   failing = new Set<string>();

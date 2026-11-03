@@ -3,7 +3,7 @@ import type { Database } from "bun:sqlite";
 import { audit } from "./audit";
 import { describe, toServiceCall, type Category, type Command, type Control, type Descriptor, type Reading } from "./capabilities";
 import { authorize } from "./guard";
-import type { HaApi, HaEntity } from "./ha";
+import type { HaApi, HaEntity, Parent } from "./ha";
 import { SESSION, lookupSession, type SessionUser } from "./session";
 import { readCookie } from "./auth";
 import { MODE_ENTITY } from "./modes";
@@ -28,7 +28,30 @@ export type DeviceView = {
   icon: string | null;
   /** when the state last changed, as reported by the hub (ms since 1970) */
   changedAt: number | null;
+  /** the hub's device class (outlet, speaker, …) when it gives one, so a plain switch is not mistaken for a plug */
+  deviceClass: string | null;
+  /** "Spaceship · Speaker": only for a physical device that shows as more than one card here */
+  subtitle: string | null;
 };
+
+const sentence = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
+const FUNCTIONS: Partial<Record<Category, string>> = { light: "Light", fan: "Fan", climate: "Thermostat", lock: "Lock", camera: "Camera" };
+const MEDIA: Record<string, string> = { speaker: "Speaker", tv: "TV", receiver: "Receiver" };
+const SWITCH: Record<string, string> = { outlet: "Outlet", switch: "Switch" };
+
+/** What a card is within its device, from what the hub says it is (never from its name): "Speaker", "Camera", or its own label when the hub gives no class. */
+export function partOf(category: Category, p: Parent, friendly: string, attrCls?: unknown): string {
+  const cls = p.cls ?? (typeof attrCls === "string" ? attrCls : "");
+  const own = () => {
+    const l = p.label ?? friendly;
+    const lower = l.toLowerCase(), dn = p.deviceName.toLowerCase();
+    return sentence((lower.startsWith(dn + " ") ? l.slice(dn.length + 1) : l).trim());
+  };
+  if (category === "media") return MEDIA[cls] ?? "Media player";
+  if (category === "switch") return SWITCH[cls] ?? own();
+  if (category === "sensor" || category === "energy") return cls ? sentence(cls.replace(/_/g, " ")) : own();
+  return FUNCTIONS[category] ?? own();
+}
 
 export type DeviceMeta = { entity_id: string; name: string | null; room_id: string | null; hidden: number; icon: string | null };
 type RunResult =
@@ -71,20 +94,40 @@ export function createDeviceService(db: Database, ha: HaApi) {
       available: !stale && !offline, reason: stale ? "home_assistant_unavailable" : offline ? "device_offline" : null,
       state: e.state, controls: d.controls, reading: d.reading, attrs: attrsOf(d, e),
       changedAt: Date.parse(e.last_changed ?? e.last_updated ?? "") || null, icon: m?.icon ?? null,
+      deviceClass: ha.parents?.get(e.entity_id)?.cls ?? (typeof e.attributes.device_class === "string" ? e.attributes.device_class : null), subtitle: null,
     };
+  }
+
+  /** Names a card after its physical device when that device shows as two or more cards ("Spaceship · Speaker"); a lone card keeps its own name. */
+  function withSubtitles(views: DeviceView[]): DeviceView[] {
+    const parents = ha.parents; if (!parents?.size) return views;
+    const count = new Map<string, number>();
+    for (const v of views) { const p = parents.get(v.id); if (p) count.set(p.deviceId, (count.get(p.deviceId) ?? 0) + 1); }
+    // A player with no class beside a speaker on the same device is that speaker over another protocol (AirPlay, Cast): one is enough.
+    const speakers = new Set(views.filter((v) => v.category === "media" && v.deviceClass === "speaker").map((v) => parents.get(v.id)?.deviceId));
+    views = views.filter((v) => !(v.category === "media" && v.deviceClass !== "speaker" && speakers.has(parents.get(v.id)?.deviceId)));
+    return views.map((v) => {
+      const p = parents.get(v.id);
+      if (!p || (count.get(p.deviceId) ?? 0) < 2) return v;
+      return { ...v, subtitle: `${sentence(p.deviceName)} · ${partOf(v.category, p, String(ha.entities.get(v.id)?.attributes.friendly_name ?? v.id), ha.entities.get(v.id)?.attributes.device_class)}` };
+    });
   }
 
   function visibleDevices(u: SessionUser): DeviceView[] {
     const ok = accessor(u), m = meta(u.householdId), out: DeviceView[] = [];
     for (const e of ha.entities.values()) { const v = ok(e.entity_id) ? viewOf(e, m.get(e.entity_id)) : null; if (v) out.push(v); }
-    return out.sort((a, b) => a.name.localeCompare(b.name));
+    return withSubtitles(out).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   function deviceFor(u: SessionUser, id: string): { entity: HaEntity; view: DeviceView } | null {
     const e = ha.entities.get(id);
     if (!e || !accessor(u)(id)) return null; // same answer for "missing" and "not yours"
     const view = viewOf(e, meta(u.householdId).get(id));
-    return view ? { entity: e, view } : null;
+    if (!view) return null;
+    const p = ha.parents?.get(id);
+    // Counting siblings needs every card of that device, so only do the work for entities that have a parent.
+    if (p) { const m = meta(u.householdId), ok = accessor(u); const sibs = [...ha.entities.values()].filter((x) => ha.parents?.get(x.entity_id)?.deviceId === p.deviceId && ok(x.entity_id)).map((x) => viewOf(x, m.get(x.entity_id))).filter((x): x is DeviceView => !!x); return { entity: e, view: withSubtitles(sibs).find((x) => x.id === id) ?? view }; }
+    return { entity: e, view };
   }
 
   const MESSAGES: Record<string, string> = {

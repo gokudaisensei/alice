@@ -263,10 +263,11 @@
 {/snippet}
 {#snippet label()}
 	<h3 class="line-clamp-2 break-words text-[0.9375rem] font-semibold leading-[1.15] tracking-[-0.015em]">{device.name}</h3>
+	{#if device.subtitle}<p class="mt-0.5 truncate text-xs {sub[tone]}">{device.subtitle}</p>{/if}
 	{#if short || !device.available}<p class="mt-0.5 truncate text-[0.8125rem] {sub[tone]}" aria-live="polite">{#if !device.available}<Badge variant="outline" class="-ml-0.5 h-5 px-2">{short}</Badge>{:else}{short}{/if}</p>{/if}
 {/snippet}
 {#snippet drawerBody()}
-	<Drawer.Header class="px-0 pb-1"><Drawer.Title class="flex items-center gap-3 text-left"><span class="flex size-10 shrink-0 items-center justify-center rounded-full {chip[tone]}" style="view-transition-name: dev-chip"><Icon class="size-5" aria-hidden="true" /></span><span class="min-w-0"><span class="block truncate text-lg font-semibold tracking-[-0.02em]">{device.name}</span><span class="block text-sm font-normal text-muted-foreground">{status}</span></span></Drawer.Title><Drawer.Description class="sr-only">Controls for {device.name}</Drawer.Description></Drawer.Header>
+	<Drawer.Header class="px-0 pb-1"><Drawer.Title class="flex items-center gap-3 text-left"><span class="flex size-10 shrink-0 items-center justify-center rounded-full {chip[tone]}" style="view-transition-name: dev-chip"><Icon class="size-5" aria-hidden="true" /></span><span class="min-w-0"><span class="block truncate text-lg font-semibold tracking-[-0.02em]">{device.name}</span>{#if device.subtitle}<span class="block truncate text-xs font-normal text-muted-foreground">{device.subtitle}</span>{/if}<span class="block text-sm font-normal text-muted-foreground">{status}</span></span></Drawer.Title><Drawer.Description class="sr-only">Controls for {device.name}</Drawer.Description></Drawer.Header>
 	<div class="space-y-5 pt-2">
 		{#if device.available && (has('power') || (has('lock') && device.state !== 'locked'))}
 			<div class="flex items-center justify-between rounded-2xl bg-secondary/60 px-4 py-3">

@@ -1,4 +1,4 @@
-import { Activity, Blinds, Bed, Camera, Coffee, CookingPot, DoorClosed, DoorOpen, Droplets, Fan, Gauge, Heater, Lamp, LampDesk, Lightbulb, Lock, LockOpen, Microwave, Plug, Refrigerator, Siren, Sofa, Speaker, Thermometer, Tv, Warehouse, WashingMachine, Zap, type House } from '@lucide/svelte';
+import { Activity, Blinds, Bed, Camera, Coffee, CookingPot, DoorClosed, DoorOpen, Droplets, Fan, Gauge, Heater, Lamp, LampDesk, Lightbulb, Lock, LockOpen, Microwave, Plug, Refrigerator, ToggleRight, Siren, Sofa, Speaker, Thermometer, Tv, Warehouse, WashingMachine, Zap, type House } from '@lucide/svelte';
 import type { Device } from './home.svelte.js';
 import { sensorWord } from './fmt.js';
 
@@ -25,7 +25,7 @@ const NAMED: [RegExp, string][] = [
 ];
 
 /** The icon for a device: the person's own choice, else one picked from its kind, its reading and its name. */
-export function iconFor(d: Pick<Device, 'category' | 'state' | 'name' | 'reading'> & { icon?: string | null }): IconComponent {
+export function iconFor(d: Pick<Device, 'category' | 'state' | 'name' | 'reading'> & { icon?: string | null; deviceClass?: string | null }): IconComponent {
 	if (d.icon && BY_KEY.has(d.icon)) {
 		if (d.icon === 'lock' && d.category === 'lock' && d.state === 'unlocked') return LockOpen;
 		if (d.icon === 'door' && d.state === 'on') return DoorOpen;
@@ -39,7 +39,7 @@ export function iconFor(d: Pick<Device, 'category' | 'state' | 'name' | 'reading
 		case 'camera': return Camera;
 		case 'media': return /speaker|sound|music/i.test(d.name) ? Speaker : Tv;
 		case 'energy': return Zap;
-		case 'switch': { const k = NAMED.find(([re]) => re.test(d.name))?.[1]; return (k && BY_KEY.get(k)) || Plug; }
+		case 'switch': { const k = NAMED.find(([re]) => re.test(d.name))?.[1]; return (k && BY_KEY.get(k)) || (d.deviceClass === 'outlet' ? Plug : ToggleRight); }
 		case 'sensor': {
 			const cls = d.reading?.cls ?? '';
 			const word = sensorWord(d as Parameters<typeof sensorWord>[0]);

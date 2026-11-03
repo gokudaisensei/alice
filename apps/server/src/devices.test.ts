@@ -373,6 +373,29 @@ test("parts of a device (config entities) are not listed as devices, and each de
   expect(other).toHaveProperty("icon", null);
 });
 
+test("a physical device with several cards names each after its device; a lone card keeps its own name", async () => {
+  const { t, admin, devices } = await home();
+  const ent = (id: string, state: string, attributes: Record<string, unknown>) => t.ha.entities.set(id, { entity_id: id, state, attributes, last_changed: "", last_updated: "" } as never);
+  ent("media_player.panel_speaker", "idle", { friendly_name: "Panel Speaker", supported_features: 4 });
+  ent("camera.panel_camera", "idle", { friendly_name: "Panel Camera" });
+  ent("switch.panel_mic_mute", "off", { friendly_name: "Panel Microphone mute" });
+  const dev = "dev-panel";
+  t.ha.parents.set("media_player.panel_speaker", { deviceId: dev, deviceName: "panel", label: "Speaker", cls: "speaker" });
+  t.ha.parents.set("camera.panel_camera", { deviceId: dev, deviceName: "panel", label: "Camera", cls: null });
+  t.ha.parents.set("switch.panel_mic_mute", { deviceId: dev, deviceName: "panel", label: "Panel Microphone mute", cls: null });
+  ent("media_player.panel_airplay", "idle", { friendly_name: "panel", supported_features: 4 });
+  t.ha.parents.set("media_player.panel_airplay", { deviceId: dev, deviceName: "panel", label: null, cls: null });
+  t.ha.parents.set("light.kitchen", { deviceId: "dev-lone", deviceName: "Kitchen", label: null, cls: null });
+  const list = (await devices(admin)).devices as Body[];
+  const sub = (id: string) => list.find((d) => d.id === id)?.subtitle;
+  expect(sub("media_player.panel_speaker")).toBe("Panel · Speaker");
+  expect(sub("camera.panel_camera")).toBe("Panel · Camera");
+  expect(sub("switch.panel_mic_mute")).toBe("Panel · Microphone mute");
+  expect(sub("light.kitchen")).toBeNull();
+  expect(list.find((d) => d.id === "media_player.panel_airplay")).toBeUndefined();
+  expect(list.find((d) => d.id === "switch.panel_mic_mute")).toMatchObject({ deviceClass: null });
+});
+
 test("a person can choose a device's icon from the known set only", async () => {
   const { t, admin, devices } = await home();
   const put = (icon: unknown) => t.call("PUT", "/api/admin/devices/light.kitchen", { cookie: admin, body: { icon } });
