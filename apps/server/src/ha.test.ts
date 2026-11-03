@@ -1,6 +1,7 @@
 import { afterAll, expect, test } from "bun:test";
 import { HaClient } from "./ha";
 import { startMockHa } from "../../mock-ha/src/mock";
+import type { Body } from "./testkit";
 
 const mock = startMockHa(18123, "tok");
 afterAll(() => mock.stop());
@@ -125,4 +126,51 @@ test("a device's parent is read under either name the hub has used, so a child d
   expect(ha.parents.get("light.b")?.deviceName).toBe("Spaceship");
   ha.stop();
   mock.registry.entities = []; mock.registry.devices = [];
+});
+
+// ---------- the Alice integration inside the hub ----------
+
+test("with the integration installed, things the app made are written through it, and anything else still goes the old way", async () => {
+  const m = startMockHa(18126, "tok", { component: { protocol: 1 } });
+  const ha = new HaClient("http://127.0.0.1:18126", "tok"); ha.start();
+  await until(() => ha.conn === "connected" && ha.component !== null);
+  expect(ha.component).toEqual({ version: "0.1.0", protocol: 1 });
+  expect(await ha.config("POST", "/api/config/script/config/alice_routine_ab12", { alias: "x", sequence: [] })).toEqual({ ok: true });
+  expect(m.configs.has("script/alice_routine_ab12")).toBe(true);
+  expect(await ha.config("DELETE", "/api/config/script/config/alice_routine_ab12")).toEqual({ ok: true });
+  expect(m.configs.has("script/alice_routine_ab12")).toBe(false);
+  await ha.config("POST", "/api/config/scene/config/legacy_movie", { name: "Mine" }); // not ours: the administrator route, as before
+  expect(m.writes).toEqual(["ws", "ws", "rest"]);
+  m.setComponentError("unauthorized");
+  expect(await ha.config("POST", "/api/config/script/config/alice_routine_ab12", {})).toEqual({ ok: false, error: "ha_not_admin" });
+  m.setComponentError("invalid_config");
+  expect(await ha.config("POST", "/api/config/script/config/alice_routine_ab12", {})).toEqual({ ok: false, error: "ha_rejected" });
+  ha.stop(); m.stop();
+});
+
+test("an integration speaking a dialect this app does not know is left alone", async () => {
+  const m = startMockHa(18127, "tok", { component: { protocol: 99 } });
+  const ha = new HaClient("http://127.0.0.1:18127", "tok"); ha.start();
+  await until(() => ha.conn === "connected"); await Bun.sleep(100);
+  expect(ha.component).toBeNull();
+  await ha.config("POST", "/api/config/script/config/alice_routine_ab12", { alias: "x", sequence: [] });
+  expect(m.writes).toEqual(["rest"]);
+  ha.stop(); m.stop();
+});
+
+test("a message an automation sends through Alice arrives as plain, short text, whatever is put in it", async () => {
+  const ha = new HaClient("http://127.0.0.1:18123", "tok"); ha.start();
+  await until(() => ha.conn === "connected");
+  const got: Body[] = []; ha.subscribe((e) => { if (e.type === "message") got.push(e); });
+  mock.fire("alice_notify", { title: "Laundry <b>done</b>", message: "The washer\nhas finished " + "x".repeat(400), severity: "critical", audience: "admins" });
+  mock.fire("alice_notify", { title: "no message" });
+  mock.fire("alice_notify", { message: "hello", severity: "weird" });
+  mock.fire("alice_notify", "not an object" as unknown as Record<string, unknown>);
+  await until(() => got.length >= 2); await Bun.sleep(50);
+  expect(got.length).toBe(2);
+  expect(got[0]).toMatchObject({ title: "Laundry b done /b", critical: true, admins: true });
+  expect(got[0].message.length).toBe(300);
+  expect(got[0].message.startsWith("The washer has finished")).toBe(true);
+  expect(got[1]).toEqual({ type: "message", title: "", message: "hello", critical: false, admins: false });
+  ha.stop();
 });

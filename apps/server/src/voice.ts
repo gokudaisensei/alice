@@ -3,7 +3,7 @@ import type { Database } from "bun:sqlite";
 import { activity, audit } from "./audit";
 import { describe } from "./capabilities";
 import { authorize } from "./guard";
-import { friendlyName, type HaApi } from "./ha";
+import { friendlyName, haError, type HaApi } from "./ha";
 import { all, one } from "./sql";
 import { asObject, denyWith as deny } from "./http";
 
@@ -41,7 +41,7 @@ export function voiceRoutes(db: Database, ha: HaApi, secure: boolean) {
       if (!c || typeof enabled !== "boolean") return deny(set, c === undefined && typeof entityId === "string" ? 404 : 400, c === undefined ? "not_found" : "invalid_input");
       if (ha.isStale()) return deny(set, 503, "ha_unavailable");
       const r = await ha.ws({ type: "homeassistant/expose_entity", assistants: ASSISTANTS, entity_ids: [c.id], should_expose: enabled });
-      if (!r.success) return deny(set, 502, "ha_rejected"); // Home Assistant is the source of truth: if it didn't accept, nothing is recorded
+      if (!r.success) return deny(set, 502, haError(r)); // Home Assistant is the source of truth: if it didn't accept, nothing is recorded
       if (enabled) db.query("INSERT OR IGNORE INTO voice_exposure (household_id, entity_id) VALUES (?,?)").run(g.user.householdId, c.id);
       else db.query("DELETE FROM voice_exposure WHERE household_id = ? AND entity_id = ?").run(g.user.householdId, c.id);
       audit(db, { householdId: g.user.householdId, actorType: "user", actorId: g.user.id, action: enabled ? "voice.enable" : "voice.disable", target: c.id, outcome: "success" });

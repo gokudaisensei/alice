@@ -1,0 +1,18 @@
+{
+  "config": {
+    "step": { "user": { "title": "Link Alice", "description": "Lets the Alice app write its own scenes, routines and automations here without a full administrator key, and lets your automations send messages through Alice." } },
+    "abort": { "single_instance_allowed": "Alice is already linked." }
+  },
+  "services": {
+    "notify": {
+      "name": "Send through Alice",
+      "description": "Send a message to the people in your home through the Alice app.",
+      "fields": {
+        "message": { "name": "Message", "description": "What to say. Plain text, up to 300 characters." },
+        "title": { "name": "Title", "description": "A short heading, up to 80 characters." },
+        "severity": { "name": "Severity", "description": "Critical messages may sound during quiet hours for people who allowed that." },
+        "audience": { "name": "Who", "description": "Everyone in the home, or only the administrators." }
+      }
+    }
+  }
+}

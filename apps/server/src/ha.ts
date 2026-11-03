@@ -26,11 +26,17 @@ export type HaDeviceInfo = { manufacturer: string | null; model: string | null; 
 export type Parent = { deviceId: string; deviceName: string; label: string | null; cls: string | null };
 
 export interface HaHealth { health(): "ok" | "unreachable" | "auth_failed" }
-export type HaEvent = { type: "entity"; entityId: string } | { type: "conn" };
+/** A message an automation in the hub sent through the Alice integration (`alice.notify`). */
+export type HaNotice = { type: "message"; title: string; message: string; critical: boolean; admins: boolean };
+export type HaEvent = { type: "entity"; entityId: string } | { type: "conn" } | HaNotice;
 /** Changes to the registries that describe the home (what is a device, what room it is in). Any of them means the cached structure is out of date. */
 export const REGISTRY_EVENTS = ["entity_registry_updated", "device_registry_updated", "area_registry_updated", "floor_registry_updated", "label_registry_updated"] as const;
 /** What the hub says about itself: used to word things the way the household does (units, time zone) and to spot an old version. */
 export type HaInfo = { version: string | null; timeZone: string | null; locationName: string | null; metric: boolean | null; language: string | null };
+/** The dialect of the integration this app speaks. A component with another number is not used. */
+export const COMPONENT_PROTOCOL = 1;
+/** Why Home Assistant said no: a key that is not an administrator's is told "unauthorized". */
+export const haError = (r: { error?: { code?: string } }) => (r.error?.code === "unauthorized" ? "ha_not_admin" : "ha_rejected");
 export type HaOptions = {
   /** how often to check the link is alive */ pingMs?: number;
   /** how long a reply may take before the link counts as dead */ replyMs?: number;
@@ -43,6 +49,8 @@ export interface HaApi extends HaHealth {
   secondary?: ReadonlySet<string>;
   /** Version, time zone and unit system, once the hub has said. */
   info?: HaInfo;
+  /** The Alice integration inside Home Assistant, when it is there and speaks our dialect. */
+  component?: { version: string; protocol: number } | null;
   /** The hub's areas and floors, and which area each entity is in (its own, else its device's). */
   areas?: ReadonlyMap<string, HaArea>;
   floors?: ReadonlyMap<string, HaFloor>;
@@ -79,6 +87,7 @@ export class HaClient implements HaApi {
   entities = new Map<string, HaEntity>();
   secondary = new Set<string>();
   parents = new Map<string, Parent>();
+  component: { version: string; protocol: number } | null = null;
   areas = new Map<string, HaArea>();
   floors = new Map<string, HaFloor>();
   areaOf = new Map<string, string>();
@@ -177,15 +186,25 @@ export class HaClient implements HaApi {
     if (m.type === "auth_ok") {
       this.backoff = 1000;
       await this.send({ type: "subscribe_events", event_type: "state_changed" });
-      for (const t of [...REGISTRY_EVENTS, "core_config_updated"]) await this.send({ type: "subscribe_events", event_type: t });
+      for (const t of [...REGISTRY_EVENTS, "core_config_updated", "alice_notify"]) await this.send({ type: "subscribe_events", event_type: t });
       const r = await this.send({ type: "get_states" });
       if (r.success) { this.entities = new Map((r.result as HaEntity[]).map((e) => [e.entity_id, e])); this.conn = "connected"; this.emit({ type: "conn" }); this.startPinger(); }
+      await this.loadComponent();
       await this.loadInfo();
       await this.loadRegistry();
       return;
     }
     if (m.type === "event" && m.event?.event_type && (REGISTRY_EVENTS as readonly string[]).includes(m.event.event_type)) return this.scheduleRegistry();
     if (m.type === "event" && m.event?.event_type === "core_config_updated") return void this.loadInfo();
+    if (m.type === "event" && m.event?.event_type === "alice_notify") {
+      // Anything in the hub can fire this event, so it is read as untrusted: short plain text, nothing else.
+      const d = (m.event as { data?: unknown }).data;
+      const o = d && typeof d === "object" ? (d as Record<string, unknown>) : {};
+      const clean = (v: unknown, n: number) => (typeof v === "string" ? v.replace(/[\u0000-\u001f<>]/g, " ").replace(/\s+/g, " ").trim().slice(0, n) : "");
+      const message = clean(o.message, 300);
+      if (message) this.emit({ type: "message", title: clean(o.title, 80), message, critical: o.severity === "critical", admins: o.audience === "admins" });
+      return;
+    }
     if (m.type === "event" && m.event?.event_type === "state_changed") {
       const { entity_id, new_state } = m.event.data;
       if (new_state) this.entities.set(entity_id, new_state); else this.entities.delete(entity_id);
@@ -193,6 +212,13 @@ export class HaClient implements HaApi {
       return;
     }
     if ("id" in m && typeof m.id === "number") { this.waiting.get(m.id)?.(m); this.waiting.delete(m.id); }
+  }
+
+  /** Is the Alice integration installed in the hub? If so, scenes, routines and automations are written through it, which needs no administrator key. */
+  private async loadComponent() {
+    const h = await this.send({ type: "alice/hello" });
+    const r = h.success && h.result && typeof h.result === "object" ? (h.result as { version?: unknown; protocol?: unknown }) : null;
+    this.component = r && r.protocol === COMPONENT_PROTOCOL && typeof r.version === "string" ? { version: r.version, protocol: r.protocol } : null;
   }
 
   private async loadInfo() {
@@ -263,6 +289,12 @@ export class HaClient implements HaApi {
 
   async config(method: "POST" | "DELETE", path: string, body?: unknown) {
     if (this.conn !== "connected") return { ok: false, error: "ha_unavailable" };
+    // Things the app made go through the Alice integration when it is installed: it checks them and needs no administrator key.
+    const m = this.component ? /^\/api\/config\/(scene|script|automation)\/config\/(alice_[a-z0-9_]+)$/.exec(path) : null;
+    if (m && this.component) {
+      const r = await this.send(method === "POST" ? { type: "alice/config_write", kind: m[1], item_id: m[2], config: body } : { type: "alice/config_delete", kind: m[1], item_id: m[2] });
+      return r.success ? { ok: true } : { ok: false, error: r.error?.code === "unauthorized" ? "ha_not_admin" : r.error?.code === "timeout" || r.error?.code === "disconnected" ? "ha_unavailable" : "ha_rejected" };
+    }
     try {
       const r = await fetch(new URL(path, this.url), {
         method, headers: { Authorization: `Bearer ${this.token}`, "content-type": "application/json" },

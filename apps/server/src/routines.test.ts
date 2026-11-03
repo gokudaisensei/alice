@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { ensureModeHelper, MODE_ENTITY } from "./modes";
-import { setup, type Body } from "./testkit";
+import { ent, setup, type Body } from "./testkit";
 
 async function home() {
   const t = setup();
@@ -296,4 +296,13 @@ test("plugs that look like heaters, routers or fridges are never switched off by
   expect(ids).toContain("switch.plug");
   expect(ids).not.toContain("switch.router");
   expect(ids).not.toContain("switch.heater");
+});
+
+test("a stored routine never arms or disarms an alarm, so a code is never written into the hub's files", async () => {
+  const t = setup();
+  t.ha.entities.set("alarm_control_panel.home", ent("alarm_control_panel.home", "disarmed", { supported_features: 3, code_format: "number" }));
+  const admin = await t.bootstrapAdmin("a1"); await t.reauth(admin.cookie!, "a1");
+  const r = await t.call("POST", "/api/routines", { cookie: admin.cookie!, body: { name: "Arm", steps: [{ type: "device", entityId: "alarm_control_panel.home", action: "arm", value: { mode: "away", code: "1234" } }] } });
+  expect(r.status).toBe(400);
+  expect([...t.ha.configs.keys()].some((k) => k.startsWith("script/"))).toBe(false);
 });

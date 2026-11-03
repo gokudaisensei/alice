@@ -317,6 +317,7 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
             const user = lookupSession(db, token); // re-check on every event: revoked users stop receiving immediately
             if (!user) { cleanup(); try { ctrl.close(); } catch {} return; }
             if (e.type === "conn") return send("ha", { haHealth: ha.health(), stale: ha.isStale() });
+            if (e.type !== "entity") return;
             if (e.entityId === MODE_ENTITY) return send("mode", { mode: ha.entities.get(MODE_ENTITY)?.state ?? null });
             const dev = svc.deviceFor(user, e.entityId);
             if (dev) send("device", dev.view);

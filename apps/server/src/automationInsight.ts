@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import type { Database } from "bun:sqlite";
 import { audit } from "./audit";
 import { authorize } from "./guard";
-import { friendlyName, type HaApi } from "./ha";
+import { friendlyName, haError, type HaApi } from "./ha";
 import type { AutomationService } from "./automations";
 import type { DeviceService } from "./devices";
 import { asObject, denyWith as deny } from "./http";
@@ -42,7 +42,7 @@ export function automationInsightRoutes(db: Database, ha: HaApi, secure: boolean
       if (ha.isStale()) return deny(set, 503, "ha_unavailable");
       const e = svc.entityOf(row);
       const l = await ha.ws({ type: "trace/list", domain: "automation", item_id: row.ha_id });
-      if (!l.success || !Array.isArray(l.result)) return deny(set, 502, "ha_rejected");
+      if (!l.success || !Array.isArray(l.result)) return deny(set, 502, haError(l));
       const conditions = svc.parsed(row).conditions;
       const recent = (l.result as Run[]).filter((r) => r.timestamp?.start).sort((a, b) => Date.parse(b.timestamp!.start!) - Date.parse(a.timestamp!.start!)).slice(0, 5);
       const runs: TraceRun[] = await Promise.all(recent.map(async (r) => {

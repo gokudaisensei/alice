@@ -97,6 +97,7 @@ export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays
   const offLimits = limits.onChange((id) => { disarm(`power:${id}`); check(id); }); // a changed or removed limit starts the clock again
   const off = ha.subscribe((e) => {
     if (e.type === "entity") return check(e.entityId);
+    if (e.type !== "conn") return;
     if (ha.isStale()) {
       arm("hub", delays.hubMs, () => ha.isStale(), () => {
         const h = household(); if (!h) return;

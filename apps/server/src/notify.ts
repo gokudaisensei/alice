@@ -9,7 +9,7 @@ import type { Role } from "./policy";
 import { all, exists, one, scalar } from "./sql";
 
 /** Categories a person can mute. Hub problems and insights are optional too; nothing is forced. */
-export const KINDS = ["device_offline", "lock_open", "hub", "insight", "power", "safety", "battery", "open_long", "ha_issue"] as const;
+export const KINDS = ["device_offline", "lock_open", "hub", "insight", "power", "safety", "battery", "open_long", "ha_issue", "from_ha"] as const;
 export const DEDUPE_MS = 6 * 3600_000, INSIGHT_DEDUPE_MS = 72 * 3600_000, RATE_PER_HOUR = 10, RETENTION_MS = 90 * 86400_000;
 
 export type PushSub = { endpoint: string; p256dh: string; auth: string };

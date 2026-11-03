@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import type { Database } from "bun:sqlite";
 import { audit } from "./audit";
 import { authorize } from "./guard";
-import { friendlyName, type HaApi, type HaEntity } from "./ha";
+import { friendlyName, haError, type HaApi, type HaEntity } from "./ha";
 import type { DeviceService } from "./devices";
 import { RateLimiter } from "./ratelimit";
 import { asObject, denyWith as deny } from "./http";
@@ -30,9 +30,9 @@ const asTargets = (v: unknown): Target[] => (Array.isArray(v) ? v.filter((x): x 
 /** Home Assistant's own text assistant, for what the app's plain rules don't understand, behind the same limits as everything else. */
 export function assistRoutes(db: Database, ha: HaApi, secure: boolean, svc: DeviceService, now: () => number = Date.now) {
   const limiter = new RateLimiter(15, 60_000, now);
-  const exposedToAssist = async (): Promise<Set<string> | null> => {
+  const exposedToAssist = async (): Promise<Set<string> | { error: string }> => {
     const r = await ha.ws({ type: "homeassistant/expose_entity/list" });
-    if (!r.success) return null;
+    if (!r.success) return { error: haError(r) };
     const m = asObject(asObject(r.result).exposed_entities);
     return new Set(Object.entries(m).filter(([, v]) => (Array.isArray(v) ? v.includes("conversation") : asObject(v).conversation === true)).map(([id]) => id));
   };
@@ -68,7 +68,7 @@ export function assistRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
       const g = authorize(db, request, secure, ["admin.access"]); if (!("user" in g)) return deny(set, g.status, g.body.error);
       if (ha.isStale()) return deny(set, 503, "ha_unavailable");
       const ex = await exposedToAssist();
-      if (!ex) return { available: false, exposed: 0, risky: [] };
+      if (!(ex instanceof Set)) return { available: false, exposed: 0, risky: [], ...(ex.error === "ha_not_admin" ? { reason: "needs_admin_key" } : {}) };
       const risky = [...ex].filter((id) => sensitiveEntity(ha.entities.get(id), id)).map((id) => ({ id, name: friendlyName(ha.entities.get(id), id) })).sort((a, b) => a.name.localeCompare(b.name));
       return { available: true, exposed: ex.size, risky };
     })
@@ -76,11 +76,11 @@ export function assistRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
       const g = authorize(db, request, secure, ["admin.access"], true); if (!("user" in g)) return deny(set, g.status, g.body.error);
       if (ha.isStale()) return deny(set, 503, "ha_unavailable");
       const ex = await exposedToAssist();
-      if (!ex) return deny(set, 502, "ha_rejected");
+      if (!(ex instanceof Set)) return deny(set, 502, ex.error);
       const ids = [...ex].filter((id) => sensitiveEntity(ha.entities.get(id), id));
       if (ids.length) {
         const r = await ha.ws({ type: "homeassistant/expose_entity", assistants: ["conversation", "cloud.alexa", "cloud.google_assistant"], entity_ids: ids, should_expose: false });
-        if (!r.success) return deny(set, 502, "ha_rejected");
+        if (!r.success) return deny(set, 502, haError(r));
       }
       audit(db, { householdId: g.user.householdId, actorType: "user", actorId: g.user.id, action: "assist.protect", target: "home_assistant", outcome: "success", reason: `hidden=${ids.length}` });
       return { ok: true, hidden: ids.length };

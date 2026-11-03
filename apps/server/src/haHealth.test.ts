@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { scalar } from "./sql";
 import { createDeviceService } from "./devices";
 import { createNotifier } from "./notify";
-import { createHaStatus } from "./haStatus";
+import { createHaStatus, forwardHaMessages } from "./haStatus";
 import { startRules } from "./rules";
 import { ent, setup, type Body } from "./testkit";
 
@@ -162,4 +162,27 @@ test("installing a hub update needs an admin with a fresh passkey check; backing
   expect((await j("POST", "/api/admin/ha-status/backup", admin)).json).toEqual({ ok: true, started: true });
   expect((await j("POST", "/api/admin/ha-status/backup", member.cookie)).status).toBe(403);
   expect((t.db.query("SELECT action FROM security_audit WHERE action LIKE 'ha.%'").all() as Body[]).map((x) => x.action)).toEqual(["ha.update_install", "ha.backup"]);
+});
+
+test("a message an automation sends through Alice reaches the household, critical ones through the flood limit, admin-only ones to admins only; guests never", async () => {
+  const { t, admin, member, guest, nf, titles } = await home();
+  const off = forwardHaMessages(t.db, t.ha, nf);
+  t.ha.emit({ type: "message", title: "Laundry", message: "The washer has finished", critical: false, admins: false });
+  t.ha.emit({ type: "message", title: "", message: "Only for admins", critical: false, admins: true });
+  await wait(30);
+  expect(await titles(admin)).toEqual(expect.arrayContaining(["Laundry", "A message from your home"]));
+  expect(await titles(member.cookie)).toEqual(["Laundry"]);
+  expect(await titles(guest.cookie)).toEqual([]);
+  t.ha.emit({ type: "message", title: "Laundry", message: "The washer has finished", critical: false, admins: false });
+  await wait(30);
+  expect((await titles(admin)).filter((x) => x === "Laundry").length).toBe(1); // said twice in a minute: heard once
+  off();
+});
+
+test("the health page says whether the Alice integration is in Home Assistant", async () => {
+  const { t, admin, j } = await home();
+  const line = async () => ((await j("GET", "/api/admin/health", admin)).json.checks as Body[]).find((c) => c.id === "integration");
+  expect(await line()).toMatchObject({ status: "ok", detail: expect.stringContaining("Not installed") });
+  t.ha.component = { version: "0.1.0", protocol: 1 };
+  expect((await line())?.detail).toContain("Installed (version 0.1.0)");
 });

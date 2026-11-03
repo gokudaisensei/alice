@@ -7,7 +7,7 @@ import { ensureModeHelper } from "./modes";
 import { realWebAuthn } from "./webauthn";
 import { createDeviceService } from "./devices";
 import { createNotifier, realPush } from "./notify";
-import { createHaStatus } from "./haStatus";
+import { createHaStatus, forwardHaMessages } from "./haStatus";
 import { createInsights, createSampler } from "./insights";
 import { startRules } from "./rules";
 import { createPowerLimits } from "./power";
@@ -44,6 +44,7 @@ setInterval(() => { insights.sweep(notifier).catch(() => {}); notifier.prune(); 
 // Nightly encrypted backup (once a key is set). On start-up, catch up if the last one is more than a day old.
 // What the hub itself is worried about (repairs, notices, updates, failing integrations): told to admins, once per item.
 const haStatus = createHaStatus(db, ha);
+forwardHaMessages(db, ha, notifier);
 const haSweep = () => { if (!ha.isStale()) haStatus.sweep(notifier).catch(() => {}); };
 setTimeout(haSweep, 60_000); setInterval(haSweep, 10 * 60_000);
 

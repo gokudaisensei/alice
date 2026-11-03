@@ -15,7 +15,7 @@ type Kind = "scene" | "script" | "automation";
 const isKind = (v: string | undefined): v is Kind => v === "scene" || v === "script" || v === "automation";
 
 /** `demo` fills the home with what Alice's newer screens need: areas, floors, a label, more kinds of device, and answers for energy, logbook, traces and the hub's own worries. */
-export function startMockHa(port: number, token = "dev-token", opts: { demo?: boolean } = {}) {
+export function startMockHa(port: number, token = "dev-token", opts: { demo?: boolean; /** act as a hub with the Alice integration installed, speaking this protocol */ component?: { protocol: number } } = {}) {
   const e = (id: string, state: string, a: Record<string, unknown> = {}): Entity =>
     ({ entity_id: id, state, attributes: { friendly_name: (id.split(".")[1] ?? id).replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()), ...a } });
   const states: Entity[] = [
@@ -70,7 +70,10 @@ export function startMockHa(port: number, token = "dev-token", opts: { demo?: bo
   /** What each assistant may touch in the demo: Home Assistant exposes doors and garages to its own assistant unless told not to. */
   const exposedTo = new Map<string, Set<string>>(opts.demo ? [["light.kitchen", new Set(["conversation"])], ["lock.front_door", new Set(["conversation"])], ["cover.garage_door", new Set(["conversation", "cloud.alexa"])]] : []);
   let mute = false; // when set, the hub stops answering anything (a half-open link)
-  const fire = (eventType: string) => { for (const s of eventSubs.get(eventType) ?? []) s.send(JSON.stringify({ type: "event", event: { event_type: eventType, data: {} } })); };
+  const fire = (eventType: string, data: Record<string, unknown> = {}) => { for (const s of eventSubs.get(eventType) ?? []) s.send(JSON.stringify({ type: "event", event: { event_type: eventType, data } })); };
+  /** How config writes reached the hub, in order: through the Alice integration ("ws") or the administrator REST API ("rest"). */
+  const writes: string[] = [];
+  let componentError: string | null = null;
   const configs = new Map<string, Config>();
   const slug = (n: string) => n.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
   const broadcast = (ent: Entity) => { for (const s of subs) s.send(JSON.stringify({ type: "event", event: { event_type: "state_changed", data: { entity_id: ent.entity_id, new_state: ent } } })); };
@@ -103,6 +106,7 @@ export function startMockHa(port: number, token = "dev-token", opts: { demo?: bo
       if (cfg) {
         const key = `${cfg[1]}/${cfg[2]}`;
         if (req.method === "DELETE") { configs.delete(key); return Response.json({ result: "ok" }); }
+        writes.push("rest");
         return req.json().then((b) => { configs.set(key, b as Config); return Response.json({ result: "ok" }); });
       }
       return new Response("not found", { status: 404 });
@@ -229,8 +233,16 @@ export function startMockHa(port: number, token = "dev-token", opts: { demo?: bo
       for (const s of subs) s.send(JSON.stringify({ type: "event", event: { event_type: "state_changed", data: { entity_id: updated.entity_id, new_state: updated } } }));
       return ok();
     }
+    if (opts.component && m.type.startsWith("alice/")) {
+      if (m.type === "alice/hello") return ok({ version: "0.1.0", protocol: opts.component.protocol });
+      if (componentError) return fail(componentError, "refused");
+      const c = m as unknown as { kind: Kind; item_id: string; config?: Config };
+      if (!/^alice_[a-z0-9_]+$/.test(c.item_id ?? "")) return fail("invalid_config", "ids must start with alice_");
+      if (m.type === "alice/config_write") { writes.push("ws"); configs.set(`${c.kind}/${c.item_id}`, c.config as Config); reload(c.kind); return ok({ ok: true }); }
+      if (m.type === "alice/config_delete") { writes.push("ws"); const found = configs.delete(`${c.kind}/${c.item_id}`); reload(c.kind); return ok({ ok: true, found }); }
+    }
     if (opts.demo) { const r = demo(m); if (r !== undefined) return r.ok === false ? fail(r.code, r.message) : ok(r.result); }
     return fail("unknown_command", "?");
   }
-  return { server, states, registry, hubConfig, fire, goQuiet: (v = true) => { mute = v; }, stop: () => server.stop(true) };
+  return { server, states, registry, hubConfig, fire, configs, writes, setComponentError: (c: string | null) => { componentError = c; }, goQuiet: (v = true) => { mute = v; }, stop: () => server.stop(true) };
 }

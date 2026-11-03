@@ -1,0 +1,21 @@
+notify:
+  fields:
+    message:
+      required: true
+      example: "The washing machine has finished"
+      selector:
+        text:
+    title:
+      example: "Laundry"
+      selector:
+        text:
+    severity:
+      default: info
+      selector:
+        select:
+          options: [info, critical]
+    audience:
+      default: all
+      selector:
+        select:
+          options: [all, admins]

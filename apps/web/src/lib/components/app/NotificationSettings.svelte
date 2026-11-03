@@ -11,13 +11,13 @@
 	import { plural } from '#lib/fmt.js';
 	import { BellRing, ShieldAlert } from '@lucide/svelte';
 
-	const LABEL: Record<string, string> = { device_offline: 'A device stays offline', lock_open: 'A door stays unlocked', hub: 'The home hub is unreachable', insight: 'Suggestions about energy and devices left on', power: 'A plug stays above its power limit', safety: 'Smoke, gas, a water leak or an alarm', battery: 'A battery is running low', open_long: 'A door or window is left open', ha_issue: 'Home Assistant needs attention' };
+	const LABEL: Record<string, string> = { device_offline: 'A device stays offline', lock_open: 'A door stays unlocked', hub: 'The home hub is unreachable', insight: 'Suggestions about energy and devices left on', power: 'A plug stays above its power limit', safety: 'Smoke, gas, a water leak or an alarm', battery: 'A battery is running low', open_long: 'A door or window is left open', ha_issue: 'Home Assistant needs attention', from_ha: 'Messages from your home automations' };
 	const GROUPS = [
 		{ title: 'Security and safety', hint: 'Worth hearing about straight away. We suggest keeping these on.', kinds: ['safety', 'lock_open', 'hub'], essential: true },
-		{ title: 'Home activity', hint: 'Things that need a look when you are able.', kinds: ['device_offline', 'battery', 'open_long', 'power'], essential: false },
+		{ title: 'Home activity', hint: 'Things that need a look when you are able.', kinds: ['device_offline', 'battery', 'open_long', 'power', 'from_ha'], essential: false },
 		{ title: 'Updates and suggestions', hint: 'Helpful, never urgent.', kinds: ['ha_issue', 'insight'], essential: false }
 	];
-	const ABOUT: Record<string, string> = { lock_open: 'A door has been left unlocked for a while.', hub: 'The app has lost contact with your home hub.', device_offline: 'Something has been unreachable for a while.', power: 'A plug is using more power than the limit you set.', insight: 'Ideas for saving energy.', safety: 'A smoke, carbon monoxide, gas or leak sensor has gone off, or your alarm has.', battery: 'A sensor or lock battery has stayed low.', open_long: 'A door or window has been open for a while.', ha_issue: 'Home Assistant has a repair, an update or a problem to look at.' };
+	const ABOUT: Record<string, string> = { lock_open: 'A door has been left unlocked for a while.', hub: 'The app has lost contact with your home hub.', device_offline: 'Something has been unreachable for a while.', power: 'A plug is using more power than the limit you set.', insight: 'Ideas for saving energy.', safety: 'A smoke, carbon monoxide, gas or leak sensor has gone off, or your alarm has.', battery: 'A sensor or lock battery has stayed low.', open_long: 'A door or window has been open for a while.', ha_issue: 'Home Assistant has a repair, an update or a problem to look at.', from_ha: 'Something in Home Assistant sent you a message through Alice.' };
 	let why = $state(false);
 	let p = $state<NotePrefs | null>(null), here = $state(false), msg = $state(''), busy = $state(false);
 	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;

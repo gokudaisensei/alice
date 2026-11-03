@@ -19,7 +19,7 @@ export function createSync(ha: HaApi) {
     if (log.length > 1000) log.splice(0, log.length - 1000);
     for (const w of [...waiters]) w();
   };
-  ha.subscribe((e) => { if (e.type === "conn") push("ha"); else if (e.entityId === MODE_ENTITY) push("mode"); else if (e.entityId) push("entity", e.entityId); });
+  ha.subscribe((e) => { if (e.type === "conn") push("ha"); else if (e.type === "entity") { if (e.entityId === MODE_ENTITY) push("mode"); else push("entity", e.entityId); } });
   return {
     get rev() { return rev; },
     /** Something the app itself stores changed (rooms, groups, scenes, routines, automations, access). */

@@ -2,7 +2,7 @@ import { Elysia } from "elysia";
 import type { Database } from "bun:sqlite";
 import { audit } from "./audit";
 import { authorize } from "./guard";
-import { friendlyName, type HaApi } from "./ha";
+import { friendlyName, haError, type HaApi } from "./ha";
 import type { Notifier } from "./notify";
 import { asObject, denyWith as deny } from "./http";
 import { one } from "./sql";
@@ -79,6 +79,15 @@ export function createHaStatus(db: Database, ha: HaApi, now: () => number = Date
 }
 export type HaStatusService = ReturnType<typeof createHaStatus>;
 
+/** Messages the hub's own automations send through the Alice integration reach people here, once a minute at most per message. */
+export function forwardHaMessages(db: Database, ha: HaApi, nf: Notifier) {
+  return ha.subscribe((e) => {
+    if (e.type !== "message") return;
+    const h = one<{ id: string }>(db, "SELECT id FROM households LIMIT 1")?.id; if (!h) return;
+    void nf.emit({ householdId: h, kind: "from_ha", critical: e.critical, ...(e.admins ? { audience: "admins" as const } : {}), title: e.title || "A message from your home", body: e.message, dedupeKey: `ha:${e.title}:${e.message}`.slice(0, 200), dedupeMs: 60_000 });
+  });
+}
+
 export function haStatusRoutes(db: Database, ha: HaApi, secure: boolean, hs: HaStatusService) {
   const log = (u: { householdId: string; id: string }, action: string, target: string) => audit(db, { householdId: u.householdId, actorType: "user", actorId: u.id, action, target, outcome: "success" });
   return new Elysia({ name: "ha-status" })
@@ -94,7 +103,7 @@ export function haStatusRoutes(db: Database, ha: HaApi, secure: boolean, hs: HaS
       if (!e || !e.entity_id.startsWith("update.") || e.state !== "on") return deny(set, 404, "not_found");
       if (ha.isStale()) return deny(set, 503, "ha_unavailable");
       const r = await ha.callService("update", "install", {}, e.entity_id);
-      if (!r.ok) return deny(set, r.error === "ha_unavailable" ? 503 : 409, r.error);
+      if (!r.ok) return deny(set, r.error === "ha_unavailable" ? 503 : 409, r.error === "home_assistant_error" ? "ha_not_admin" : r.error); // a key that is not an administrator's is refused this
       hs.invalidate(); log(g.user, "ha.update_install", e.entity_id);
       return { ok: true, started: true };
     })
@@ -103,7 +112,7 @@ export function haStatusRoutes(db: Database, ha: HaApi, secure: boolean, hs: HaS
       if (ha.isStale()) return deny(set, 503, "ha_unavailable");
       const r = await ha.ws({ type: "backup/generate" });
       // A backup takes longer than we wait; the hub carries on, so a timeout means it started.
-      if (!r.success && r.error?.code !== "timeout") return deny(set, 502, "ha_rejected");
+      if (!r.success && r.error?.code !== "timeout") return deny(set, 502, haError(r));
       hs.invalidate(); log(g.user, "ha.backup", "home_assistant");
       return { ok: true, started: true };
     });

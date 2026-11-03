@@ -201,3 +201,17 @@ git clone <your repository> alice && cd alice
 
 This path runs without the compose network isolation (no private HA network, no egress proxy) and without the signed-update host service. Use section 5 for a production box.
 
+## 14. Optional: the Alice integration inside Home Assistant
+
+Without it, the app needs an **administrator** key for Home Assistant (that is how it writes scenes, routines and automations). With it, scenes, routines and automations are written through a small integration that checks everything first, so the app can run with a key that is **not** an administrator's. A leaked key then cannot do more than the app can: it can only write items whose names start with `alice_`, in shapes the app itself makes (no templates; a short list of services; never unlocking, disarming or opening a garage, gate or water or gas valve).
+
+1. On the machine that holds Home Assistant's configuration folder: `./alice.sh ha-component /path/to/config`. It copies the integration and adds `alice:` to `configuration.yaml`. Make sure `configuration.yaml` also has `automation: !include automations.yaml`, `script: !include scripts.yaml` and `scene: !include scenes.yaml`.
+2. Restart Home Assistant. Check Settings, Devices and services: "Alice" appears. The app's System page then says "Installed".
+3. (Optional) In Home Assistant, Settings, People, add a user for the app **without** "Administrator", sign in as that user, create a long-lived token (Profile, Security) and use it as the app's key (`./alice.sh install` again, or replace the token file).
+
+What a key that is not an administrator's cannot do, measured on Home Assistant 2026.10.4: create or rename areas from the app, read automation traces ("Why didn't it run?"), see or start Home Assistant's own backups, take doors and alarms out of Home Assistant's assistant ("Keep them out of reach"), create the household mode helper the first time (create it once with an administrator key, or define `input_select.alice_household_mode` in `configuration.yaml`), and install updates. Each shows a plain "the home hub didn't allow it" message. Everything else works: all device control, rooms and floors, energy, history, the log, alerts, Home Assistant status, Assist, and writing scenes, routines and automations.
+
+The integration also adds a service, `alice.notify` (message, title, severity, audience): an automation in Home Assistant can call it to send a message to the people in the home through the app; `severity: critical` may sound during quiet hours for people who allowed that.
+
+To check it on a throwaway Home Assistant (needs docker and bun; touches nothing you already run): `deploy/ha/test-container.sh`.
+

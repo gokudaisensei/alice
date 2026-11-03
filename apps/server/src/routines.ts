@@ -72,6 +72,7 @@ export function createRoutineService(db: Database, ha: HaApi, svc: DeviceService
         const call = toServiceCall(describe(e), { action: String(s.action), value: s.value });
         if ("error" in call) return bad(call.error);
         if (call.sensitive) return bad("invalid_step"); // doors are never unlocked by a stored routine
+        if (call.domain === "alarm_control_panel") return bad("invalid_step"); // an alarm code must never be written into a stored routine
         sequence.push({ action: `${call.domain}.${call.service}`, target: { entity_id: e.entity_id }, data: call.data });
         clean.push({ type: "device", entityId: e.entity_id, action: String(s.action), ...(s.value !== undefined ? { value: s.value } : {}) });
       } else if (s.type === "scene") {

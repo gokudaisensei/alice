@@ -6,6 +6,7 @@
 #                                               --origin: the https address your own reverse proxy serves)
 #   ./alice.sh stop | status | logs
 #   ./alice.sh cli <command>                    server admin commands, e.g. setup-code, list-admins, recovery-code <id>
+#   ./alice.sh ha-component <HA config dir>     install or upgrade the Alice integration in Home Assistant (optional; see docs/INSTALL.md)
 #
 # Everything this script creates lives in ./.alice (git-ignored): config, the HA token (mode 600), database, logs.
 # The compose stack in deploy/ is for running next to HA on one box; this script is for the other case.
@@ -171,6 +172,26 @@ cmd_status() {
 }
 
 cmd_cli() { load_env; cd "$ROOT/apps/server" && bun src/cli.ts "$@"; }
+# Copies the Alice integration into Home Assistant's config folder (the one that holds configuration.yaml) and links it with `alice:`.
+# Run it on the machine that has that folder; restart Home Assistant afterwards. Safe to run again to upgrade.
+cmd_ha_component() {
+  local dir="${1:-}"
+  [ -n "$dir" ] || die "Usage: ./alice.sh ha-component /path/to/homeassistant/config"
+  [ -f "$dir/configuration.yaml" ] || die "$dir has no configuration.yaml. Give the folder Home Assistant reads its configuration from."
+  [ -d "$ROOT/deploy/ha/custom_components/alice" ] || die "The integration files are missing from this copy of the app."
+  mkdir -p "$dir/custom_components"
+  rm -rf "$dir/custom_components/alice"
+  cp -r "$ROOT/deploy/ha/custom_components/alice" "$dir/custom_components/alice"
+  find "$dir/custom_components/alice" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+  ok "copied the integration to $dir/custom_components/alice"
+  if grep -qE '^alice:' "$dir/configuration.yaml"; then ok "configuration.yaml already links it"
+  else printf '\n# Added by alice.sh: links the Alice app\nalice:\n' >> "$dir/configuration.yaml"; ok "added 'alice:' to configuration.yaml"; fi
+  for kind in automation script scene; do
+    grep -qE "^$kind:" "$dir/configuration.yaml" || echo "  note: configuration.yaml has no '$kind:' line. Add  $kind: !include ${kind}s.yaml  so what the app writes is loaded."
+  done
+  say "Restart Home Assistant. Then, to use a key that is not an administrator's, create a separate user for the app in Home Assistant (Settings, People) without 'Administrator', sign in as it, and make a long-lived token there."
+}
+
 cmd_logs() { tail -n "${1:-60}" -f "$STATE/server.log"; }
 
 case "${1:-help}" in
@@ -180,5 +201,6 @@ case "${1:-help}" in
   status)  cmd_status ;;
   logs)    shift; cmd_logs "$@" ;;
   cli)     shift; cmd_cli "$@" ;;
+  ha-component) shift; cmd_ha_component "$@" ;;
   *) sed -n 2,11p "$0" | sed 's/^# \{0,1\}//' ;;
 esac

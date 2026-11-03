@@ -26,6 +26,10 @@ export function createHealth(db: Database, ha: HaApi, bk: Backups, up: Updates, 
         ? { id: "hub", label: "Home hub", status: "fail", detail: "The hub refused the app's access key.", advice: "Contact support: the key the app uses to talk to the hub needs replacing." }
         : { id: "hub", label: "Home hub", status: "fail", detail: "The app can't reach the home hub.", advice: "Check that the hub is powered on and connected to your network. Devices can't be controlled from the app until it is back." });
 
+    checks.push(ha.component
+      ? { id: "integration", label: "Alice in Home Assistant", status: "ok", detail: `Installed (version ${ha.component.version}). The app writes its own scenes, routines and automations through it, so it does not need an administrator key for that.` }
+      : { id: "integration", label: "Alice in Home Assistant", status: "ok", detail: "Not installed. The app uses the hub's administrator key for everything it changes there. Installing the Alice integration lets it run with a more limited key." });
+
     let size = 0, free: number | null = null;
     try { if (o.dbPath !== ":memory:") { size = statSync(o.dbPath).size; const s = statfsSync(dirname(o.dbPath)); free = Number(s.bavail) * Number(s.bsize); } } catch {}
     const qc = one<{ quick_check: string }>(db, "PRAGMA quick_check(1)")?.quick_check;
