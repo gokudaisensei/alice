@@ -37,7 +37,7 @@ export function startMockHa(port: number, token = "dev-token") {
   const subs = new Set<ServerWebSocket<unknown>>();
   const eventSubs = new Map<string, Set<ServerWebSocket<unknown>>>();
   /** The hub's registries: what is a device, and which part of it each entity is. Tests change these and then call `fire`. */
-  const registry = { entities: [] as Record<string, unknown>[], devices: [] as Record<string, unknown>[] };
+  const registry = { entities: [] as Record<string, unknown>[], devices: [] as Record<string, unknown>[], areas: [] as Record<string, unknown>[], floors: [] as Record<string, unknown>[] };
   const hubConfig = { version: "2026.10.4", time_zone: "Asia/Kolkata", location_name: "Home", unit_system: { temperature: "°C" } };
   let mute = false; // when set, the hub stops answering anything (a half-open link)
   const fire = (eventType: string) => { for (const s of eventSubs.get(eventType) ?? []) s.send(JSON.stringify({ type: "event", event: { event_type: eventType, data: {} } })); };
@@ -99,6 +99,8 @@ export function startMockHa(port: number, token = "dev-token") {
     if (m.type === "get_states") return ok(states);
     if (m.type === "config/entity_registry/list") return ok(registry.entities);
     if (m.type === "config/device_registry/list") return ok(registry.devices);
+    if (m.type === "config/area_registry/list") return ok(registry.areas);
+    if (m.type === "config/floor_registry/list") return ok(registry.floors);
     if (m.type === "input_select/create") { const ent = e("input_select." + slug(m.name ?? ""), m.initial ?? "", { options: m.options, friendly_name: m.name }); states.push(ent); broadcast(ent); return ok(); }
     if (m.type === "call_service" && m.service === "reload" && isKind(m.domain)) { reload(m.domain); return ok(); }
     if (m.type === "call_service") {

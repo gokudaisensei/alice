@@ -10,6 +10,7 @@
 	import Row from '#lib/components/app/Row.svelte';
 	import Empty from '#lib/components/app/Empty.svelte';
 	import RoomSuggestions from '#lib/components/app/RoomSuggestions.svelte';
+	import HaAreas from '#lib/components/app/HaAreas.svelte';
 	import { roomLook } from '#lib/roomLook.js';
 	import DevicePicker from '#lib/components/app/DevicePicker.svelte';
 	import * as Drawer from '#lib/components/ui/drawer';
@@ -50,6 +51,7 @@
 <Page title="Edit rooms" subtitle="Organise your home. Open a room to add or rename its devices." width="md">
 	{#snippet actions()}<Button onclick={() => (roomOpen = true)}><Plus />New room</Button>{/snippet}
 	{#if error}<p role="alert" class="text-sm text-signal">{error}</p>{/if}
+	<HaAreas />
 	<RoomSuggestions />
 
 	<Section title="Rooms">

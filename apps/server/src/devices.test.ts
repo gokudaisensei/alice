@@ -197,7 +197,7 @@ test("rooms and device organisation are admin-only and household-scoped", async 
   expect((await t.call("PUT", "/api/admin/devices/nope.nope", { cookie: admin, body: { name: "x" } })).status).toBe(404);
   await t.call("PUT", "/api/admin/devices/light.hall", { cookie: admin, body: { hidden: true } });
   expect(await ids(member.cookie)).not.toContain("light.hall");
-  expect((await t.call("GET", "/api/rooms", { cookie: member.cookie })).json.rooms).toEqual([{ id: room.id, name: "Kitchen", color: null, icon: null }]);
+  expect((await t.call("GET", "/api/rooms", { cookie: member.cookie })).json.rooms).toEqual([{ id: room.id, name: "Kitchen", color: null, icon: null, floor: null }]);
 });
 
 test("personal preferences and favourites are per user and validated", async () => {

@@ -2,6 +2,13 @@
 
 Status: proposal. Target: **Home Assistant Container** only (no Supervisor, no add-ons, no ingress, no HA OS features). Written against the code in `apps/server/src` as of commit `d0829a3`.
 
+## 0. Progress
+
+| Phase | State |
+|---|---|
+| P1 transport | Heartbeat, safe parsing, live registry re-read, hub info (version, time zone, units) are in. **Still open:** split into transport and model, `subscribe_entities`, using `ha.info` for units. |
+| P2 areas | HA areas and floors are read live; admins preview and import them as rooms (`/api/admin/rooms/ha-areas`, `/ha-import`, `rooms.ha_area_id`); devices follow their area unless the household placed them; renames in HA show up. **Still open:** labels, write-back to HA (create/rename areas), device detail from the registry (manufacturer, firmware, battery), floor grouping on the home screen. |
+
 ## 1. Principle
 
 Today HA is a state feed and a YAML writer. The goal is to make **HA's own data model the backbone** and keep Alice for what HA cannot do: passkey identity and roles, plain-language UX, honest "confirmed or not" command semantics, guided builders, household-level alerts, encrypted backups and signed updates.

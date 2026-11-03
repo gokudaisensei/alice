@@ -3,6 +3,7 @@ import type { Database } from "bun:sqlite";
 import { audit } from "./audit";
 import { describe, toServiceCall, type Category, type Command, type Control, type Descriptor, type Reading } from "./capabilities";
 import { authorize } from "./guard";
+import { roomRows, withAreaRooms } from "./haRooms";
 import type { HaApi, HaEntity, Parent } from "./ha";
 import { SESSION, lookupSession, type SessionUser } from "./session";
 import { readCookie } from "./auth";
@@ -73,7 +74,7 @@ function attrsOf(d: Descriptor, e: HaEntity): DeviceAttrs {
 }
 
 export function createDeviceService(db: Database, ha: HaApi) {
-  const meta = (household: string) => new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden, icon FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r]));
+  const meta = (household: string) => withAreaRooms(db, ha, household, new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden, icon FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r])));
 
   /** Role default, overridable per user. Guests start with nothing. */
   const accessor = (u: Pick<SessionUser, "id" | "role">) => {
@@ -200,7 +201,7 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
     })
     .get("/api/rooms", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      const rooms = all<{ id: string; name: string; color: string | null; icon: string | null }>(db, "SELECT id, name, color, icon FROM rooms WHERE household_id = ? ORDER BY position, name", g.user.householdId);
+      const rooms = roomRows(db, ha, g.user.householdId).map(({ id, name, color, icon, floor }) => ({ id, name, color, icon, floor }));
       if (g.user.permissions.includes("rooms.manage")) return { rooms };
       // Everyone else only learns about rooms that contain something they can use.
       const used = new Set(svc.visibleDevices(g.user).map((d) => d.roomId));
@@ -230,7 +231,7 @@ export function deviceRoutes(db: Database, ha: HaApi, secure: boolean, svc: Devi
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const q = text(query.q).trim().toLowerCase().slice(0, 60);
       if (!q) return { devices: [], rooms: [], scenes: [], routines: [] };
-      const rooms = all<{ id: string; name: string }>(db, "SELECT id, name FROM rooms WHERE household_id = ?", g.user.householdId);
+      const rooms = roomRows(db, ha, g.user.householdId).map(({ id, name }) => ({ id, name }));
       const roomName = new Map(rooms.map((r) => [r.id, r.name.toLowerCase()]));
       const words: Record<Category, string> = { light: "light lights lamp", switch: "switch plug outlet socket", fan: "fan", climate: "thermostat climate air conditioner ac heating", sensor: "sensor", lock: "lock door", camera: "camera", media: "media tv television speaker player", energy: "energy power meter" };
       const matches = (d: DeviceView) => d.name.toLowerCase().includes(q) || (!!d.roomId && !!roomName.get(d.roomId)?.includes(q)) || words[d.category].split(" ").some((w) => w.startsWith(q));

@@ -7,6 +7,7 @@ import type { DeviceMeta } from "./devices";
 import { authorize } from "./guard";
 import type { HaApi } from "./ha";
 import { friendlyName } from "./ha";
+import { roomRows, withAreaRooms } from "./haRooms";
 import { asObject, cleanName, deny, oneOf, text } from "./http";
 import { effectivePermissions, type Permission, type Role } from "./policy";
 import { all, exists, one, scalar } from "./sql";
@@ -24,7 +25,7 @@ const MEMBER_ABILITIES: Permission[] = ["device.control", "scene.activate", "sce
 /** Household organisation: rooms, device placement, groups, per-user device access. Admin area only. */
 export function manageRoutes(db: Database, ha: HaApi, secure: boolean) {
   const org = (req: Request) => authorize(db, req, secure, ["admin.access", "rooms.manage"]);
-  const metaOf = (household: string) => new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r]));
+  const metaOf = (household: string) => withAreaRooms(db, ha, household, new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden, icon FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r])));
   const roomOk = (h: string, id: unknown): id is string => typeof id === "string" && exists(db, "SELECT 1 FROM rooms WHERE id = ? AND household_id = ?", id, h);
   const entityOk = (id: unknown): id is string => typeof id === "string" && ha.entities.has(id);
   /** Devices, scenes (HA entities) or routines ("routine:<id>") can all be granted to a person. */
@@ -175,7 +176,7 @@ export function manageRoutes(db: Database, ha: HaApi, secure: boolean) {
       const devices = [...ha.entities.values()].map((e) => ({ e, d: describe(e), m: meta.get(e.entity_id) }))
         .filter((x) => x.d.ordinary && !x.m?.hidden && !(guest && x.d.category === "energy")).map((x) => ({ id: x.e.entity_id, name: x.m?.name || x.d.name, category: x.d.category, roomId: x.m?.room_id ?? null, allowed: can(x.e.entity_id) }))
         .sort((a, b) => a.name.localeCompare(b.name));
-      const rooms = all<{ id: string; name: string }>(db, "SELECT id, name FROM rooms WHERE household_id = ? ORDER BY position, name", h);
+      const rooms = roomRows(db, ha, h).map(({ id, name }) => ({ id, name }));
       const scenes = [...ha.entities.values()].filter((e) => e.entity_id.startsWith("scene.") && !meta.get(e.entity_id)?.hidden)
         .map((e) => ({ id: e.entity_id, name: friendlyName(e), allowed: can(e.entity_id) })).sort((a, b) => a.name.localeCompare(b.name));
       const routines = all<{ id: string; name: string }>(db, "SELECT id, name FROM routines WHERE household_id = ? ORDER BY name", h).map((r) => ({ id: `routine:${r.id}`, name: r.name, allowed: can(`routine:${r.id}`) }));

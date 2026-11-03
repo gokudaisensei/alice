@@ -82,3 +82,23 @@ test("a link that stops answering is dropped and re-established, instead of look
   expect(ha.health()).toBe("ok");
   ha.stop();
 });
+
+test("areas and floors are read, and an entity is in its own area or else its device's", async () => {
+  mock.registry.floors = [{ floor_id: "f1", name: "Upstairs", level: 1 }];
+  mock.registry.areas = [{ area_id: "bed", name: "Bedroom", floor_id: "f1" }, { area_id: "bath", name: "Bathroom", floor_id: null }];
+  mock.registry.devices = [{ id: "d1", name: "Lamp", area_id: "bed" }];
+  mock.registry.entities = [{ entity_id: "light.living_room", device_id: "d1" }, { entity_id: "light.kitchen", device_id: "d1", area_id: "bath" }, { entity_id: "light.hall", area_id: "gone" }];
+  const ha = new HaClient("http://127.0.0.1:18123", "tok", { registryDebounceMs: 30 }); ha.start();
+  await until(() => ha.areas.size === 2);
+  expect(ha.areas.get("bed")).toEqual({ id: "bed", name: "Bedroom", floorId: "f1" });
+  expect(ha.floors.get("f1")?.name).toBe("Upstairs");
+  expect(ha.areaOf.get("light.living_room")).toBe("bed");  // through its device
+  expect(ha.areaOf.get("light.kitchen")).toBe("bath");     // its own area beats its device's
+  expect(ha.areaOf.has("light.hall")).toBe(false);          // an area that no longer exists
+  mock.registry.areas = [{ area_id: "bed", name: "Master bedroom", floor_id: "f1" }, { area_id: "bath", name: "Bathroom", floor_id: null }];
+  mock.fire("area_registry_updated");
+  await until(() => ha.areas.get("bed")?.name === "Master bedroom");
+  expect(ha.areas.get("bed")?.name).toBe("Master bedroom");
+  ha.stop();
+  mock.registry.entities = []; mock.registry.devices = []; mock.registry.areas = []; mock.registry.floors = [];
+});

@@ -9,6 +9,7 @@ import { authRoutes } from "./auth";
 import type { HaApi } from "./ha";
 import { createDeviceService, deviceRoutes } from "./devices";
 import { manageRoutes } from "./manage";
+import { haRoomRoutes } from "./haRooms";
 import { createStatic } from "./static";
 import { createPowerLimits, powerRoutes, type PowerLimits } from "./power";
 import { createSync, syncRoutes } from "./sync";
@@ -105,6 +106,7 @@ export function createApp(deps: AppDeps) {
     .use(notifyRoutes(deps.db, deps.cookieSecure, notifier))
     .use(insightRoutes(deps.db, deps.cookieSecure, insights, deps.now))
     .use(manageRoutes(deps.db, deps.ha, deps.cookieSecure))
+    .use(haRoomRoutes(deps.db, deps.ha, deps.cookieSecure))
     .use(syncRoutes(deps.db, deps.cookieSecure, sync, devices))
     .use(powerRoutes(deps.db, deps.ha, deps.cookieSecure, powerLimits, devices))
     .use(prefsRoutes(deps.db, deps.cookieSecure, devices))
