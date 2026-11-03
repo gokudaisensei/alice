@@ -88,6 +88,8 @@ class Home {
 	canManageScenes = $state(false);
 	haHealth = $state<HaHealth>('ok');
 	loaded = $state(false);
+	/** Whether Home Assistant's own rooms are waiting to be brought in (so the app does not also guess rooms from device names). */
+	haRooms = $state<'unknown' | 'offered' | 'none'>('unknown');
 	busy = $state<Record<string, boolean>>({});
 	notice = $state<Notice | null>(null);
 	/** A moment after a command: it settled, or it didn't. Tiles use it to pulse or shake. */

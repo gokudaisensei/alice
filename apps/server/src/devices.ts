@@ -60,7 +60,11 @@ export function partOf(category: Category, p: Parent, friendly: string, attrCls?
   return FUNCTIONS[category] ?? own();
 }
 
-export type DeviceMeta = { entity_id: string; name: string | null; room_id: string | null; hidden: number; icon: string | null };
+export type DeviceMeta = { entity_id: string; name: string | null; room_id: string | null; hidden: number; icon: string | null; /** shown although it is a helper or a part of another device */ pinned: number };
+/** What kind of thing an entity is for the household: a device, a setting of a device ("part"), or a free-standing helper value. Only devices are shown unless someone pins the rest. */
+export type Kind = "device" | "part" | "helper";
+/** A device that has one of these is a thing in its own right; its switches and buttons are only its settings. */
+const PRIMARY: Category[] = ["light", "media", "camera", "climate", "fan", "lock", "cover", "vacuum", "humidifier", "waterheater", "valve", "alarm", "siren"];
 type RunResult =
   | { status: 200; body: { ok: true; confirmed: boolean; device: DeviceView | null } }
   | { status: 400 | 401 | 404 | 409 | 503; body: ErrorBody };
@@ -88,7 +92,23 @@ function attrsOf(d: Descriptor, e: HaEntity): DeviceAttrs {
 }
 
 export function createDeviceService(db: Database, ha: HaApi) {
-  const meta = (household: string) => withAreaRooms(db, ha, household, new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden, icon FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r])));
+  const meta = (household: string) => withAreaRooms(db, ha, household, new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden, icon, pinned FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r])));
+
+  // Which physical devices have a main function (a light, a speaker, a camera…). Worked out again only when the hub's entities or registry change.
+  let primary: { parents: unknown; n: number; set: Set<string> } | null = null;
+  function primaryDevices(): Set<string> {
+    if (primary && primary.parents === ha.parents && primary.n === ha.entities.size) return primary.set;
+    const set = new Set<string>();
+    for (const e of ha.entities.values()) { const p = ha.parents?.get(e.entity_id); if (p && !ha.secondary?.has(e.entity_id) && PRIMARY.includes(describe(e).category)) set.add(p.deviceId); }
+    primary = { parents: ha.parents, n: ha.entities.size, set };
+    return set;
+  }
+  function kindOf(e: HaEntity): Kind {
+    const d = describe(e), p = ha.parents?.get(e.entity_id);
+    if (d.category === "input") return p ? "part" : "helper";
+    if (d.category === "switch" && p && primaryDevices().has(p.deviceId) && p.cls !== "outlet") return "part";
+    return "device";
+  }
 
   /** Role default, overridable per user. Guests start with nothing. */
   const accessor = (u: Pick<SessionUser, "id" | "role">) => {
@@ -103,6 +123,7 @@ export function createDeviceService(db: Database, ha: HaApi) {
   function viewOf(e: HaEntity, m: DeviceMeta | undefined): DeviceView | null {
     const d = describe(e);
     if (!d.ordinary || m?.hidden || ha.secondary?.has(e.entity_id)) return null;
+    if (!m?.pinned && kindOf(e) !== "device") return null; // a setting or helper stays out of sight until someone chooses to show it
     const stale = ha.isStale(), offline = e.state === "unavailable";
     return {
       id: e.entity_id, name: m?.name || d.name, category: d.category, roomId: m?.room_id ?? null,
@@ -118,9 +139,11 @@ export function createDeviceService(db: Database, ha: HaApi) {
     const parents = ha.parents; if (!parents?.size) return views;
     const count = new Map<string, number>();
     for (const v of views) { const p = parents.get(v.id); if (p) count.set(p.deviceId, (count.get(p.deviceId) ?? 0) + 1); }
-    // A player with no class beside a speaker on the same device is that speaker over another protocol (AirPlay, Cast): one is enough.
-    const speakers = new Set(views.filter((v) => v.category === "media" && v.deviceClass === "speaker").map((v) => parents.get(v.id)?.deviceId));
-    views = views.filter((v) => !(v.category === "media" && v.deviceClass !== "speaker" && speakers.has(parents.get(v.id)?.deviceId)));
+    // One speaker can show up as several players (its own, AirPlay, Cast). One card is enough: the one that can do the most.
+    const best = new Map<string, DeviceView>();
+    const score = (v: DeviceView) => { const m = v.controls.find((c) => c.type === "media"); return m ? Number(m.playback) + Number(m.volume) + Number(m.power) + Number(m.browse) + m.sources.length + (v.deviceClass === "speaker" ? 0.5 : 0) : 0; };
+    for (const v of views) if (v.category === "media") { const k = parents.get(v.id)?.deviceId; if (k) { const cur = best.get(k); if (!cur || score(v) > score(cur) || (score(v) === score(cur) && v.id < cur.id)) best.set(k, v); } }
+    views = views.filter((v) => { if (v.category !== "media") return true; const k = parents.get(v.id)?.deviceId; return !k || best.get(k) === v; });
     return views.map((v) => {
       const p = parents.get(v.id);
       if (!p || (count.get(p.deviceId) ?? 0) < 2) return v;
@@ -188,7 +211,9 @@ export function createDeviceService(db: Database, ha: HaApi) {
     }).filter((g) => g.deviceIds.length > 0);
   }
 
-  return { visibleDevices, deviceFor, run, groupsFor, accessor, meta, viewOf };
+  /** Is this something the household sees as a device? (Alerts and lists use it, so they say nothing about a setting or a helper.) */
+  const shown = (household: string, id: string) => { const e = ha.entities.get(id); return !!e && viewOf(e, meta(household).get(id)) !== null; };
+  return { visibleDevices, deviceFor, run, groupsFor, accessor, meta, viewOf, kindOf, shown };
 }
 export type DeviceService = ReturnType<typeof createDeviceService>;
 

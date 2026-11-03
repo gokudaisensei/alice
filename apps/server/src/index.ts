@@ -35,7 +35,7 @@ if (code) console.log(`First-time setup: open the app and use setup code ${code}
 const push = realPush(db, config.vapidSubject, config.egressProxy || undefined);
 const devices = createDeviceService(db, ha), notifier = createNotifier(db, devices, push);
 const powerLimits = createPowerLimits(db);
-startRules(db, ha, notifier, undefined, powerLimits);
+startRules(db, ha, notifier, undefined, powerLimits, (h, id) => devices.shown(h, id));
 createSampler(db, ha).start();
 // Once a day: tell people about new insights (at most once per finding every three days) and apply retention.
 const insights = createInsights(db, ha, devices);

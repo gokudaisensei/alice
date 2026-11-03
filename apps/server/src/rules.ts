@@ -24,7 +24,7 @@ const mins = (ms: number) => { const m = Math.round(ms / 60_000); return m >= 1 
  * Plain, deterministic rules over Home Assistant's own state. A problem has to last before anyone hears about it,
  * so a flaky bulb doesn't buzz a phone. Nothing here ever acts on a device.
  */
-export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays = DEFAULT_DELAYS, limits: PowerLimits = createPowerLimits(db)) {
+export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays = DEFAULT_DELAYS, limits: PowerLimits = createPowerLimits(db), shown: (household: string, id: string) => boolean = () => true) {
   const powerMs = delays.powerMs ?? DEFAULT_DELAYS.powerMs, batteryMs = delays.batteryMs ?? DEFAULT_DELAYS.batteryMs, openMs = delays.openMs ?? DEFAULT_DELAYS.openMs;
   const fmtW = (w: number) => (w >= 1000 ? `${Math.round(w / 100) / 10} kW` : `${Math.round(w)} W`);
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -68,7 +68,9 @@ export function startRules(db: Database, ha: HaApi, nf: Notifier, delays: Delays
     if (!e) return disarm(`offline:${id}`), disarm(`lock:${id}`), disarm(`battery:${id}`), disarm(`open:${id}`);
     const d = describe(e);
     safety(id, e);
-    if (d.ordinary && !id.startsWith("scene.") && !id.startsWith("script.") && !id.startsWith("automation.")) {
+    // Only what the household sees as a device can be "offline": not a setting of a device, not a helper value.
+    const hh = household();
+    if (d.ordinary && !id.startsWith("scene.") && !id.startsWith("script.") && !id.startsWith("automation.") && hh && shown(hh, id)) {
       if (e.state === "unavailable") arm(`offline:${id}`, delays.offlineMs, () => ha.entities.get(id)?.state === "unavailable" && !ha.isStale(), () => {
         const h = household(); if (!h) return;
         void nf.emit({ householdId: h, kind: "device_offline", entityId: id, dedupeKey: `offline:${id}`, title: `${nameOf(id)} is offline`, body: `It hasn't responded for ${mins(delays.offlineMs)}. Check that it has power and Wi-Fi.` });

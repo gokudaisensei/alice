@@ -407,7 +407,7 @@
 									</div>
 								{/each}
 							</div>
-							{#if unplaced.length}<p class="text-sm text-muted-foreground">{pl(unplaced.length, 'device')} not in a room. <a class="font-medium text-primary hover:underline" href="/admin/rooms">Put them in rooms</a></p>{/if}
+							{#if unplaced.length}<p class="flex min-h-11 flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">{pl(unplaced.length, 'device')} not in a room. <a class="inline-flex min-h-11 items-center font-medium text-primary hover:underline" href="/rooms">Put them in rooms</a></p>{/if}
 						{:else}
 							<Empty icon={HomeIcon} title="No rooms yet" description="Rooms group your devices so you can find and control them by place." action={session.can('rooms.manage') ? 'Organise your home' : undefined} href="/admin/rooms" />
 						{/if}

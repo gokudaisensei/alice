@@ -3,7 +3,7 @@ import type { Database } from "bun:sqlite";
 import { randomUUID } from "node:crypto";
 import { audit, activity } from "./audit";
 import { describe, DEVICE_ICONS, ROOM_COLORS, ROOM_ICONS } from "./capabilities";
-import type { DeviceMeta } from "./devices";
+import type { DeviceMeta, DeviceService } from "./devices";
 import { authorize } from "./guard";
 import type { HaApi } from "./ha";
 import { friendlyName } from "./ha";
@@ -23,9 +23,9 @@ const GUEST_ABILITIES: Permission[] = ["device.control", "scene.activate"];
 const MEMBER_ABILITIES: Permission[] = ["device.control", "scene.activate", "scenes.manage", "automation.manage", "modes.set"];
 
 /** Household organisation: rooms, device placement, groups, per-user device access. Admin area only. */
-export function manageRoutes(db: Database, ha: HaApi, secure: boolean) {
+export function manageRoutes(db: Database, ha: HaApi, secure: boolean, svc: DeviceService) {
   const org = (req: Request) => authorize(db, req, secure, ["admin.access", "rooms.manage"]);
-  const metaOf = (household: string) => withAreaRooms(db, ha, household, new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden, icon FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r])));
+  const metaOf = (household: string) => withAreaRooms(db, ha, household, new Map(all<DeviceMeta>(db, "SELECT entity_id, name, room_id, hidden, icon, pinned FROM device_meta WHERE household_id = ?", household).map((r) => [r.entity_id, r])));
   const roomOk = (h: string, id: unknown): id is string => typeof id === "string" && exists(db, "SELECT 1 FROM rooms WHERE id = ? AND household_id = ?", id, h);
   const entityOk = (id: unknown): id is string => typeof id === "string" && ha.entities.has(id);
   /** Devices, scenes (HA entities) or routines ("routine:<id>") can all be granted to a person. */
@@ -36,15 +36,16 @@ export function manageRoutes(db: Database, ha: HaApi, secure: boolean) {
   return new Elysia({ name: "manage" })
     // Every HA entity, including ones unsuitable for the household UI (those are flagged, never controllable there).
     // Searchable and paged, so a home with hundreds of devices never has to be scrolled through. `all=1` also lists unsuitable entities.
+    // Settings of a device and helper values (`kind` part or helper) are left out unless asked for (`helpers=1`) or searched for by name.
     .get("/api/admin/devices", ({ request, query, set }) => {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const meta = metaOf(g.user.householdId);
-      const q = text(query.q).trim().toLowerCase(), room = text(query.room), notRoom = text(query.notRoom), includeAll = query.all === "1";
+      const q = text(query.q).trim().toLowerCase(), room = text(query.room), notRoom = text(query.notRoom), includeAll = query.all === "1", withHelpers = query.helpers === "1" || !!q;
       const limit = Math.min(200, Math.max(1, Number(query.limit) || 100)), offset = Math.max(0, Number(query.offset) || 0);
       const rows = [...ha.entities.values()].map((e) => {
         const d = describe(e), m = meta.get(e.entity_id);
-        return { id: e.entity_id, name: m?.name || d.name, haName: d.name, category: d.category, ordinary: d.ordinary, roomId: m?.room_id ?? null, hidden: !!m?.hidden, state: e.state };
-      }).filter((r) => (includeAll || r.ordinary) && (!q || r.name.toLowerCase().includes(q) || r.haName.toLowerCase().includes(q) || r.category.includes(q) || r.id.toLowerCase().includes(q))
+        return { id: e.entity_id, name: m?.name || d.name, haName: d.name, category: d.category, ordinary: d.ordinary, kind: svc.kindOf(e), pinned: !!m?.pinned, roomId: m?.room_id ?? null, hidden: !!m?.hidden, state: e.state };
+      }).filter((r) => (includeAll || r.ordinary) && !ha.secondary?.has(r.id) && (withHelpers || r.kind === "device" || r.pinned) && (!q || r.name.toLowerCase().includes(q) || r.haName.toLowerCase().includes(q) || r.category.includes(q) || r.id.toLowerCase().includes(q))
         && (room === "" || (room === "none" ? r.roomId === null : r.roomId === room)) && (!notRoom || r.roomId !== notRoom)).sort((a, b) => a.name.localeCompare(b.name));
       return { stale: ha.isStale(), total: rows.length, devices: rows.slice(offset, offset + limit) };
     })
@@ -52,13 +53,14 @@ export function manageRoutes(db: Database, ha: HaApi, secure: boolean) {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
       if (!entityOk(params.id)) return deny(set, 404, "not_found");
       const h = g.user.householdId, b = asObject(body);
-      const next = one<Pick<DeviceMeta, "name" | "room_id" | "hidden" | "icon">>(db, "SELECT name, room_id, hidden, icon FROM device_meta WHERE household_id = ? AND entity_id = ?", h, params.id) ?? { name: null, room_id: null, hidden: 0, icon: null };
+      const next = one<Pick<DeviceMeta, "name" | "room_id" | "hidden" | "icon" | "pinned">>(db, "SELECT name, room_id, hidden, icon, pinned FROM device_meta WHERE household_id = ? AND entity_id = ?", h, params.id) ?? { name: null, room_id: null, hidden: 0, icon: null, pinned: 0 };
       if ("name" in b) { next.name = b.name === null ? null : cleanName(b.name); if (b.name !== null && !next.name) return deny(set, 400, "invalid_input"); }
       if ("roomId" in b) { if (b.roomId !== null && !roomOk(h, b.roomId)) return deny(set, 400, "invalid_input"); next.room_id = b.roomId as string | null; }
       if ("hidden" in b) next.hidden = b.hidden ? 1 : 0;
+      if ("pinned" in b) next.pinned = b.pinned ? 1 : 0;
       if ("icon" in b) { if (b.icon !== null && !oneOf(DEVICE_ICONS, b.icon)) return deny(set, 400, "invalid_input"); next.icon = b.icon as string | null; }
-      db.query("INSERT INTO device_meta (household_id, entity_id, name, room_id, hidden, icon) VALUES (?,?,?,?,?,?) ON CONFLICT(household_id, entity_id) DO UPDATE SET name=excluded.name, room_id=excluded.room_id, hidden=excluded.hidden, icon=excluded.icon")
-        .run(h, params.id, next.name, next.room_id, next.hidden, next.icon);
+      db.query("INSERT INTO device_meta (household_id, entity_id, name, room_id, hidden, icon, pinned) VALUES (?,?,?,?,?,?,?) ON CONFLICT(household_id, entity_id) DO UPDATE SET name=excluded.name, room_id=excluded.room_id, hidden=excluded.hidden, icon=excluded.icon, pinned=excluded.pinned")
+        .run(h, params.id, next.name, next.room_id, next.hidden, next.icon, next.pinned);
       audit(db, { householdId: h, actorType: "user", actorId: g.user.id, action: "device.organise", target: params.id, outcome: "success" });
       return { ok: true };
     })
@@ -94,7 +96,8 @@ export function manageRoutes(db: Database, ha: HaApi, secure: boolean) {
       const h = g.user.householdId, b = asObject(body), add = entityIds(b.add ?? [], 200), remove = entityIds(b.remove ?? [], 200);
       if (!roomOk(h, params.id) || !add || !remove) return deny(set, 400, "invalid_input");
       db.transaction(() => {
-        for (const e of add) db.query("INSERT INTO device_meta (household_id, entity_id, room_id, hidden) VALUES (?,?,?,0) ON CONFLICT(household_id, entity_id) DO UPDATE SET room_id = excluded.room_id").run(h, e, params.id);
+        // Putting a setting or helper into a room is how someone chooses to show it.
+        for (const e of add) db.query("INSERT INTO device_meta (household_id, entity_id, room_id, hidden, pinned) VALUES (?,?,?,0,?) ON CONFLICT(household_id, entity_id) DO UPDATE SET room_id = excluded.room_id, hidden = 0, pinned = MAX(pinned, excluded.pinned)").run(h, e, params.id, (() => { const x = ha.entities.get(e); return x && svc.kindOf(x) !== "device" ? 1 : 0; })());
         for (const e of remove) db.query("UPDATE device_meta SET room_id = NULL WHERE household_id = ? AND entity_id = ? AND room_id = ?").run(h, e, params.id);
       })();
       // In a room that mirrors a hub area, the hub learns of it too. The household's placement holds either way.

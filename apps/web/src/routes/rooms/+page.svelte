@@ -6,6 +6,7 @@
 	import { session } from '#lib/session.svelte.js';
 	import { haptics } from '#lib/haptics.js';
 	import RoomSuggestions from '#lib/components/app/RoomSuggestions.svelte';
+	import HaAreas from '#lib/components/app/HaAreas.svelte';
 	import { plural } from '#lib/fmt.js';
 	import { tileClass } from '#lib/tiles.js';
 	import DeviceCard from '#lib/components/app/DeviceCard.svelte';
@@ -51,7 +52,7 @@
 </script>
 
 <Page title="Rooms" width="xl">
-	{#if session.can('rooms.manage')}<RoomSuggestions />{/if}
+	{#if session.can('rooms.manage')}<HaAreas /><RoomSuggestions />{/if}
 	{#snippet actions()}{#if session.can('rooms.manage')}<Button variant="secondary" size="sm" href="/admin/rooms"><Settings2 />Manage</Button>{/if}{/snippet}
 	{#if pages.length}
 		<div class="-mx-5 flex snap-x snap-proximity scroll-px-5 gap-2 overflow-x-auto no-scrollbar px-5 pb-1 md:mx-0 md:flex-wrap md:overflow-visible md:px-0" role="tablist" aria-label="Rooms">

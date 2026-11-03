@@ -390,11 +390,14 @@ test("a physical device with several cards names each after its device; a lone c
   const sub = (id: string) => list.find((d) => d.id === id)?.subtitle;
   expect(sub("media_player.panel_speaker")).toBe("Panel · Speaker");
   expect(sub("camera.panel_camera")).toBe("Panel · Camera");
-  expect(sub("switch.panel_mic_mute")).toBe("Panel · Microphone mute");
-  expect(list.find((d) => d.id === "switch.panel_mic_mute")?.name).toBe("Panel Microphone mute");
+  expect(list.find((d) => d.id === "switch.panel_mic_mute")).toBeUndefined(); // a setting of the panel, not a device: hidden until someone shows it
+  expect((await t.call("PUT", "/api/admin/devices/switch.panel_mic_mute", { cookie: admin, body: { pinned: true } })).status).toBe(200);
+  const shown = ((await devices(admin)).devices as Body[]).find((d) => d.id === "switch.panel_mic_mute");
+  expect(shown?.subtitle).toBe("Panel · Microphone mute");
+  expect(shown?.name).toBe("Panel Microphone mute");
   expect(sub("light.kitchen")).toBeNull();
   expect(list.find((d) => d.id === "media_player.panel_airplay")).toBeUndefined();
-  expect(list.find((d) => d.id === "switch.panel_mic_mute")).toMatchObject({ deviceClass: null });
+  expect(shown).toMatchObject({ deviceClass: null });
 });
 
 test("a person can choose a device's icon from the known set only", async () => {

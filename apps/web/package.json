@@ -10,7 +10,10 @@
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"typecheck": "bun run check"
+		"typecheck": "bun run check",
+		"vendor": "mkdir -p static/vendor && cp node_modules/hls.js/dist/hls.light.min.js static/vendor/hls.js",
+		"prebuild": "bun run vendor",
+		"predev": "bun run vendor"
 	},
 	"devDependencies": {
 		"@internationalized/date": "^3.12.0",

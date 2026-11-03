@@ -16,8 +16,15 @@ export const words = {
 };
 
 /** What a scene does, in one line. */
-export const sceneDoes = (deviceIds: string[]) =>
-	deviceIds.length ? `Sets ${joinNames(deviceIds.map(words.nameOf))} the way they were saved. Runs when you tap it.` : 'Sets the devices it was made with. Runs when you tap it.';
+const nameOrNull = (id: string) => home.byId(id)?.name ?? home.scenes.find((s) => s.id === id)?.name ?? null;
+/** How many of a scene's devices no longer exist. */
+export const goneIn = (deviceIds: string[]) => deviceIds.filter((id) => nameOrNull(id) === null).length;
+export const sceneDoes = (deviceIds: string[]) => {
+	const names = deviceIds.map(nameOrNull).filter((n): n is string => n !== null), gone = deviceIds.length - names.length;
+	if (!deviceIds.length) return 'Sets the devices it was made with. Runs when you tap it.';
+	if (!names.length) return `Its ${gone === 1 ? 'device is' : `${gone} devices are`} no longer available, so running it does nothing. Delete it or build it again.`;
+	return `Sets ${joinNames(names)} the way they were saved${gone ? `; ${gone === 1 ? 'one other device is' : `${gone} others are`} no longer available` : ''}. Runs when you tap it.`;
+};
 /** What a routine does, in one line. */
 export const routineDoes = (steps: { type: string }[]) => sentences(capitalize(stepsSentence(steps as Step[], words.nameOf)) || 'Has no steps yet', 'Runs when you tap it');
 /** What an automation does and when, in one line. */

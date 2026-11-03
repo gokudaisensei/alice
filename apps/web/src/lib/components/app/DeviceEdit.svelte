@@ -23,6 +23,13 @@
 	// What else relies on this device, so changing it holds no surprise. Only for people who manage automations; quiet when there is nothing.
 	let usedBy = $state<{ kind: string; name: string; madeHere: boolean }[]>([]);
 	onMount(async () => { const r = await api<{ items: typeof usedBy }>('GET', `/api/devices/${encodeURIComponent(device.id)}/used-by`); if (r.ok) usedBy = r.data.items; });
+	async function hide() {
+		saving = true;
+		const r = await api('PUT', `/api/admin/devices/${encodeURIComponent(device.id)}`, { hidden: true });
+		saving = false;
+		if (!r.ok) { haptics.error(); home.say('error', 'That didn’t save. Please try again.'); return; }
+		await home.load(); haptics.success(); home.say('ok', 'Hidden. Bring it back from Edit rooms, under Add devices.'); onsaved?.();
+	}
 	const field = 'h-12 w-full rounded-xl border bg-card px-3.5 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring';
 </script>
 
@@ -41,4 +48,5 @@
 		<p class="text-xs text-muted-foreground">The first one is chosen for you from the device’s type and name.</p>
 	</div>
 	<Button class="h-12 w-full" disabled={saving} onclick={save}>{saving ? 'Saving…' : 'Save'}</Button>
+	<Button variant="ghost" class="h-11 w-full text-muted-foreground" disabled={saving} onclick={hide}>Hide this from the app</Button>
 </div>

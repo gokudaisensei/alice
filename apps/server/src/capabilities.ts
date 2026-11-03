@@ -140,7 +140,7 @@ function sensorLike(e: HaEntity, a: HaAttributes, base: Base): Descriptor {
   const energy = domain === "sensor" && ENERGY_CLASSES.includes(String(a.device_class));
   const unit = a.unit_of_measurement == null ? null : String(a.unit_of_measurement);
   // Plain readings only. Timestamps ("last backup"), dates and enum text states are the hub's own housekeeping, not things in a home.
-  const housekeeping = (domain === "binary_sensor" && !a.device_class) || domain === "sensor" && (["timestamp", "date", "enum", "duration"].includes(String(a.device_class)) || (!unit && !a.device_class && (e.state === "" || !Number.isFinite(Number(e.state))) && e.state !== "unavailable"));
+  const housekeeping = (domain === "binary_sensor" && !a.device_class) || domain === "sensor" && (["timestamp", "date", "enum", "duration"].includes(String(a.device_class)) || (!unit && !a.device_class) || a.friendly_name === undefined);
   return { ...base, category: energy ? "energy" : "sensor", ordinary: !housekeeping, reading: { value: e.state, unit, kind: "measurement", cls: typeof a.device_class === "string" ? a.device_class : null } };
 }
 

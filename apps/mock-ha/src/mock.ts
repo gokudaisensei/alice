@@ -51,6 +51,23 @@ export function startMockHa(port: number, token = "dev-token", opts: { demo?: bo
     e("binary_sensor.hall_smoke", "off", { device_class: "smoke" }),
     e("binary_sensor.back_door", "off", { device_class: "door" }),
     e("sensor.door_sensor_battery", "11", { device_class: "battery", unit_of_measurement: "%" }),
+    // a wall panel like the real one: a speaker seen twice, a camera, and settings, all one physical device
+    e("media_player.panel_speaker", "idle", { supported_features: 4 | 1 | 16384 | 128 | 256, device_class: "speaker", friendly_name: "spaceship" }),
+    e("media_player.panel_cast", "idle", { supported_features: 4, friendly_name: "spaceship" }),
+    e("camera.panel_camera", "idle", { supported_features: 2, friendly_name: "Camera" }),
+    e("switch.panel_mic_mute", "on", { friendly_name: "Microphone mute" }),
+    e("switch.panel_adb", "off", { friendly_name: "ADB over network" }),
+    e("switch.panel_autoanswer", "off", { friendly_name: "Auto-answer calls" }),
+    e("button.panel_wake", "unknown", { friendly_name: "Wake" }),
+    e("button.panel_favorite", "unknown", { friendly_name: "Favorite current song" }),
+    e("sensor.panel_protocol_version", "3", {}),
+    // helper values left by a home simulator
+    e("input_number.away_temperature", "16", { min: 5, max: 30, step: 1 }),
+    e("input_number.bathroom_humidity_level", "55", { min: 0, max: 100, step: 1 }),
+    e("input_number.bedroom_light_level", "255", { min: 0, max: 255, step: 1 }),
+    e("input_number.living_room_thermostat_target", "21", { min: 5, max: 30, step: 1 }),
+    e("input_select.house_mode", "home", { options: ["home", "away"] }),
+    e("input_select.home_alarm_mode", "disarmed", { options: ["disarmed", "armed"] }),
     e("automation.porch_light_at_dusk", "on", { id: "1700000000001", last_triggered: "2026-11-02T13:00:00+00:00" }),
     e("script.goodnight_house", "off", {}),
     e("update.home_assistant_core", "on", { title: "Home Assistant Core", installed_version: "2026.10.4", latest_version: "2026.11.0" }),
@@ -65,6 +82,10 @@ export function startMockHa(port: number, token = "dev-token", opts: { demo?: bo
     registry.areas.push({ area_id: "living", name: "Living room", floor_id: "ground" }, { area_id: "kitchen", name: "Kitchen", floor_id: "ground" }, { area_id: "bedroom", name: "Bedroom", floor_id: "first" }, { area_id: "garden", name: "Garden", floor_id: null });
     registry.labels.push({ label_id: "evening", name: "Evening lights" });
     registry.devices.push({ id: "d_living", name: "Living room lights", area_id: "living", manufacturer: "Acme", model: "Strip 2", sw_version: "1.4.2", labels: ["evening"] }, { id: "d_kitchen", name: "Kitchen light", area_id: "kitchen", manufacturer: "Acme", model: "Bulb", sw_version: "2.0", labels: ["evening"] });
+    registry.devices.push({ id: "d_panel", name: "spaceship", manufacturer: "EchoLocal", model: "checkers", sw_version: "0.0.13", labels: [] }, { id: "d_coffee", name: "Coffee plug", manufacturer: "Acme", model: "Plug", labels: [] });
+    registry.entities.push({ entity_id: "media_player.panel_speaker", device_id: "d_panel", platform: "esphome", original_name: "Speaker", original_device_class: "speaker" }, { entity_id: "media_player.panel_cast", device_id: "d_panel", platform: "cast" }, { entity_id: "camera.panel_camera", device_id: "d_panel", platform: "esphome", original_name: "Camera" },
+      { entity_id: "switch.panel_mic_mute", device_id: "d_panel", platform: "esphome", original_name: "Microphone mute" }, { entity_id: "switch.panel_adb", device_id: "d_panel", platform: "esphome", original_name: "ADB over network" }, { entity_id: "switch.panel_autoanswer", device_id: "d_panel", platform: "esphome", original_name: "Auto-answer calls" },
+      { entity_id: "button.panel_wake", device_id: "d_panel", platform: "esphome", original_name: "Wake" }, { entity_id: "button.panel_favorite", device_id: "d_panel", platform: "esphome", original_name: "Favorite current song" }, { entity_id: "switch.coffee_plug", device_id: "d_coffee", platform: "zha" });
     registry.entities.push({ entity_id: "light.living_room", device_id: "d_living", platform: "zha" }, { entity_id: "light.kitchen", device_id: "d_kitchen", platform: "zha" }, { entity_id: "light.hall", area_id: "garden", platform: "zha" }, { entity_id: "sensor.door_sensor_battery", device_id: "d_kitchen", platform: "zha" }, { entity_id: "cover.living_blinds", area_id: "living", platform: "zha" });
   }
   /** What each assistant may touch in the demo: Home Assistant exposes doors and garages to its own assistant unless told not to. */

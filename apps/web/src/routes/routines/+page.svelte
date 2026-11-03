@@ -33,6 +33,7 @@
 	const loaded = $derived(home.loaded && behaviours.loaded);
 	const options = $derived([{ id: 'all' as const, label: 'All' }, { id: 'run' as const, label: 'Run now' }, ...(canAuto ? [{ id: 'auto' as const, label: 'Automatic' }] : [])]);
 
+	let moreIdeas = $state(false);
 	const sentence = (x: string) => (/[.!?]$/.test(x) ? x : `${x}.`);
 	type Idea = { key: string; name: string; blurb: string; summary: string; missing: string | null; href: string; runs: string };
 	const ideas = $derived<Idea[]>([
@@ -71,7 +72,7 @@
 	{#if loaded && ideas.length}
 		<Section title="Ideas to start from" hint="Nothing happens until you check the details and save.">
 			<div class="grid gap-3 sm:grid-cols-2">
-				{#each ideas as t (t.key)}
+				{#each (moreIdeas ? ideas : ideas.slice(0, 3)) as t (t.key)}
 					<div class="flex flex-col gap-2 rounded-tile bg-secondary/60 p-4">
 						<h3 class="font-semibold tracking-[-0.015em]">{t.name}</h3>
 						<p class="text-sm text-muted-foreground">{t.blurb}</p>
@@ -82,6 +83,7 @@
 					</div>
 				{/each}
 			</div>
+			{#if ideas.length > 3}<Button variant="ghost" class="mx-auto flex min-h-11" onclick={() => (moreIdeas = !moreIdeas)}>{moreIdeas ? 'Show fewer ideas' : `Show ${ideas.length - 3} more ideas`}</Button>{/if}
 		</Section>
 	{/if}
 </Page>

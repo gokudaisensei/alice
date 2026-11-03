@@ -41,7 +41,7 @@
 	{#if blocked}
 		<div role="status" class="flex gap-3 rounded-2xl bg-signal-soft p-4 text-sm text-signal-foreground">
 			<TriangleAlert class="mt-0.5 size-5 shrink-0" />
-			<div><p class="font-semibold">{cloud === null ? 'Couldn’t check Home Assistant Cloud' : 'Home Assistant Cloud isn’t linked yet'}</p><p class="mt-0.5">{cloud === null ? 'Try again in a moment. The switches below are off limits until the link is confirmed.' : 'Voice control needs a Home Assistant Cloud subscription linked to this home. Our support team can set that up. Until then the switches below are locked.'}</p></div>
+			<div><p class="font-semibold">{cloud === null ? 'Couldn’t check Home Assistant Cloud' : 'Home Assistant Cloud isn’t linked yet'}</p><p class="mt-0.5">{cloud === null ? 'Try again in a moment. Nothing can be turned on for voice until the link is confirmed.' : 'Voice control needs a Home Assistant Cloud subscription linked to this home. Our support team can set that up. Until then nothing can be turned on for voice.'}</p></div>
 		</div>
 	{:else if cloud}
 		<p class="text-sm text-muted-foreground">{plural(on, 'item')} available to voice.</p>
@@ -55,8 +55,10 @@
 	</details>
 	{#if msg}<p role="alert" class="text-sm text-signal">{msg}</p>{/if}
 	{#if !loaded}<SkeletonList kind="rows" count={5} />
+	{:else if blocked}
+		<p class="text-sm text-muted-foreground">Once Home Assistant Cloud is linked, your lights, plugs and scenes will be listed here to choose from.</p>
 	{:else if items.length}
-		<Group class={blocked ? 'opacity-60' : ''}>
+		<Group>
 			{#each items as i (i.id)}
 				<label class="flex min-h-14 items-center gap-3 px-4 py-3 transition-colors {blocked ? 'cursor-not-allowed' : 'cursor-pointer hover:bg-muted/60'}"><span class="min-w-0 flex-1"><span class="block truncate text-[0.9375rem] font-medium">{i.name}</span><span class="text-sm text-muted-foreground">{about(i)}</span></span>
 					<Switch checked={i.enabled} disabled={blocked || !!busy[i.id]} onCheckedChange={(v) => set(i, v)} aria-label="Voice control for {i.name}" /></label>

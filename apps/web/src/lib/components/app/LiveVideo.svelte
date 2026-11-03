@@ -6,6 +6,16 @@
 	let { id, name }: { id: string; name: string } = $props();
 	let video = $state<HTMLVideoElement | undefined>(), on = $state(false), phase = $state<'idle' | 'loading' | 'playing' | 'failed'>('idle'), why = $state('');
 	let hls: { destroy: () => void } | null = null;
+	type HlsCtor = typeof import('hls.js').default;
+	/** The player is a separate file, fetched only when someone watches a camera, so it is not part of everyone's first download. */
+	let loading: Promise<HlsCtor | null> | null = null;
+	const loadHls = () => (loading ??= new Promise<HlsCtor | null>((resolve) => {
+		const w = window as unknown as { Hls?: HlsCtor };
+		if (w.Hls) return resolve(w.Hls);
+		const s = document.createElement('script');
+		s.src = '/vendor/hls.js'; s.onload = () => resolve(w.Hls ?? null); s.onerror = () => { loading = null; resolve(null); };
+		document.head.append(s);
+	}));
 	const src = $derived(`/api/devices/${encodeURIComponent(id)}/live/master_playlist.m3u8`);
 
 	/** The bundled player where the browser can run it; the browser's own HLS only where it cannot (older iPhones). Browsers that claim native HLS do not all play it. */
@@ -14,8 +24,8 @@
 		await new Promise((r) => setTimeout(r)); // the <video> exists on the next tick
 		const v = video; if (!v) return;
 		v.muted = true; v.playsInline = true;
-		const { default: Hls } = await import('hls.js');
-		if (Hls.isSupported()) {
+		const Hls = await loadHls();
+		if (Hls?.isSupported()) {
 			const h = new Hls({ enableWorker: false, lowLatencyMode: true, maxBufferLength: 8 });
 			hls = h;
 			h.on(Hls.Events.ERROR, (_e, d) => { if (d.fatal) fail(d.response?.code === 429 ? 'Too many cameras are open right now. Close one and try again.' : 'The live video isn’t available right now.'); });

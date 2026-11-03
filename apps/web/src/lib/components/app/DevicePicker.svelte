@@ -10,14 +10,14 @@
 	import { haptics } from '#lib/haptics.js';
 	import { Search, X } from '@lucide/svelte';
 
-	type Row = { id: string; name: string; category: string; roomId: string | null };
+	type Row = { id: string; name: string; category: string; roomId: string | null; kind?: 'device' | 'part' | 'helper'; hidden?: boolean };
 	let { open = $bindable(false), title, selected = [], notRoom, nameLabel, name = $bindable(''), confirm, minimum = 1, onconfirm }: {
 		open: boolean; title: string; selected?: string[]; notRoom?: string; nameLabel?: string; name?: string;
 		confirm: (n: number) => string; minimum?: number; onconfirm: (ids: string[], name: string) => Promise<string | null | void> | string | null | void;
 	} = $props();
 
 	const PAGE = 40;
-	let q = $state(''), rows = $state<Row[]>([]), total = $state(0), picked = $state<string[]>([]), loading = $state(false), saving = $state(false), error = $state(''), only = $state<'all' | 'none'>('all');
+	let helpers = $state(false), q = $state(''), rows = $state<Row[]>([]), total = $state(0), picked = $state<string[]>([]), loading = $state(false), saving = $state(false), error = $state(''), only = $state<'all' | 'none'>('all');
 	let timer: ReturnType<typeof setTimeout>;
 	const roomName = (id: string | null) => (id ? home.rooms.find((r) => r.id === id)?.name : null);
 	const KIND: Record<string, string> = { ...KIND_SINGULAR, light: 'Light', switch: 'Plug', fan: 'Fan', climate: 'Climate', lock: 'Lock', camera: 'Camera', media: 'Media', sensor: 'Sensor', energy: 'Energy' };
@@ -28,13 +28,14 @@
 		if (q.trim()) qs.set('q', q.trim());
 		if (notRoom) qs.set('notRoom', notRoom);
 		if (only === 'none') qs.set('room', 'none');
+		if (helpers) qs.set('helpers', '1');
 		const r = await api<{ devices: Row[]; total: number }>('GET', `/api/admin/devices?${qs}`);
 		loading = false;
 		if (!r.ok) { error = r.data?.message ?? explain(r.data?.error); return; }
 		rows = offset ? [...rows, ...r.data.devices] : r.data.devices; total = r.data.total;
 	}
 	// Every time the sheet opens: start clean, with what was already chosen ticked.
-	$effect(() => { if (open) untrack(() => { q = ''; only = 'all'; picked = [...selected]; error = ''; fetchPage(0); }); });
+	$effect(() => { if (open) untrack(() => { q = ''; helpers = false; only = 'all'; picked = [...selected]; error = ''; fetchPage(0); }); });
 	function search() { clearTimeout(timer); timer = setTimeout(() => fetchPage(0), 220); }
 	const has = (id: string) => picked.includes(id);
 	function flip(id: string) { haptics.tap(); picked = has(id) ? picked.filter((x) => x !== id) : [...picked, id]; }
@@ -60,11 +61,12 @@
 					</div>
 				{/if}
 			</div>
+			<div class="flex px-5 pb-2"><button type="button" aria-pressed={helpers} onclick={() => { helpers = !helpers; fetchPage(0); }} class="min-h-8 rounded-full px-3.5 text-sm font-medium transition-colors {helpers ? 'bg-foreground text-background' : 'bg-secondary text-muted-foreground'}">Include settings and helper values</button></div>
 			<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain border-t">
 				{#each rows as d (d.id)}
 					<button type="button" role="checkbox" aria-checked={has(d.id)} onclick={() => flip(d.id)} class="flex min-h-14 w-full items-center gap-3 border-b px-5 py-2.5 text-left transition-colors active:bg-muted">
 						<Checkbox checked={has(d.id)} />
-						<span class="min-w-0 flex-1"><span class="block truncate text-[0.9375rem] font-medium">{d.name}</span><span class="text-sm text-muted-foreground">{KIND[d.category] ?? d.category}{#if roomName(d.roomId)}&nbsp;· in {roomName(d.roomId)}{/if}</span></span>
+						<span class="min-w-0 flex-1"><span class="block truncate text-[0.9375rem] font-medium">{d.name}</span><span class="text-sm text-muted-foreground">{d.kind === 'part' ? 'A setting of a device' : d.kind === 'helper' ? 'A helper value' : (KIND[d.category] ?? d.category)}{#if d.hidden}&nbsp;· hidden{/if}{#if roomName(d.roomId)}&nbsp;· in {roomName(d.roomId)}{/if}</span></span>
 					</button>
 				{:else}
 					{#if !loading}<p class="px-5 py-10 text-center text-sm text-muted-foreground">{q ? 'Nothing matches that search.' : 'No devices to show.'}</p>{/if}

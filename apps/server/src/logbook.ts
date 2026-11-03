@@ -23,7 +23,7 @@ export function originOf(r: Row): Origin {
 }
 
 /** Rows that carry only a state ("on", "playing") are put in a sentence. */
-const said = (s: string | undefined) => (!s ? "changed" : s === "on" ? "turned on" : s === "off" ? "turned off" : s === "unavailable" ? "went offline" : s === "unknown" ? "lost its reading" : `is now ${s.replace(/_/g, " ")}`);
+const said = (s: string | undefined) => (!s ? "changed" : /^\d{4}-\d{2}-\d{2}T/.test(s) ? "updated" : /^(none|null)$/i.test(s) ? "was cleared" : s === "on" ? "turned on" : s === "off" ? "turned off" : s === "unavailable" ? "went offline" : s === "unknown" ? "lost its reading" : `is now ${s.replace(/_/g, " ")}`);
 
 const MAX_ENTITIES = 300, MAX_EVENTS = 100;
 
@@ -42,7 +42,9 @@ export function logbookRoutes(db: Database, ha: HaApi, secure: boolean, svc: Dev
     const events = (r.result as Row[]).flatMap((x) => {
       const v = x.entity_id ? views.get(x.entity_id) : undefined, at = stamp(x.when);
       return v && Number.isFinite(at) ? [{ at, id: v.id, name: v.name, message: x.message ?? said(x.state), origin: originOf(x) }] : [];
-    }).sort((a, b) => b.at - a.at).slice(0, MAX_EVENTS);
-    return { events };
+    }).sort((a, b) => b.at - a.at);
+    // A burst of changes on one device (a speaker flipping between playing, idle and paused) is one line: where it ended up.
+    const last = new Map<string, number>(), kept = events.filter((e) => { const t = last.get(e.id); last.set(e.id, e.at); return t === undefined || t - e.at > 120_000; });
+    return { events: kept.slice(0, MAX_EVENTS) };
   });
 }

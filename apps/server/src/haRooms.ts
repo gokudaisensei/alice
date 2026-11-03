@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { activity, audit } from "./audit";
 import { authorize } from "./guard";
 import type { HaApi } from "./ha";
-import type { DeviceMeta } from "./devices";
+import type { DeviceMeta, DeviceService } from "./devices";
+import type { SessionUser } from "./session";
 import { asObject, denyWith as deny } from "./http";
 import { all, scalar } from "./sql";
 
@@ -33,7 +34,7 @@ export function withAreaRooms(db: Database, ha: HaApi, household: string, own: M
   for (const [entityId, areaId] of ha.areaOf) {
     const roomId = room.get(areaId), m = out.get(entityId);
     if (!roomId || m?.room_id) continue;
-    out.set(entityId, { entity_id: entityId, name: null, hidden: 0, icon: null, ...m, room_id: roomId });
+    out.set(entityId, { entity_id: entityId, name: null, hidden: 0, icon: null, pinned: 0, ...m, room_id: roomId });
   }
   return out;
 }
@@ -57,16 +58,18 @@ export async function placeEntityInHa(ha: HaApi, entityId: string, areaId: strin
 }
 
 /** Bringing the hub's areas in as rooms: shown first, applied only when an admin says so, and never deleting anything. */
-export function haRoomRoutes(db: Database, ha: HaApi, secure: boolean) {
+export function haRoomRoutes(db: Database, ha: HaApi, secure: boolean, svc: DeviceService) {
   const org = (req: Request) => authorize(db, req, secure, ["admin.access", "rooms.manage"]);
 
-  function plan(household: string) {
+  /** What this person sees as devices: areas and labels are counted by these, so an area of settings and helpers is not offered as a room. */
+  const seen = (u: SessionUser) => new Set(svc.visibleDevices(u).map((d) => d.id));
+  function plan(household: string, visible: Set<string>) {
     const rooms = all<RoomRow>(db, "SELECT id, name, color, icon, ha_area_id FROM rooms WHERE household_id = ?", household);
     const linked = new Map(rooms.filter((r) => r.ha_area_id).map((r) => [r.ha_area_id as string, r]));
     const byName = new Map(rooms.filter((r) => !r.ha_area_id).map((r) => [norm(r.name), r]));
     const count = new Map<string, number>();
-    for (const a of ha.areaOf?.values() ?? []) count.set(a, (count.get(a) ?? 0) + 1);
-    return [...(ha.areas?.values() ?? [])].map((a) => {
+    for (const [id, a] of ha.areaOf ?? []) if (visible.has(id)) count.set(a, (count.get(a) ?? 0) + 1);
+    return [...(ha.areas?.values() ?? [])].filter((a) => linked.has(a.id) || (count.get(a.id) ?? 0) > 0).map((a) => {
       const l = linked.get(a.id), m = l ? undefined : byName.get(norm(a.name));
       return {
         id: a.id, name: a.name, floor: (a.floorId && ha.floors?.get(a.floorId)?.name) || null, devices: count.get(a.id) ?? 0,
@@ -75,13 +78,13 @@ export function haRoomRoutes(db: Database, ha: HaApi, secure: boolean) {
     }).sort((x, y) => Number(x.floor === null) - Number(y.floor === null) || (x.floor ?? "").localeCompare(y.floor ?? "") || x.name.localeCompare(y.name)); // rooms on a floor first
   }
 
-  function labelPlan(household: string) {
+  function labelPlan(household: string, visible: Set<string>) {
     const groups = all<{ id: string; name: string; ha_label_id: string | null }>(db, "SELECT id, name, ha_label_id FROM device_groups WHERE household_id = ?", household);
     const linked = new Map(groups.filter((x) => x.ha_label_id).map((x) => [x.ha_label_id as string, x]));
     const byName = new Map(groups.filter((x) => !x.ha_label_id).map((x) => [norm(x.name), x]));
     const count = new Map<string, number>();
-    for (const ls of ha.labelsOf?.values() ?? []) for (const l of ls) count.set(l, (count.get(l) ?? 0) + 1);
-    return [...(ha.labels ?? [])].map(([id, name]) => {
+    for (const [eid, ls] of ha.labelsOf ?? []) if (visible.has(eid)) for (const l of ls) count.set(l, (count.get(l) ?? 0) + 1);
+    return [...(ha.labels ?? [])].filter(([id]) => linked.has(id) || (count.get(id) ?? 0) > 0).map(([id, name]) => {
       const l = linked.get(id), m = l ? undefined : byName.get(norm(name));
       return { id, name, devices: count.get(id) ?? 0, state: l ? ("linked" as const) : m ? ("match" as const) : ("new" as const), groupId: (l ?? m)?.id ?? null };
     }).sort((x, y) => x.name.localeCompare(y.name));
@@ -90,7 +93,8 @@ export function haRoomRoutes(db: Database, ha: HaApi, secure: boolean) {
   return new Elysia({ name: "ha-rooms" })
     .get("/api/admin/rooms/ha-areas", ({ request, set }) => {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      return { available: !ha.isStale() && !!ha.areas?.size, areas: plan(g.user.householdId) };
+      const areas = plan(g.user.householdId, seen(g.user));
+      return { available: !ha.isStale() && areas.length > 0, areas };
     })
     .post("/api/admin/rooms/ha-import", ({ request, body, set }) => {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
@@ -100,7 +104,7 @@ export function haRoomRoutes(db: Database, ha: HaApi, secure: boolean) {
       const pick = new Set<string>(want as string[] | undefined);
       let created = 0, linked = 0;
       db.transaction(() => {
-        for (const a of plan(h)) {
+        for (const a of plan(h, seen(g.user))) {
           if (a.state === "linked" || (want && !pick.has(a.id))) continue;
           if (a.state === "match" && a.roomId) { db.query("UPDATE rooms SET ha_area_id = ? WHERE id = ? AND household_id = ?").run(a.id, a.roomId, h); linked++; }
           else {
@@ -116,7 +120,8 @@ export function haRoomRoutes(db: Database, ha: HaApi, secure: boolean) {
     // Hub labels work the same way, as groups.
     .get("/api/admin/groups/ha-labels", ({ request, set }) => {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
-      return { available: !ha.isStale() && !!ha.labels?.size, labels: labelPlan(g.user.householdId) };
+      const labels = labelPlan(g.user.householdId, seen(g.user));
+      return { available: !ha.isStale() && labels.length > 0, labels };
     })
     .post("/api/admin/groups/ha-import", ({ request, body, set }) => {
       const g = org(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
@@ -126,7 +131,7 @@ export function haRoomRoutes(db: Database, ha: HaApi, secure: boolean) {
       const pick = new Set<string>(want as string[] | undefined);
       let created = 0, linked = 0;
       db.transaction(() => {
-        for (const l of labelPlan(h)) {
+        for (const l of labelPlan(h, seen(g.user))) {
           if (l.state === "linked" || (want && !pick.has(l.id))) continue;
           if (l.state === "match" && l.groupId) { db.query("UPDATE device_groups SET ha_label_id = ? WHERE id = ? AND household_id = ?").run(l.id, l.groupId, h); linked++; }
           else { db.query("INSERT INTO device_groups (id, household_id, name, ha_label_id) VALUES (?,?,?,?)").run(randomUUID(), h, l.name, l.id); created++; }

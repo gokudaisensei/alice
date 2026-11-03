@@ -6,19 +6,20 @@ import { authorize } from "./guard";
 import { friendlyName, haError, type HaApi } from "./ha";
 import { all, one } from "./sql";
 import { asObject, denyWith as deny } from "./http";
+import type { DeviceService } from "./devices";
 
 const ASSISTANTS = ["cloud.alexa", "cloud.google_assistant"];
 const ALLOWED = ["light", "switch", "fan", "climate", "media"]; // never locks, cameras, covers or sensors
 
 /** Which things may be controlled by voice through Home Assistant Cloud. Nothing is on until a household admin turns it on, one item at a time. */
-export function voiceRoutes(db: Database, ha: HaApi, secure: boolean) {
+export function voiceRoutes(db: Database, ha: HaApi, secure: boolean, svc: DeviceService) {
   function candidates(h: string) {
     const out = new Map<string, { id: string; name: string; kind: "device" | "scene" | "routine" }>();
     for (const e of ha.entities.values()) {
       if (e.entity_id.startsWith("scene.")) out.set(e.entity_id, { id: e.entity_id, name: friendlyName(e), kind: "scene" });
       else if (!e.entity_id.startsWith("script.") && !e.entity_id.startsWith("automation.")) {
         const d = describe(e);
-        if (d.ordinary && ALLOWED.includes(d.category)) out.set(e.entity_id, { id: e.entity_id, name: one<{ name: string }>(db, "SELECT name FROM device_meta WHERE household_id = ? AND entity_id = ? AND name != ''", h, e.entity_id)?.name ?? d.name, kind: "device" });
+        if (d.ordinary && ALLOWED.includes(d.category) && svc.shown(h, e.entity_id)) out.set(e.entity_id, { id: e.entity_id, name: one<{ name: string }>(db, "SELECT name FROM device_meta WHERE household_id = ? AND entity_id = ? AND name != ''", h, e.entity_id)?.name ?? d.name, kind: "device" });
       }
     }
     for (const r of all<{ name: string; script_id: string }>(db, "SELECT name, script_id FROM routines WHERE household_id = ?", h)) out.set(`script.${r.script_id}`, { id: `script.${r.script_id}`, name: r.name, kind: "routine" });

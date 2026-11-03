@@ -21,3 +21,6 @@ Thumbs.db
 # Vite
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Copied from hls.js at build time (see the vendor script), loaded only when a camera is watched live
+/static/vendor

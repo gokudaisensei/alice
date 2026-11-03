@@ -12,7 +12,7 @@
 	const todo = $derived(areas.filter((a) => a.state !== 'linked'));
 	const chosen = $derived(todo.filter((a) => !skip[a.id]));
 
-	async function load() { const r = await api<{ available: boolean; areas: Area[] }>('GET', '/api/admin/rooms/ha-areas'); if (r.ok) { available = r.data.available; areas = r.data.areas; } }
+	async function load() { const r = await api<{ available: boolean; areas: Area[] }>('GET', '/api/admin/rooms/ha-areas'); if (r.ok) { available = r.data.available; areas = r.data.areas; home.haRooms = r.data.available && r.data.areas.some((a) => a.state !== 'linked') ? 'offered' : 'none'; } else home.haRooms = 'none'; }
 	onMount(load);
 
 	async function bringIn() {

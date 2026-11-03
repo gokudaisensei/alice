@@ -19,7 +19,7 @@
 	data-slot="switch"
 	data-size={size}
 	class={cn(
-		"data-[state=checked]:bg-primary data-[state=unchecked]:bg-[color-mix(in_oklab,var(--input),var(--foreground)_8%)] focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 shrink-0 rounded-full border border-transparent focus-visible:ring-3 aria-invalid:ring-3 group-has-[:focus-visible]/field-label:ring-0 group-has-[:focus-visible]/field-label:border-transparent data-[size=default]:h-[26px] data-[size=default]:w-[44px] data-[size=sm]:h-[20px] data-[size=sm]:w-[34px] peer group/switch relative inline-flex items-center transition-colors duration-200 outline-none after:absolute after:-inset-x-3 after:-inset-y-2 data-disabled:cursor-not-allowed data-disabled:opacity-50",
+		"data-[state=checked]:bg-primary data-[state=unchecked]:bg-[color-mix(in_oklab,var(--input),var(--foreground)_8%)] focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 shrink-0 rounded-full border border-transparent focus-visible:ring-3 aria-invalid:ring-3 group-has-[:focus-visible]/field-label:ring-0 group-has-[:focus-visible]/field-label:border-transparent data-[size=default]:h-[26px] data-[size=default]:w-[44px] data-[size=sm]:h-[20px] data-[size=sm]:w-[34px] peer group/switch relative inline-flex items-center transition-colors duration-200 outline-none after:absolute after:-inset-x-3 after:-inset-y-3 data-disabled:cursor-not-allowed data-disabled:opacity-50",
 		className
 	)}
 	{...restProps}

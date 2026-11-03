@@ -89,16 +89,30 @@ export function automationInsightRoutes(db: Database, ha: HaApi, secure: boolean
       return { people: svc.persons().map((id) => ({ id, name: friendlyName(ha.entities.get(id), id), home: ha.entities.get(id)?.state === "home" })) };
     })
     // Automations and scripts made in Home Assistant itself: shown, switched and started here, never edited here.
-    .get("/api/automations/native", ({ request, set }) => {
+    .get("/api/automations/native", ({ request, query, set }) => {
       const g = manage(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const ok = devices.accessor(g.user), mine = managedIds(g.user.householdId), scripts = managedScripts(g.user.householdId);
-      const list = [...ha.entities.values()].filter((e) => ok(e.entity_id));
+      // What the household chose to put away stays out of the list (and out of the count) unless asked for.
+      const away = new Set(all<{ entity_id: string }>(db, "SELECT entity_id FROM device_meta WHERE household_id = ? AND hidden = 1 AND (entity_id LIKE 'automation.%' OR entity_id LIKE 'script.%')", g.user.householdId).map((r) => r.entity_id));
+      const showAway = query.hidden === "1";
+      const list = [...ha.entities.values()].filter((e) => ok(e.entity_id) && away.has(e.entity_id) === showAway);
       return {
+        hiddenCount: showAway ? 0 : away.size,
         automations: list.filter((e) => e.entity_id.startsWith("automation.") && !mine.has(String(e.attributes.id)) && !String(e.attributes.id ?? "").startsWith("alice_"))
           .map((e) => ({ id: e.entity_id, name: friendlyName(e), enabled: e.state === "on", lastTriggered: lastTriggered(e) })).sort((a, b) => a.name.localeCompare(b.name)),
         scripts: list.filter((e) => e.entity_id.startsWith("script.") && !scripts.has(e.entity_id) && !e.entity_id.startsWith("script.alice_") && !String(e.attributes.id ?? "").startsWith("alice_"))
           .map((e) => ({ id: e.entity_id, name: friendlyName(e), running: e.state === "on", lastTriggered: lastTriggered(e) })).sort((a, b) => a.name.localeCompare(b.name)),
       };
+    })
+    // Put one of the hub's own automations or scripts away (or bring it back): it stays in Home Assistant, it just stops being listed here.
+    .post("/api/automations/native/hidden", async ({ request, body, set }) => {
+      const g = manage(request); if (!("user" in g)) return deny(set, g.status, g.body.error);
+      const b = asObject(body), id = b.entityId;
+      if (typeof id !== "string" || !/^(automation|script)\./.test(id) || !ha.entities.has(id)) return deny(set, 404, "not_found");
+      if (typeof b.hidden !== "boolean") return deny(set, 400, "invalid_input");
+      db.query("INSERT INTO device_meta (household_id, entity_id, hidden) VALUES (?,?,?) ON CONFLICT(household_id, entity_id) DO UPDATE SET hidden = excluded.hidden").run(g.user.householdId, id, b.hidden ? 1 : 0);
+      audit(db, { householdId: g.user.householdId, actorType: "user", actorId: g.user.id, action: b.hidden ? "ha_native.hide" : "ha_native.unhide", target: id, outcome: "success" });
+      return { ok: true };
     })
     .post("/api/automations/native/run", async ({ request, body, set }) => {
       const g = manage(request); if (!("user" in g)) return deny(set, g.status, g.body.error);

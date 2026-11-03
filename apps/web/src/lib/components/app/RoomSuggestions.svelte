@@ -27,7 +27,7 @@
 	}
 </script>
 
-{#if found.length}
+{#if found.length && home.haRooms === 'none'}
 	<section class="space-y-3 rounded-2xl bg-accent px-4 py-4" aria-label="Suggested rooms">
 		<div class="flex items-start gap-3"><Sparkles class="mt-0.5 size-5 shrink-0 text-primary" /><div class="min-w-0"><h2 class="heading">Organise your home</h2><p class="meta mt-0.5">We found devices that might belong together. Untick any you don’t want.</p></div></div>
 		<ul class="space-y-1.5">
@@ -40,7 +40,7 @@
 				</li>
 			{/each}
 		</ul>
-		{#if found.length > 3}<button type="button" class="text-sm font-medium text-primary" onclick={() => (all = !all)}>{all ? 'Show fewer' : `Show all ${found.length} rooms`}</button>{/if}
+		{#if found.length > 3}<button type="button" class="min-h-11 text-sm font-medium text-primary" onclick={() => (all = !all)}>{all ? 'Show fewer' : `Show all ${found.length} rooms`}</button>{/if}
 		{#if error}<p role="alert" class="text-sm text-signal-foreground">{error}</p>{/if}
 		<Button class="h-11 w-full" disabled={busy || !chosen.length} onclick={create}>{busy ? 'Organising…' : chosen.length ? `Create ${plural(chosen.length, 'room')} and move ${plural(chosen.reduce((n, s) => n + s.deviceIds.length, 0), 'device')}` : 'Nothing selected'}</Button>
 	</section>
