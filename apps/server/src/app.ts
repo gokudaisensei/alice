@@ -13,6 +13,7 @@ import { haRoomRoutes } from "./haRooms";
 import { createHaEnergy, haEnergyRoutes } from "./haEnergy";
 import { logbookRoutes } from "./logbook";
 import { automationInsightRoutes } from "./automationInsight";
+import { createHaStatus, haStatusRoutes, type HaStatusService } from "./haStatus";
 import { createStatic } from "./static";
 import { createPowerLimits, powerRoutes, type PowerLimits } from "./power";
 import { createSync, syncRoutes } from "./sync";
@@ -35,7 +36,7 @@ export type AppDeps = {
   db: Database; ha: HaApi; webauthn: WebAuthnService;
   origin: string; cookieSecure: boolean; webDir?: string;
   push?: PushSender; now?: () => number;
-  backups?: Backups; dbPath?: string; version?: string; updates?: Updates; powerLimits?: PowerLimits;
+  backups?: Backups; dbPath?: string; version?: string; updates?: Updates; powerLimits?: PowerLimits; haStatus?: HaStatusService;
 };
 
 /** Strict CSP. SvelteKit's static build has one inline start-up script; allow exactly that script by hash, nothing else inline. */
@@ -110,6 +111,7 @@ export function createApp(deps: AppDeps) {
     .use(notifyRoutes(deps.db, deps.cookieSecure, notifier))
     .use(insightRoutes(deps.db, deps.cookieSecure, insights, deps.now))
     .use(haEnergyRoutes(deps.db, deps.cookieSecure, devices, createHaEnergy(deps.ha, deps.now)))
+    .use(haStatusRoutes(deps.db, deps.ha, deps.cookieSecure, deps.haStatus ?? createHaStatus(deps.db, deps.ha, deps.now)))
     .use(logbookRoutes(deps.db, deps.ha, deps.cookieSecure, devices, deps.now))
     .use(manageRoutes(deps.db, deps.ha, deps.cookieSecure))
     .use(haRoomRoutes(deps.db, deps.ha, deps.cookieSecure))

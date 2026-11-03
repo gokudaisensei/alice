@@ -11,13 +11,13 @@
 	import { plural } from '#lib/fmt.js';
 	import { BellRing, ShieldAlert } from '@lucide/svelte';
 
-	const LABEL: Record<string, string> = { device_offline: 'A device stays offline', lock_open: 'A door stays unlocked', hub: 'The home hub is unreachable', insight: 'Suggestions about energy and devices left on', power: 'A plug stays above its power limit' };
+	const LABEL: Record<string, string> = { device_offline: 'A device stays offline', lock_open: 'A door stays unlocked', hub: 'The home hub is unreachable', insight: 'Suggestions about energy and devices left on', power: 'A plug stays above its power limit', safety: 'Smoke, gas, a water leak or an alarm', battery: 'A battery is running low', open_long: 'A door or window is left open', ha_issue: 'Home Assistant needs attention' };
 	const GROUPS = [
-		{ title: 'Security and safety', hint: 'Worth hearing about straight away. We suggest keeping these on.', kinds: ['lock_open', 'hub'], essential: true },
-		{ title: 'Home activity', hint: 'Things that need a look when you are able.', kinds: ['device_offline', 'power'], essential: false },
-		{ title: 'Updates and suggestions', hint: 'Helpful, never urgent.', kinds: ['insight'], essential: false }
+		{ title: 'Security and safety', hint: 'Worth hearing about straight away. We suggest keeping these on.', kinds: ['safety', 'lock_open', 'hub'], essential: true },
+		{ title: 'Home activity', hint: 'Things that need a look when you are able.', kinds: ['device_offline', 'battery', 'open_long', 'power'], essential: false },
+		{ title: 'Updates and suggestions', hint: 'Helpful, never urgent.', kinds: ['ha_issue', 'insight'], essential: false }
 	];
-	const ABOUT: Record<string, string> = { lock_open: 'A door has been left unlocked for a while.', hub: 'The app has lost contact with your home hub.', device_offline: 'Something has been unreachable for a while.', power: 'A plug is using more power than the limit you set.', insight: 'Ideas for saving energy.' };
+	const ABOUT: Record<string, string> = { lock_open: 'A door has been left unlocked for a while.', hub: 'The app has lost contact with your home hub.', device_offline: 'Something has been unreachable for a while.', power: 'A plug is using more power than the limit you set.', insight: 'Ideas for saving energy.', safety: 'A smoke, carbon monoxide, gas or leak sensor has gone off, or your alarm has.', battery: 'A sensor or lock battery has stayed low.', open_long: 'A door or window has been open for a while.', ha_issue: 'Home Assistant has a repair, an update or a problem to look at.' };
 	let why = $state(false);
 	let p = $state<NotePrefs | null>(null), here = $state(false), msg = $state(''), busy = $state(false);
 	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -25,7 +25,7 @@
 	async function load() { const r = await api<NotePrefs>('GET', '/api/me/notifications'); if (r.ok) p = r.data; here = await notifications.thisDevice(); }
 	onMount(load);
 	async function save(patch: object) {
-		const r = await api<Pick<NotePrefs, 'muted' | 'quiet'>>('PUT', '/api/me/notifications', patch);
+		const r = await api<Pick<NotePrefs, 'muted' | 'quiet' | 'criticalBypass'>>('PUT', '/api/me/notifications', patch);
 		if (r.ok && p) p = { ...p, ...r.data };
 		else if (r.ok) p = null; else msg = r.data?.message ?? explain(r.data?.error);
 	}
@@ -82,6 +82,7 @@
 		<Section title="Quiet hours" hint="Notifications wait until quiet hours end. Alerts stay in the app.">
 			<Group>
 				<Row title="Hold back notifications" description={p.quiet.enabled ? `From ${p.quiet.start} until ${p.quiet.end} (${tz})` : undefined}>{#snippet trailing()}<Switch checked={!!p?.quiet.enabled} aria-label="Quiet hours" onCheckedChange={(v) => quiet({ enabled: v })} />{/snippet}</Row>
+				<Row title="Let safety alerts through" description="Smoke, gas, leak and alarm alerts will still sound during quiet hours.">{#snippet trailing()}<Switch checked={!!p?.criticalBypass} aria-label="Safety alerts during quiet hours" onCheckedChange={(v) => save({ criticalBypass: v })} />{/snippet}</Row>
 				{#if p.quiet.enabled}
 					<div class="flex flex-wrap items-center gap-2 px-4 py-3 text-sm">From <Input type="time" class="w-32" value={p.quiet.start} onchange={(e) => quiet({ start: e.currentTarget.value })} aria-label="Quiet hours start" /> until <Input type="time" class="w-32" value={p.quiet.end} onchange={(e) => quiet({ end: e.currentTarget.value })} aria-label="Quiet hours end" /></div>
 				{/if}

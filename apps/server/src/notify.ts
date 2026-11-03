@@ -9,7 +9,7 @@ import type { Role } from "./policy";
 import { all, exists, one, scalar } from "./sql";
 
 /** Categories a person can mute. Hub problems and insights are optional too; nothing is forced. */
-export const KINDS = ["device_offline", "lock_open", "hub", "insight", "power"] as const;
+export const KINDS = ["device_offline", "lock_open", "hub", "insight", "power", "safety", "battery", "open_long", "ha_issue"] as const;
 export const DEDUPE_MS = 6 * 3600_000, INSIGHT_DEDUPE_MS = 72 * 3600_000, RATE_PER_HOUR = 10, RETENTION_MS = 90 * 86400_000;
 
 export type PushSub = { endpoint: string; p256dh: string; auth: string };
@@ -46,15 +46,15 @@ export function realPush(db: Database, subject: string, proxy?: string): PushSen
   };
 }
 
-type PrefsRow = { muted: string; quiet_enabled: number; quiet_start: string | null; quiet_end: string | null; tz: string | null };
-export type Prefs = { muted: string[]; quiet: { enabled: boolean; start: string; end: string; tz: string } };
+type PrefsRow = { muted: string; quiet_enabled: number; quiet_start: string | null; quiet_end: string | null; tz: string | null; critical_bypass: number };
+export type Prefs = { muted: string[]; quiet: { enabled: boolean; start: string; end: string; tz: string }; /** safety alerts may sound during quiet hours */ criticalBypass: boolean };
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 const tzOk = (tz: string) => { try { new Intl.DateTimeFormat("en", { timeZone: tz }); return true; } catch { return false; } };
 
 export function createNotifier(db: Database, svc: DeviceService, push: PushSender | null, now: () => number = Date.now) {
   function prefsOf(userId: string): Prefs {
     const r = one<PrefsRow>(db, "SELECT * FROM notification_prefs WHERE user_id = ?", userId);
-    return { muted: r ? JSON.parse(r.muted) as string[] : [], quiet: { enabled: !!r?.quiet_enabled, start: r?.quiet_start ?? "22:00", end: r?.quiet_end ?? "07:00", tz: r?.tz ?? "UTC" } };
+    return { muted: r ? JSON.parse(r.muted) as string[] : [], quiet: { enabled: !!r?.quiet_enabled, start: r?.quiet_start ?? "22:00", end: r?.quiet_end ?? "07:00", tz: r?.tz ?? "UTC" }, criticalBypass: !!r?.critical_bypass };
   }
   /** Quiet hours hold back push only. The notification is still in the inbox. */
   function inQuiet(p: Prefs, at: number) {
@@ -74,7 +74,7 @@ export function createNotifier(db: Database, svc: DeviceService, push: PushSende
     return sent;
   }
 
-  type N = { householdId: string; kind: (typeof KINDS)[number] | "maintenance"; audience?: "admins"; actions?: { action: string; title: string }[]; switchId?: string; title: string; body: string; entityId?: string; dedupeKey: string; dedupeMs?: number };
+  type N = { householdId: string; kind: (typeof KINDS)[number] | "maintenance"; audience?: "admins"; /** safety news: never held back by the hourly limit, and may sound in quiet hours for people who opted in */ critical?: boolean; actions?: { action: string; title: string }[]; switchId?: string; title: string; body: string; entityId?: string; dedupeKey: string; dedupeMs?: number };
   /** Who hears about it: people who may use the device, or admins and members for household-wide news. */
   function recipients(n: N) {
     const users = all<{ id: string; role: Role }>(db, "SELECT id, role FROM users WHERE household_id = ? AND status = 'active'", n.householdId);
@@ -88,7 +88,7 @@ export function createNotifier(db: Database, svc: DeviceService, push: PushSende
       if (p.muted.includes(n.kind) && n.kind !== "maintenance") continue; // maintenance news about the device itself cannot be muted
       if (exists(db, "SELECT 1 FROM notifications WHERE user_id = ? AND dedupe_key = ? AND created_at > ?", u.id, n.dedupeKey, t - (n.dedupeMs ?? DEDUPE_MS))) continue;
       const recent = scalar(db, "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND kind != 'summary' AND created_at > ?", 0, u.id, t - 3600_000);
-      if (recent >= RATE_PER_HOUR) {
+      if (recent >= RATE_PER_HOUR && !n.critical) {
         // Over the limit: one running line instead of a flood, and no push.
         const key = `summary:${Math.floor(t / 3600_000)}`;
         const ex = one<{ id: string; body: string }>(db, "SELECT id, body FROM notifications WHERE user_id = ? AND dedupe_key = ?", u.id, key);
@@ -101,7 +101,7 @@ export function createNotifier(db: Database, svc: DeviceService, push: PushSende
       db.query("INSERT INTO notifications (id, household_id, user_id, kind, title, body, entity_id, dedupe_key, created_at) VALUES (?,?,?,?,?,?,?,?,?)")
         .run(randomUUID(), n.householdId, u.id, n.kind, n.title, n.body, n.entityId ?? null, n.dedupeKey, t);
       out.recipients++;
-      if (!inQuiet(p, t)) out.pushed += await pushTo(u.id, { title: n.title, body: n.body, url: "/activity", ...(n.entityId ? { entityId: n.entityId } : {}), ...(n.actions ? { actions: n.actions } : {}), ...(n.switchId ? { switchId: n.switchId } : {}) });
+      if (!inQuiet(p, t) || (n.critical && p.criticalBypass)) out.pushed += await pushTo(u.id, { title: n.title, body: n.body, url: "/activity", ...(n.entityId ? { entityId: n.entityId } : {}), ...(n.actions ? { actions: n.actions } : {}), ...(n.switchId ? { switchId: n.switchId } : {}) });
     }
     return out;
   }
@@ -139,17 +139,18 @@ export function notifyRoutes(db: Database, secure: boolean, nf: Notifier) {
     .get("/api/me/notifications", ({ request, set }) => {
       const g = authorize(db, request, secure, []); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const subs = scalar(db, "SELECT COUNT(*) FROM push_subscriptions WHERE user_id = ?", 0, g.user.id);
-      return { ...nf.prefsOf(g.user.id), kinds: g.user.role === "guest" ? KINDS.filter((k) => k !== "insight" && k !== "power") : KINDS, pushDevices: subs, pushAvailable: !!nf.push };
+      return { ...nf.prefsOf(g.user.id), kinds: g.user.role === "guest" ? KINDS.filter((k) => k !== "insight" && k !== "power" && k !== "ha_issue") : g.user.role === "member" ? KINDS.filter((k) => k !== "ha_issue") : KINDS, pushDevices: subs, pushAvailable: !!nf.push };
     })
     .put("/api/me/notifications", ({ request, body, set }) => {
       const g = authorize(db, request, secure, ["prefs.edit"]); if (!("user" in g)) return deny(set, g.status, g.body.error);
       const cur = nf.prefsOf(g.user.id), b = asObject(body);
       const muted = b.muted === undefined ? cur.muted : b.muted;
       const q: Record<string, unknown> = { ...cur.quiet, ...asObject(b.quiet) };
-      if (!Array.isArray(muted) || !muted.every((k) => oneOf(KINDS, k)) || typeof q.enabled !== "boolean" || typeof q.start !== "string" || !HHMM.test(q.start) || typeof q.end !== "string" || !HHMM.test(q.end) || typeof q.tz !== "string" || !tzOk(q.tz)) return deny(set, 400, "invalid_input");
-      db.query(`INSERT INTO notification_prefs (user_id, muted, quiet_enabled, quiet_start, quiet_end, tz) VALUES (?,?,?,?,?,?)
-        ON CONFLICT(user_id) DO UPDATE SET muted=excluded.muted, quiet_enabled=excluded.quiet_enabled, quiet_start=excluded.quiet_start, quiet_end=excluded.quiet_end, tz=excluded.tz`)
-        .run(g.user.id, JSON.stringify([...new Set(muted)]), q.enabled ? 1 : 0, q.start, q.end, q.tz);
+      const bypass = b.criticalBypass === undefined ? cur.criticalBypass : b.criticalBypass;
+      if (typeof bypass !== "boolean" || !Array.isArray(muted) || !muted.every((k) => oneOf(KINDS, k)) || typeof q.enabled !== "boolean" || typeof q.start !== "string" || !HHMM.test(q.start) || typeof q.end !== "string" || !HHMM.test(q.end) || typeof q.tz !== "string" || !tzOk(q.tz)) return deny(set, 400, "invalid_input");
+      db.query(`INSERT INTO notification_prefs (user_id, muted, quiet_enabled, quiet_start, quiet_end, tz, critical_bypass) VALUES (?,?,?,?,?,?,?)
+        ON CONFLICT(user_id) DO UPDATE SET muted=excluded.muted, quiet_enabled=excluded.quiet_enabled, quiet_start=excluded.quiet_start, quiet_end=excluded.quiet_end, tz=excluded.tz, critical_bypass=excluded.critical_bypass`)
+        .run(g.user.id, JSON.stringify([...new Set(muted)]), q.enabled ? 1 : 0, q.start, q.end, q.tz, bypass ? 1 : 0);
       return { ...nf.prefsOf(g.user.id) };
     })
     .get("/api/push/key", ({ request, set }) => {

@@ -7,6 +7,7 @@ import { ensureModeHelper } from "./modes";
 import { realWebAuthn } from "./webauthn";
 import { createDeviceService } from "./devices";
 import { createNotifier, realPush } from "./notify";
+import { createHaStatus } from "./haStatus";
 import { createInsights, createSampler } from "./insights";
 import { startRules } from "./rules";
 import { createPowerLimits } from "./power";
@@ -41,6 +42,11 @@ const insights = createInsights(db, ha, devices);
 setInterval(() => { insights.sweep(notifier).catch(() => {}); notifier.prune(); try { const r = runRetention(db); if (r.auditBlocked) console.warn("Audit retention skipped: system clock looks wrong"); } catch (e) { console.warn("Retention failed", errorMessage(e)); } }, 24 * 3600_000);
 
 // Nightly encrypted backup (once a key is set). On start-up, catch up if the last one is more than a day old.
+// What the hub itself is worried about (repairs, notices, updates, failing integrations): told to admins, once per item.
+const haStatus = createHaStatus(db, ha);
+const haSweep = () => { if (!ha.isStale()) haStatus.sweep(notifier).catch(() => {}); };
+setTimeout(haSweep, 60_000); setInterval(haSweep, 10 * 60_000);
+
 const backups = createBackups(db, parseDests(dirname(config.dbPath), config.backupDirs));
 const runBackup = async () => {
   for (const h of all<{ id: string }>(db, "SELECT id FROM households")) {
@@ -59,7 +65,7 @@ setInterval(() => updates.ingest(notifier).catch(() => {}), 60_000); // turns th
 updates.ingest(notifier).catch(() => {});
 
 createApp({
-  updates, push, backups, dbPath: config.dbPath, version: config.version, db, ha, origin: config.origin, cookieSecure: config.cookieSecure, webDir: config.webDir, powerLimits,
+  updates, push, haStatus, backups, dbPath: config.dbPath, version: config.version, db, ha, origin: config.origin, cookieSecure: config.cookieSecure, webDir: config.webDir, powerLimits,
   webauthn: realWebAuthn({ rpID: config.rpID, rpName: "Smart Home Companion", origin: config.origin }),
 }).listen(config.port);
 console.log(`server listening on :${config.port}`);

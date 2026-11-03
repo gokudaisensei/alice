@@ -1,7 +1,7 @@
 import { api } from './api.js';
 
 export type Note = { id: string; kind: string; title: string; body: string; entityId: string | null; createdAt: number; read: boolean };
-export type NotePrefs = { muted: string[]; quiet: { enabled: boolean; start: string; end: string; tz: string }; kinds: string[]; pushDevices: number; pushAvailable: boolean };
+export type NotePrefs = { muted: string[]; quiet: { enabled: boolean; start: string; end: string; tz: string }; criticalBypass: boolean; kinds: string[]; pushDevices: number; pushAvailable: boolean };
 
 const b64 = (s: string) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 

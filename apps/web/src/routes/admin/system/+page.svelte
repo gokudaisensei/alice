@@ -10,6 +10,7 @@
 	import Page from '#lib/components/app/Page.svelte';
 	import SkeletonList from '#lib/components/app/SkeletonList.svelte';
 	import Section from '#lib/components/app/Section.svelte';
+	import HaStatus from '#lib/components/app/HaStatus.svelte';
 	import Group from '#lib/components/app/Group.svelte';
 	import { clock, longDate, plural } from '#lib/fmt.js';
 	import { Activity, CircleCheck, TriangleAlert } from '@lucide/svelte';
@@ -115,6 +116,8 @@
 	{#if !loaded}
 	<SkeletonList kind="rows" count={2} />
 {:else}
+	<HaStatus />
+
 	<Section title="Backups" hint="Encrypted copies of the app's data. The home hub's own settings are backed up separately."><div class="space-y-4 rounded-2xl border bg-card p-4">
 			{#if bk && !bk.recipientSet}
 				<p class="text-sm">First, create a backup key. You'll download a file that is the only way to open a backup. <strong>Keep it somewhere other than this home device</strong>, such as a password manager or a printout.</p>
