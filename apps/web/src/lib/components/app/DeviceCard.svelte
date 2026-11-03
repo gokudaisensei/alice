@@ -10,6 +10,7 @@
 	import DeviceHistory from '#lib/components/app/DeviceHistory.svelte';
 	import DeviceAbout from '#lib/components/app/DeviceAbout.svelte';
 	import ExtraControls from '#lib/components/app/ExtraControls.svelte';
+	import LiveVideo from '#lib/components/app/LiveVideo.svelte';
 	import { WEATHER } from '#lib/kinds.js';
 	import { isWide } from '#lib/tiles.js';
 	import { scale } from 'svelte/transition';
@@ -219,6 +220,7 @@
 			<ExtraControls {device} {off} {sliderTone} />
 			{#if has('camera')}
 				<img src={snap} alt="Latest picture from {device.name}" class="aspect-video max-h-56 w-full rounded-xl bg-muted object-cover" loading="lazy" />
+				{#if detail && device.available}<LiveVideo id={device.id} name={device.name} />{/if}
 			{/if}
 			{#if hasSecondary && ((device.state === 'on' && (has('color_temp') || has('color'))) || has('thermostat'))}
 				<button type="button" class="text-sm font-medium text-primary underline-offset-4 hover:underline {tone === 'on' ? 'text-on-foreground' : ''}" onclick={() => (more = !more)} aria-expanded={more}>{more ? 'Fewer settings' : 'More settings'}</button>

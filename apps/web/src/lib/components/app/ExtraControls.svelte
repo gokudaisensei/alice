@@ -3,11 +3,12 @@
 	import { Slider } from '#lib/components/ui/slider';
 	import { Button } from '#lib/components/ui/button';
 	import { Input } from '#lib/components/ui/input';
+	import MediaBrowser from '#lib/components/app/MediaBrowser.svelte';
 	import { ArrowDown, ArrowUp, Square, Play, Pause, Navigation, Home } from '@lucide/svelte';
 
 	let { device, off, sliderTone }: { device: Device; off: boolean; sliderTone: string } = $props();
 	const has = <const T extends Control['type']>(t: T) => device.controls.find((c): c is Extract<Control, { type: T }> => c.type === t);
-	const cover = $derived(has('cover') ?? has('valve')), vacuum = $derived(has('vacuum')), humid = $derived(has('humidifier')), alarm = $derived(has('alarm')), num = $derived(has('number')), sel = $derived(has('select')), press = $derived(has('press'));
+	const cover = $derived(has('cover') ?? has('valve')), vacuum = $derived(has('vacuum')), humid = $derived(has('humidifier')), alarm = $derived(has('alarm')), num = $derived(has('number')), sel = $derived(has('select')), press = $derived(has('press')), media = $derived(has('media'));
 	const cmd = (a: string, v?: unknown) => home.command(device.id, a, v);
 	const word = (s: string) => s.replace(/_/g, ' ');
 	let code = $state('');
@@ -60,3 +61,7 @@
 	<div class="flex flex-wrap gap-2" role="group" aria-label={device.name}>{#each sel.options as o}<Button size="sm" variant={device.attrs.option === o ? 'default' : 'secondary'} disabled={off} onclick={() => cmd('set_option', o)}>{o}</Button>{/each}</div>
 {/if}
 {#if press}<Button variant="secondary" size="sm" disabled={off} onclick={() => cmd('press')}>Press</Button>{/if}
+{#if media?.sources.length}
+	<div class="flex flex-wrap gap-2" role="group" aria-label="Input">{#each media.sources as s}<Button size="sm" variant={device.attrs.source === s ? 'default' : 'secondary'} disabled={off} onclick={() => cmd('select_source', s)}>{s}</Button>{/each}</div>
+{/if}
+{#if media?.browse && !off}<MediaBrowser {device} />{/if}

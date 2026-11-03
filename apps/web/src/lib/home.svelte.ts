@@ -10,7 +10,7 @@ export type Control =
 	| { type: 'power' } | { type: 'brightness' } | { type: 'color_temp'; minK: number; maxK: number } | { type: 'color' }
 	| { type: 'fan_speed'; step: number }
 	| { type: 'thermostat'; min: number; max: number; step: number; modes: string[]; unit: string }
-	| { type: 'lock' } | { type: 'media'; playback: boolean; volume: boolean; power: boolean } | { type: 'camera' }
+	| { type: 'lock' } | { type: 'media'; playback: boolean; volume: boolean; power: boolean; browse: boolean; playMedia: boolean; sources: string[] } | { type: 'camera' }
 	| { type: 'cover'; position: boolean; tilt: boolean; stop: boolean; cls: string | null }
 	| { type: 'vacuum'; start: boolean; pause: boolean; dock: boolean; locate: boolean; speeds: string[] }
 	| { type: 'humidifier'; min: number; max: number; modes: string[] }
@@ -24,7 +24,7 @@ export type DeviceAttrs = {
 	brightnessPct?: number | null; colorTempK?: number | null; hs?: number[] | null;
 	speedPct?: number | null;
 	target?: number | null; hvacAction?: string | null;
-	volumePct?: number | null; title?: string | null;
+	volumePct?: number | null; title?: string | null; source?: string | null;
 	positionPct?: number | null; tiltPct?: number | null;
 	speed?: string | null; batteryPct?: number | null;
 	humidityPct?: number | null; targetHumidityPct?: number | null; mode?: string | null;

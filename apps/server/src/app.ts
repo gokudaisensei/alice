@@ -13,6 +13,7 @@ import { haRoomRoutes } from "./haRooms";
 import { createHaEnergy, haEnergyRoutes } from "./haEnergy";
 import { logbookRoutes } from "./logbook";
 import { assistRoutes } from "./haAssist";
+import { mediaRoutes } from "./haMedia";
 import { automationInsightRoutes } from "./automationInsight";
 import { createHaStatus, haStatusRoutes, type HaStatusService } from "./haStatus";
 import { createStatic } from "./static";
@@ -48,7 +49,7 @@ export function buildCsp(webDir?: string): string {
     for (const m of readFileSync(index, "utf8").matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/g))
       hashes.push(`'sha256-${createHash("sha256").update(m[1] ?? "").digest("base64")}'`);
   }
-  return ["default-src 'self'", `script-src 'self' ${hashes.join(" ")}`.trim(), "img-src 'self' data:", "style-src 'self' 'unsafe-inline'", "connect-src 'self'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'"].join("; ");
+  return ["default-src 'self'", `script-src 'self' ${hashes.join(" ")}`.trim(), "img-src 'self' data:", "media-src 'self' blob:", "style-src 'self' 'unsafe-inline'", "connect-src 'self'", "base-uri 'self'", "form-action 'self'", "frame-ancestors 'none'"].join("; ");
 }
 
 export function createApp(deps: AppDeps) {
@@ -113,6 +114,7 @@ export function createApp(deps: AppDeps) {
     .use(insightRoutes(deps.db, deps.cookieSecure, insights, deps.now))
     .use(haEnergyRoutes(deps.db, deps.cookieSecure, devices, createHaEnergy(deps.ha, deps.now)))
     .use(haStatusRoutes(deps.db, deps.ha, deps.cookieSecure, deps.haStatus ?? createHaStatus(deps.db, deps.ha, deps.now)))
+    .use(mediaRoutes(deps.db, deps.ha, deps.cookieSecure, devices, deps.now))
     .use(assistRoutes(deps.db, deps.ha, deps.cookieSecure, devices, deps.now))
     .use(logbookRoutes(deps.db, deps.ha, deps.cookieSecure, devices, deps.now))
     .use(manageRoutes(deps.db, deps.ha, deps.cookieSecure))

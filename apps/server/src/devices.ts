@@ -16,7 +16,7 @@ export type DeviceAttrs = {
   brightnessPct?: number | null; colorTempK?: number | null; hs?: number[] | null; // lights
   speedPct?: number | null; // fans
   target?: number | null; hvacAction?: string | null; // thermostats
-  volumePct?: number | null; title?: string | null; // media players
+  volumePct?: number | null; title?: string | null; source?: string | null; // media players
   positionPct?: number | null; tiltPct?: number | null; // covers and valves
   speed?: string | null; batteryPct?: number | null; // vacuums
   humidityPct?: number | null; targetHumidityPct?: number | null; mode?: string | null; // humidifiers
@@ -83,7 +83,7 @@ function attrsOf(d: Descriptor, e: HaEntity): DeviceAttrs {
   else if (d.domain === "select" || d.domain === "input_select") out.option = e.state;
   else if (d.domain === "weather") { out.condition = e.state; out.target = typeof a.temperature === "number" ? a.temperature : null; out.humidityPct = round(a.humidity); }
   else if (d.domain === "climate") { out.target = typeof a.temperature === "number" ? a.temperature : null; out.hvacAction = typeof a.hvac_action === "string" ? a.hvac_action : null; }
-  else if (d.domain === "media_player") { out.volumePct = typeof a.volume_level === "number" ? Math.round(a.volume_level * 100) : null; out.title = typeof a.media_title === "string" ? a.media_title : null; }
+  else if (d.domain === "media_player") { out.volumePct = typeof a.volume_level === "number" ? Math.round(a.volume_level * 100) : null; out.title = typeof a.media_title === "string" ? a.media_title : null; out.source = typeof a.source === "string" ? a.source : null; }
   return out;
 }
 

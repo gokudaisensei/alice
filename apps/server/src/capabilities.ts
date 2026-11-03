@@ -21,7 +21,7 @@ export type Control =
   | { type: "fan_speed"; step: number }
   | { type: "thermostat"; min: number; max: number; step: number; modes: string[]; unit: string }
   | { type: "lock" }
-  | { type: "media"; playback: boolean; volume: boolean; power: boolean }
+  | { type: "media"; playback: boolean; volume: boolean; power: boolean; /** can be pointed at something from its media library */ browse: boolean; /** can be told to play something it was pointed at */ playMedia: boolean; /** inputs it can switch between */ sources: string[] }
   | { type: "camera" }
   | { type: "cover"; position: boolean; tilt: boolean; stop: boolean; cls: string | null }
   | { type: "vacuum"; start: boolean; pause: boolean; dock: boolean; locate: boolean; speeds: string[] }
@@ -96,7 +96,8 @@ const DESCRIBERS: Record<string, Describer> = {
   media_player: (_e, a, base) => {
     const f = a.supported_features;
     const playback = hasFeature(f, 1) || hasFeature(f, 16384), volume = hasFeature(f, 4), power = hasFeature(f, 128) && hasFeature(f, 256);
-    return { ...base, category: "media", controls: [{ type: "media", playback, volume, power }], ordinary: playback || volume || power };
+    const browse = hasFeature(f, 131072), playMedia = hasFeature(f, 512), sources = hasFeature(f, 2048) ? strings(a.source_list) : [];
+    return { ...base, category: "media", controls: [{ type: "media", playback, volume, power, browse, playMedia, sources }], ordinary: playback || volume || power || browse || sources.length > 0 };
   },
   cover: (_e, a, base) => {
     const f = a.supported_features, c: Control = { type: "cover", position: hasFeature(f, 4), tilt: hasFeature(f, 128), stop: hasFeature(f, 8), cls: cls(a) };
@@ -158,6 +159,7 @@ export const ACTIONS = [
   "open", "close", "stop", "set_position", "set_tilt",
   "vacuum_start", "vacuum_pause", "vacuum_dock", "vacuum_locate", "set_vacuum_speed",
   "set_humidity", "set_mode", "arm", "disarm", "set_number", "set_option", "press",
+  "play_media", "select_source",
 ] as const;
 export type Action = (typeof ACTIONS)[number];
 export const isAction = (value: unknown): value is Action => oneOf(ACTIONS, value);
@@ -296,5 +298,15 @@ export function toServiceCall(d: Descriptor, c: Command): ServiceCall | CommandE
       return typeof c.value === "string" && o.options.includes(c.value) ? call("select_option", { option: c.value }) : INVALID;
     }
     case "press": return control(d, "press") ? call("press") : UNSUPPORTED;
+    case "play_media": {
+      if (!control(d, "media")?.playMedia) return UNSUPPORTED;
+      const v = asObject(c.value), id = v.id, type = v.type;
+      return typeof id === "string" && id.length > 0 && id.length <= 500 && typeof type === "string" && /^[A-Za-z0-9_./:-]{1,60}$/.test(type) ? call("play_media", { media_content_id: id, media_content_type: type }) : INVALID;
+    }
+    case "select_source": {
+      const m = control(d, "media");
+      if (!m?.sources.length) return UNSUPPORTED;
+      return typeof c.value === "string" && m.sources.includes(c.value) ? call("select_source", { source: c.value }) : INVALID;
+    }
   }
 }

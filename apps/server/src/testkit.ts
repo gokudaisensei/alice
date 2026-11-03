@@ -166,7 +166,15 @@ export class FakeHa implements HaApi {
   }
   historyFor = new Map<string, { t: number; state: string }[]>();
   async history(id: string, _hours: number) { return this.stale ? null : (this.historyFor.get(id) ?? []); }
-  async snapshot(id: string) { return id === "camera.porch" ? { body: new Uint8Array([0xff, 0xd8, 0xff]).buffer as ArrayBuffer, type: "image/jpeg" } : null; }
+  /** What a live stream would serve, by path; and every path asked for. */
+  streamFiles = new Map<string, { status: number; body: string; type: string }>();
+  streamHits: string[] = [];
+  async streamPart(path: string) {
+    this.streamHits.push(path);
+    const f = this.streamFiles.get(path.split("?")[0]!);
+    return f ? { status: f.status, body: new TextEncoder().encode(f.body).buffer as ArrayBuffer, type: f.type } : { status: 404, body: new ArrayBuffer(0), type: "text/plain" };
+  }
+    async snapshot(id: string) { return id === "camera.porch" ? { body: new Uint8Array([0xff, 0xd8, 0xff]).buffer as ArrayBuffer, type: "image/jpeg" } : null; }
 }
 
 export class FakePush {

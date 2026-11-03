@@ -23,7 +23,7 @@ MAX_DEPTH = 6
 ACTIONS: dict[str, set[str]] = {
     "light": {"turn_on", "turn_off"}, "switch": {"turn_on", "turn_off"}, "fan": {"turn_on", "turn_off"}, "input_boolean": {"turn_on", "turn_off"},
     "climate": {"set_temperature", "set_hvac_mode"}, "lock": {"lock"},
-    "media_player": {"media_play", "media_pause", "volume_set", "turn_on", "turn_off"},
+    "media_player": {"media_play", "media_pause", "volume_set", "turn_on", "turn_off", "play_media", "select_source"},
     "cover": {"open_cover", "close_cover", "set_cover_position", "set_cover_tilt_position", "stop_cover"},
     "valve": {"open_valve", "close_valve", "set_valve_position"},
     "vacuum": {"start", "pause", "return_to_base", "locate", "set_fan_speed"},

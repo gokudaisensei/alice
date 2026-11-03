@@ -75,6 +75,8 @@ export interface HaApi extends HaHealth {
   /** Resolves with the first entity (now or soon) matching `pred`, or null on timeout. */
   waitFor(pred: (e: HaEntity) => boolean, ms: number): Promise<HaEntity | null>;
   snapshot?(entityId: string): Promise<{ body: ArrayBuffer; type: string } | null>;
+  /** A piece of a live stream (playlist or segment) from the hub's own stream address, which carries its own token in the path. */
+  streamPart?(path: string): Promise<{ status: number; body: ArrayBuffer; type: string } | null>;
   /** State changes for one entity over the last `hours`, oldest first. */
   history?(entityId: string, hours: number): Promise<{ t: number; state: string }[] | null>;
 }
@@ -312,6 +314,14 @@ export class HaClient implements HaApi {
       this.waiting.set(id, (m) => { clearTimeout(t); resolve(m); });
       this.sock.send(JSON.stringify({ id, ...msg }));
     });
+  }
+
+  /** The hub's live-stream pieces. The address holds a short-lived stream token, so the app's own key is not sent. */
+  async streamPart(path: string) {
+    try {
+      const r = await fetch(new URL(path, this.url), { signal: AbortSignal.timeout(15_000) });
+      return { status: r.status, body: await r.arrayBuffer(), type: r.headers.get("content-type") ?? "application/octet-stream" };
+    } catch { return null; }
   }
 
   /** Camera still via HA's REST proxy; the token never leaves the server. */

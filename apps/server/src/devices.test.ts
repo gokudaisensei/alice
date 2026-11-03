@@ -12,7 +12,7 @@ test("controls follow the device's real capabilities, not its category", () => {
   expect(kinds(ent("fan.f", "on", { supported_features: 0 }))).toEqual(["power"]);
   expect(kinds(ent("fan.g", "on", { supported_features: 1 }))).toEqual(["power", "fan_speed"]);
   expect(describe(ent("media_player.m", "on", { supported_features: 0 })).ordinary).toBe(false); // nothing we can control reliably
-  expect(describe(ent("media_player.n", "on", { supported_features: 4 })).controls).toEqual([{ type: "media", playback: false, volume: true, power: false }]);
+  expect(describe(ent("media_player.n", "on", { supported_features: 4 })).controls).toEqual([{ type: "media", playback: false, volume: true, power: false, browse: false, playMedia: false, sources: [] }]);
   const sensor = describe(ent("sensor.t", "21", { unit_of_measurement: "°C" }));
   expect(sensor.controls).toEqual([]);
   expect(sensor.reading).toEqual({ value: "21", unit: "°C", kind: "measurement", cls: null });
