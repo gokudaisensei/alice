@@ -62,6 +62,7 @@
 
 	/** Pressing the icon does the obvious thing: switch it, lock it, play it. Pressing anywhere else opens the details. */
 	const toggleable = $derived(device.available && !!(has('power') || has('lock') || media?.power || media?.playback));
+	const toggleLabel = $derived(has('lock') ? (device.state === 'locked' ? 'unlock' : 'lock') : media?.playback && !has('power') ? (device.state === 'playing' ? 'pause' : 'play') : device.state === 'on' || device.state === 'playing' ? 'switch off' : 'switch on');
 	function toggle() {
 		haptics.tap();
 		if (selection.active) { selection.toggle(device.id); return; } // while choosing several, the icon chooses too
@@ -248,6 +249,8 @@
 {#snippet icn(size: string)}
 	{#if toggleable && has('lock') && device.state === 'locked'}
 		<HoldButton data-chip ring onhold={() => home.command(device.id, 'unlock')} hint="Hold to unlock {device.name}" disabled={off} aria-label="Hold to unlock {device.name}" class="pointer-events-auto z-20 flex {size} shrink-0 items-center justify-center rounded-full transition-colors duration-200 disabled:opacity-60 {chip[tone]}"><Icon class="size-[46%]" aria-hidden="true" /></HoldButton>
+	{:else if toggleable}
+		<button type="button" data-chip aria-label="{device.name}: {toggleLabel}" class="pointer-events-auto relative z-20 flex {size} shrink-0 items-center justify-center rounded-full transition-[background-color,transform] duration-200 active:scale-90 {chip[tone]}" onclick={toggle}>{#key tone}<span class="flex size-full items-center justify-center" in:scale={{ start: 0.7, duration: dur(220), easing: backOut }}><Icon class="size-[46%]" aria-hidden="true" /></span>{/key}</button>
 	{:else}
 		<span data-chip class="flex {size} shrink-0 items-center justify-center rounded-full transition-colors duration-300 {chip[tone]}">{#key tone}<span class="flex size-full items-center justify-center" in:scale={{ start: 0.7, duration: dur(220), easing: backOut }}><Icon class="size-[46%]" aria-hidden="true" /></span>{/key}</span>
 	{/if}
